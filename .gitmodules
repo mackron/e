@@ -1,0 +1,18 @@
+[submodule "external/glbind"]
+	path = external/glbind
+	url = https://github.com/mackron/glbind.git
+[submodule "external/vkbind"]
+	path = external/vkbind
+	url = https://github.com/mackron/vkbind.git
+[submodule "external/minilua"]
+	path = external/minilua
+	url = https://github.com/mackron/minilua.git
+[submodule "external/c89str"]
+	path = external/c89str
+	url = https://github.com/mackron/c89str.git
+[submodule "external/c89thread"]
+	path = external/c89thread
+	url = https://github.com/mackron/c89thread.git
+[submodule "external/cgltf"]
+	path = external/cgltf
+	url = https://github.com/mackron/cgltf.git
