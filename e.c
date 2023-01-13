@@ -1796,6 +1796,35 @@ static e_fs_vtable e_gDefaultFSVTable =
 };
 
 
+static e_result e_file_stream_read(void* pUserData, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_fs_read((e_file*)pUserData, pDst, bytesToRead, pBytesRead);
+}
+
+static e_result e_file_stream_write(void* pUserData, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_fs_write((e_file*)pUserData, pSrc, bytesToWrite, pBytesWritten);
+}
+
+static e_result e_file_stream_seek(void* pUserData, e_int64 offset, e_seek_origin origin)
+{
+    return e_fs_seek((e_file*)pUserData, offset, origin);
+}
+
+static e_result e_file_stream_tell(void* pUserData, e_int64* pCursor)
+{
+    return e_fs_tell((e_file*)pUserData, pCursor);
+}
+
+static e_stream_vtable e_gFileStreamVTable =
+{
+    e_file_stream_read,
+    e_file_stream_write,
+    e_file_stream_seek,
+    e_file_stream_tell
+};
+
+
 E_API e_fs_config e_fs_config_init(e_fs_vtable* pVTable, void* pVTableUserData)
 {
     e_fs_config config;
@@ -1941,7 +1970,12 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode
     pFile->pVTable = pVTable;
     pFile->pVTableUserData = pVTableUserData;
 
-    /* TODO: Initialize the stream. */
+    /* Files are streams which means they can be plugged into anything that takes a e_stream pointer. We need to get this set up now. */
+    result = e_stream_init(&e_gFileStreamVTable, pFile, &pFile->stream);
+    if (result != E_SUCCESS) {
+        e_fs_close(pFile, pAllocationCallbacks);
+        return result;
+    }
 
     *ppFile = pFile;
 

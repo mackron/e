@@ -369,8 +369,7 @@ struct e_fs
 
 struct e_file
 {
-    /* TODO: Make this compatible with `e_stream`. This will allow the `e_file` object to be plugged into anything that takes a stream. */
-    /*e_stream stream;*/
+    e_stream stream;
     e_fs* pFS;  /* Can be null in which case the system's standard file IO routines will be used. */
     e_fs_vtable* pVTable;
     void* pVTableUserData;
