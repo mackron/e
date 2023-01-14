@@ -58,7 +58,6 @@ int main(int argc, char** argv)
     e_engine_config engineConfig;
     e_engine* pEngine;
     e_client_config clientConfig;
-    e_config_file_config configFileConfig;
     e_config_file configFile;
     e_log* pLog;
     int resX = 0;   /* Will be set to defaults below. */
@@ -71,15 +70,15 @@ int main(int argc, char** argv)
     }
 
 
-    configFileConfig = e_config_file_config_init_filepath("config.lua");
-    configFileConfig.pLog = pLog;
-
-    result = e_config_file_init(&configFileConfig, NULL, &configFile);
+    result = e_config_file_init(NULL, &configFile);
     if (result != E_SUCCESS) {
         printf("Failed to initialize config file.\n");
     } else {
-        e_config_file_get_int(&configFile, "graphics", "resolutionX", &resX);
-        e_config_file_get_int(&configFile, "graphics", "resolutionY", &resY);
+        e_config_file_load_file(&configFile, NULL, "config.lua", NULL, pLog);
+        e_config_file_load_file(&configFile, NULL, "mod.lua", NULL, pLog);
+
+        e_config_file_get_int(&configFile, "game", "resolutionX", &resX);
+        e_config_file_get_int(&configFile, "game", "resolutionY", &resY);
 
         if (resX == 0) {
             resX = 1280;

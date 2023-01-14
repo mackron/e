@@ -16,3 +16,6 @@
 [submodule "external/cgltf"]
 	path = external/cgltf
 	url = https://github.com/mackron/cgltf.git
+[submodule "external/argv"]
+	path = external/argv
+	url = https://github.com/mackron/argv.git

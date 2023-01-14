@@ -90,6 +90,9 @@
 #define C89THREAD_IMPLEMENTATION
 #include "external/c89thread/c89thread.h"
 
+#define ARGV_IMPLEMENTATION
+#include "external/argv/argv.h"
+
 #if defined(_MSC_VER)
     #pragma warning(push)
     #pragma warning(disable:4244)   /* warning C4244: '=': conversion from 'int' to 'lu_byte', possible loss of data */
@@ -162,6 +165,68 @@ static void e_zero_memory_default(void* p, size_t sz)
 #define E_ALIGN(x, a)              ((x + (a-1)) & ~(a-1))
 #define E_ALIGN_64(x)              E_ALIGN(x, 8)
 
+
+
+E_API const char* e_result_description(e_result result)
+{
+    switch (result)
+    {
+        case E_SUCCESS:                       return "No error";
+        case E_ERROR:                         return "Unknown error";
+        case E_INVALID_ARGS:                  return "Invalid argument";
+        case E_INVALID_OPERATION:             return "Invalid operation";
+        case E_OUT_OF_MEMORY:                 return "Out of memory";
+        case E_OUT_OF_RANGE:                  return "Out of range";
+        case E_ACCESS_DENIED:                 return "Permission denied";
+        case E_DOES_NOT_EXIST:                return "Resource does not exist";
+        case E_ALREADY_EXISTS:                return "Resource already exists";
+        case E_TOO_MANY_OPEN_FILES:           return "Too many open files";
+        case E_INVALID_FILE:                  return "Invalid file";
+        case E_TOO_BIG:                       return "Too large";
+        case E_PATH_TOO_LONG:                 return "Path too long";
+        case E_NAME_TOO_LONG:                 return "Name too long";
+        case E_NOT_DIRECTORY:                 return "Not a directory";
+        case E_IS_DIRECTORY:                  return "Is a directory";
+        case E_DIRECTORY_NOT_EMPTY:           return "Directory not empty";
+        case E_AT_END:                        return "At end";
+        case E_NO_SPACE:                      return "No space available";
+        case E_BUSY:                          return "Device or resource busy";
+        case E_IO_ERROR:                      return "Input/output error";
+        case E_INTERRUPT:                     return "Interrupted";
+        case E_UNAVAILABLE:                   return "Resource unavailable";
+        case E_ALREADY_IN_USE:                return "Resource already in use";
+        case E_BAD_ADDRESS:                   return "Bad address";
+        case E_BAD_SEEK:                      return "Illegal seek";
+        case E_BAD_PIPE:                      return "Broken pipe";
+        case E_DEADLOCK:                      return "Deadlock";
+        case E_TOO_MANY_LINKS:                return "Too many links";
+        case E_NOT_IMPLEMENTED:               return "Not implemented";
+        case E_NO_MESSAGE:                    return "No message of desired type";
+        case E_BAD_MESSAGE:                   return "Invalid message";
+        case E_NO_DATA_AVAILABLE:             return "No data available";
+        case E_INVALID_DATA:                  return "Invalid data";
+        case E_TIMEOUT:                       return "Timeout";
+        case E_NO_NETWORK:                    return "Network unavailable";
+        case E_NOT_UNIQUE:                    return "Not unique";
+        case E_NOT_SOCKET:                    return "Socket operation on non-socket";
+        case E_NO_ADDRESS:                    return "Destination address required";
+        case E_BAD_PROTOCOL:                  return "Protocol wrong type for socket";
+        case E_PROTOCOL_UNAVAILABLE:          return "Protocol not available";
+        case E_PROTOCOL_NOT_SUPPORTED:        return "Protocol not supported";
+        case E_PROTOCOL_FAMILY_NOT_SUPPORTED: return "Protocol family not supported";
+        case E_ADDRESS_FAMILY_NOT_SUPPORTED:  return "Address family not supported";
+        case E_SOCKET_NOT_SUPPORTED:          return "Socket type not supported";
+        case E_CONNECTION_RESET:              return "Connection reset";
+        case E_ALREADY_CONNECTED:             return "Already connected";
+        case E_NOT_CONNECTED:                 return "Not connected";
+        case E_CONNECTION_REFUSED:            return "Connection refused";
+        case E_NO_HOST:                       return "No host";
+        case E_IN_PROGRESS:                   return "Operation in progress";
+        case E_CANCELLED:                     return "Operation cancelled";
+        case E_MEMORY_ALREADY_MAPPED:         return "Memory already mapped";
+        default:                              return "Unknown error";
+    }
+}
 
 
 static e_result e_result_from_errno(int error)
@@ -2120,6 +2185,11 @@ E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo)
     return E_SUCCESS;
 }
 
+E_API e_stream* e_fs_stream(e_file* pFile)
+{
+    return &pFile->stream;
+}
+
 static e_result e_fs_open_and_read_with_extra_byte(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_result result;
@@ -2425,36 +2495,55 @@ static e_result e_result_from_lua(int result)
 }
 
 
-E_API e_config_file_config e_config_file_config_init()
+static void* e_lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize)
 {
-    e_config_file_config config;
+    const e_allocation_callbacks* pAllocationCallbacks = (const e_allocation_callbacks*)ud;
+    E_UNUSED(osize);    /* We don't need the old size. We leave it to the allocation callbacks themselves to track that. */
 
-    E_ZERO_OBJECT(&config);
-
-    return config;
-}
-
-E_API e_config_file_config e_config_file_config_init_filepath(const char* pFilePath)
-{
-    e_config_file_config config = e_config_file_config_init();
-    config.pFilePath = pFilePath;
-
-    return config;
-}
-
-E_API e_config_file_config e_config_file_config_init_string(const char* pString)
-{
-    e_config_file_config config = e_config_file_config_init();
-    config.pString = pString;
-
-    return config;
+    /*
+    Lua uses the same callback for both allocations and frees. When the new size is zero, the
+    pointer needs to be freed(). If it's non-zero we need to do a realloc().
+    */
+    if (nsize == 0) {
+        e_free(ptr, pAllocationCallbacks);
+        return NULL;
+    } else {
+        return e_realloc(ptr, nsize, pAllocationCallbacks);
+    }
 }
 
 
-E_API e_result e_config_file_init(const e_config_file_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile)
+typedef struct
+{
+    e_stream* pStream;
+    char buffer[1024];
+} e_lua_read_state;
+
+static const char* e_lua_read(lua_State* L, void* ud, size_t* size)
+{
+    /*
+    The callback Lua uses for reading is absolutely terrible. You have to return the data as a
+    `const char*`. Really?! This means we need to store a buffer somewhere, read into that,
+    and then return a pointer to that buffer. How ridiculous.
+    */
+    e_lua_read_state* pState = (e_lua_read_state*)ud;
+    E_ASSERT(pState != NULL);
+    E_ASSERT(size   != NULL);
+    E_UNUSED(L);
+
+    *size = 0;
+
+    if (e_stream_read(pState->pStream, pState->buffer, sizeof(pState->buffer), size) != E_SUCCESS) {
+        return NULL;
+    }
+
+    return pState->buffer;
+}
+
+
+E_API e_result e_config_file_init(const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile)
 {
     lua_State* pLua;
-    int resultLua;
 
     if (pConfigFile == NULL) {
         return E_INVALID_ARGS;
@@ -2462,39 +2551,12 @@ E_API e_result e_config_file_init(const e_config_file_config* pConfig, const e_a
 
     E_ZERO_OBJECT(pConfigFile);
 
-    if (pConfig == NULL) {
-        return E_INVALID_ARGS;
-    }
+    /* A persistent copy of the allocation callbacks needs to be made to ensure they stay valid for the life of the Lua state. */
+    pConfigFile->allocationCallbacks = e_allocation_callbacks_init_copy(pAllocationCallbacks);
 
-    /* TODO: Need to figure out allocation callbacks. Will need to use lua_newstate() instead of luaL_newstate(). */
-    E_UNUSED(pAllocationCallbacks);
-
-    pLua = luaL_newstate();
+    pLua = lua_newstate(e_lua_alloc, &pConfigFile->allocationCallbacks);
     if (pLua == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    if (pConfig->pFilePath != NULL) {
-        resultLua = luaL_dofile(pLua, pConfig->pFilePath);
-    } else if (pConfig->pString != NULL) {
-        resultLua = luaL_dostring(pLua, pConfig->pString);
-    } else {
-        return E_INVALID_ARGS;
-    }
-
-    /* Need to check for errors. The error message will be pushed to the top of the Lua stack. */
-    if (resultLua != LUA_OK) {
-        const char* pErrorString = lua_tostring(pLua, lua_gettop(pLua));
-        if (pErrorString != NULL) {
-            if (pConfig->pFilePath != NULL) {
-                e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Error loading config \"%s\": %s", pConfig->pFilePath, pErrorString);
-            } else {
-                e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "%s", pErrorString);
-            }
-        }
-
-        lua_close(pLua);
-        return E_ERROR;
+        return E_OUT_OF_MEMORY;
     }
 
     pConfigFile->pLuaState = pLua;
@@ -2508,10 +2570,194 @@ E_API void e_config_file_uninit(e_config_file* pConfigFile, const e_allocation_c
         return;
     }
 
-    /* TODO: Need to figure out allocation callbacks with Lua. */
+    /*
+    Lua stores a persistent copy of the allocation callback that we specified at initialization
+    time. Therefore there's no need to actually do anything with our allocation callbacks.
+    */
     E_UNUSED(pAllocationCallbacks);
 
     lua_close((lua_State*)pConfigFile->pLuaState);
+}
+
+
+static void e_config_file_merge_tables(lua_State* pDst, lua_State* pSrc, const char* pName, e_log* pLog)
+{
+    E_ASSERT(pDst != NULL);
+    E_ASSERT(pSrc != NULL);
+
+    /* The tables that we're merging should be sitting at the top of stack for both Lua states. */
+    lua_pushnil(pSrc);
+
+    /* Enumerate over each of the items in the source table. */
+    while (lua_next(pSrc, -2)) {
+        /* We'll support keys of both strings and integers. Anything else needs to be ignored. */
+        if (lua_isstring(pSrc, -2)) {
+            lua_pushstring(pDst, lua_tostring(pSrc, -2));
+        } else if (lua_isinteger(pSrc, -2)) {
+            lua_pushinteger(pDst, lua_tointeger(pSrc, -2));
+        } else {
+            /* Not a supported key type. Ignore it. */
+            e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Config '%s': Key of type '%s' is not supported in configs. Ignoring.", pName, lua_typename(pSrc, lua_type(pSrc, -2)));
+            lua_pop(pDst, 1);
+            continue;
+        }
+
+        /*
+        The source will have it's key pushed to the stack, so now we need to push the value. This
+        is the complicated part because the value could be another table. In this case we need to
+        call this function recursively.
+        */
+        if (lua_isstring(pSrc, -1)) {
+            lua_pushstring(pDst, lua_tostring(pSrc, -1));
+        } else if (lua_isinteger(pSrc, -1)) {
+            lua_pushinteger(pDst, lua_tointeger(pSrc, -1));
+        } else if (lua_isnumber(pSrc, -1)) {
+            lua_pushnumber(pDst, lua_tonumber(pSrc, -1));
+        } else if (lua_isboolean(pSrc, -1)) {
+            lua_pushboolean(pDst, lua_toboolean(pSrc, -1));
+        } else if (lua_istable(pSrc, -1)) {
+            /*
+            If the table already exists in the destination we just use the existing table (it
+            cannot be overwritten). Otherwise we just create a new table.
+
+            The key will already be on the stack, however we need to push it again because
+            lua_gettable() will pop the key from the stack. We will need the key again later when
+            we call lua_settable() later on.
+            */
+            lua_pushvalue(pDst, -1);
+            lua_gettable(pDst, -3);
+
+            /*
+            At this point the top of the stack will either be nil, or some other type. If it's not
+            a table we just overwrite it.
+            */
+            if (lua_istable(pSrc, -1)) {
+                /* It's a table. It needs to be merged. */
+                e_config_file_merge_tables(pDst, pSrc, pName, pLog);
+            } else {
+                /* It's not a table. We need to overwrite it with a brand new table. */
+                lua_createtable(pSrc, 0, 0);
+                e_config_file_merge_tables(pDst, pSrc, pName, pLog);
+            }
+        } else {
+            e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Config '%s': Value of type '%s' is not supported in configs. Ignoring.", pName, lua_typename(pSrc, lua_type(pSrc, -2)));
+            lua_pop(pDst, 1);   /* Pop the key from the destination stack. */
+            lua_pop(pSrc, 1);   /* Pop the value from the source stack in preparation for the next iteration .*/
+            continue;
+        }
+
+        /* At this point the source will have it's key and value on the stack and we can now apply it. */
+        lua_settable(pDst, -3);
+
+        /* Pop the value and continue iteration of the input table. */
+        lua_pop(pSrc, 1);
+    }
+}
+
+E_API e_result e_config_file_load(e_config_file* pConfigFile, e_stream* pStream, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog)
+{
+    /*
+    A complication with our configs is that we don't want to replace config settings, but rather we
+    want to merge them.
+
+    We want to support the ability to load from multiple config files, but we want to have it so
+    config files don't overwrite tables. For example, say we have this base config:
+
+        game =
+        {
+            title = "Game";
+            resolutionX = 1980;
+            resolutionY = 1080;
+        }
+
+    But then a mod wants to change only the name and then maybe include some mod-specific stuff,
+    they might want to do something like this:
+
+        game =
+        {
+            title = "My Mod";
+            modSetting1 = "something";
+            modSetting2 = "something else";
+        }
+
+    The second script will run, but only the title has changed. However, because the "game" table
+    is being assigned, it will overwrite the entire table and we'll lose the other settings.
+    Instead what needs to happen is the tables need to be merged so that the base settings are
+    maintained.
+
+    To achieve all of this, we'll load the script in a separate Lua state. Then we'll iterate over
+    each global and recursively write out each member to the primary Lua state. This is slow, but
+    should result in a fairly robust configuration system.
+    */
+    e_result result;
+    e_lua_read_state readState;
+    lua_State* pSecondaryLua;
+
+    if (pConfigFile == NULL || pStream == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pName == NULL) {
+        pName = "";
+    }
+
+    pSecondaryLua = lua_newstate(e_lua_alloc, (void*)pAllocationCallbacks);
+    if (pSecondaryLua == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    /*
+    The stream needs to be loaded into the Lua state. We can do this efficiently with lua_load().
+    We don't want to use lua_loadstring() here because it's unnecessarily inefficient.
+    */
+    readState.pStream = pStream;
+    result = e_result_from_lua(lua_load(pSecondaryLua, e_lua_read, &readState, pName, NULL));
+    if (result == E_SUCCESS) {
+        result = e_result_from_lua(lua_pcall(pSecondaryLua, 0, LUA_MULTRET, 0));
+    }
+
+    /* If we failed to load we'll need to post the error to the log. */
+    if (result != E_SUCCESS) {
+        const char* pErrorString = lua_tostring(pSecondaryLua, lua_gettop(pSecondaryLua));
+        if (pErrorString != NULL) {
+            e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Error loading config \"%s\": %s", pName, pErrorString);
+        }
+
+        lua_close(pSecondaryLua);
+        return result;
+    }
+
+    /*
+    Getting here means we successfully passed the Lua script. We should now be able to scan over it
+    and write everything out to the primary script.
+
+    Note that we're only merging basic variables (strings, numbers and booleans). Functions will
+    not be transferred.
+    */
+    lua_pushglobaltable((lua_State*)pConfigFile->pLuaState);
+    lua_pushglobaltable(pSecondaryLua);
+    {
+        e_config_file_merge_tables((lua_State*)pConfigFile->pLuaState, pSecondaryLua, pName, pLog);
+    }
+    lua_close(pSecondaryLua);
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog)
+{
+    e_result result;
+    e_file* pFile;
+
+    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Could not open \"%s\". %s.\n", pFilePath, e_result_description(result));
+    }
+
+    result = e_config_file_load(pConfigFile, e_fs_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
+    e_fs_close(pFile, pAllocationCallbacks);
+
+    return result;
 }
 
 static e_result e_config_file_get_value(e_config_file* pConfigFile, const char* pSection, const char* pName)
@@ -2751,6 +2997,7 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     unsigned int flags;
     e_log* pLog;
     e_bool8 isOwnerOfLog;
+    e_fs_config fsConfig;
 
 #if !defined(E_NO_OPENGL)
     size_t glbindOffset = 0;
@@ -2843,6 +3090,19 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     pEngine->isOwnerOfLog    = isOwnerOfLog;
     pEngine->pGL             = NULL;
     pEngine->pVK             = NULL;
+
+    /* We need a file system so we can load stuff like the config file. */
+    fsConfig = e_fs_config_init(pConfig->pFSVTable, pConfig->pFSVTableUserData);
+
+    result = e_fs_init_preallocated(&fsConfig, pAllocationCallbacks, &pEngine->fs);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    /* Now that our file system is set up we can load our config. */
+
+
+
 
     #ifndef E_NO_OPENGL
     {
@@ -2978,6 +3238,24 @@ E_API e_result e_engine_exit(e_engine* pEngine, int exitCode)
     }
 
     return e_platform_exit_main_loop(exitCode);
+}
+
+E_API e_fs* e_engine_get_file_system(e_engine* pEngine)
+{
+    if (pEngine == NULL) {
+        return NULL;
+    }
+
+    return &pEngine->fs;
+}
+
+E_API e_config_file* e_engine_get_config_file(e_engine* pEngine)
+{
+    if (pEngine == NULL) {
+        return NULL;
+    }
+
+    return &pEngine->configFile;
 }
 
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend)

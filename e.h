@@ -128,16 +128,54 @@ typedef enum
     E_INVALID_ARGS = -2,
     E_INVALID_OPERATION = -3,
     E_OUT_OF_MEMORY = -4,
+    E_OUT_OF_RANGE = -5,
+    E_ACCESS_DENIED = -6,
     E_DOES_NOT_EXIST = -7,
     E_ALREADY_EXISTS = -8,
+    E_TOO_MANY_OPEN_FILES = -9,
     E_INVALID_FILE = -10,
     E_TOO_BIG = -11,
+    E_PATH_TOO_LONG = -12,
+    E_NAME_TOO_LONG = -13,
+    E_NOT_DIRECTORY = -14,
+    E_IS_DIRECTORY = -15,
+    E_DIRECTORY_NOT_EMPTY = -16,
     E_AT_END = -17,
+    E_NO_SPACE = -18,
     E_BUSY = -19,
+    E_IO_ERROR = -20,
+    E_INTERRUPT = -21,
+    E_UNAVAILABLE = -22,
+    E_ALREADY_IN_USE = -23,
+    E_BAD_ADDRESS = -24,
     E_BAD_SEEK = -25,
+    E_BAD_PIPE = -26,
+    E_DEADLOCK = -27,
+    E_TOO_MANY_LINKS = -28,
     E_NOT_IMPLEMENTED = -29,
+    E_NO_MESSAGE = -30,
+    E_BAD_MESSAGE = -31,
+    E_NO_DATA_AVAILABLE = -32,
     E_INVALID_DATA = -33,
     E_TIMEOUT = -34,
+    E_NO_NETWORK = -35,
+    E_NOT_UNIQUE = -36,
+    E_NOT_SOCKET = -37,
+    E_NO_ADDRESS = -38,
+    E_BAD_PROTOCOL = -39,
+    E_PROTOCOL_UNAVAILABLE = -40,
+    E_PROTOCOL_NOT_SUPPORTED = -41,
+    E_PROTOCOL_FAMILY_NOT_SUPPORTED = -42,
+    E_ADDRESS_FAMILY_NOT_SUPPORTED = -43,
+    E_SOCKET_NOT_SUPPORTED = -44,
+    E_CONNECTION_RESET = -45,
+    E_ALREADY_CONNECTED = -46,
+    E_NOT_CONNECTED = -47,
+    E_CONNECTION_REFUSED = -48,
+    E_NO_HOST = -49,
+    E_IN_PROGRESS = -50,
+    E_CANCELLED = -51,
+    E_MEMORY_ALREADY_MAPPED = -52,
 } e_result;
 
 typedef enum
@@ -386,6 +424,7 @@ E_API e_result e_fs_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
 E_API e_result e_fs_tell(e_file* pFile, e_int64* pCursor);
 E_API e_result e_fs_flush(e_file* pFile);
 E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo);
+E_API e_stream* e_fs_stream(e_file* pFile);
 
 E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFile, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks);
@@ -436,28 +475,18 @@ E_API e_result e_log_postf(e_log* pLog, e_log_level level, const char* pFormat, 
 
 
 /* ==== BEG e_config_file.h ==== */
-typedef struct e_config_file_config e_config_file_config;
-typedef struct e_config_file        e_config_file;
-
-struct e_config_file_config
-{
-    const char* pFilePath;  /* If not null, will load from a file path. */
-    const char* pString;    /* If not null, will treat this as the content of the config file. */
-    e_log* pLog;
-};
-
-E_API e_config_file_config e_config_file_config_init(void);
-E_API e_config_file_config e_config_file_config_init_filepath(const char* pFilePath);
-E_API e_config_file_config e_config_file_config_init_string(const char* pString);
-
+typedef struct e_config_file e_config_file;
 
 struct e_config_file
 {
     void* pLuaState;    /* The lua_State object. Cast this to lua_State to use it. */
+    e_allocation_callbacks allocationCallbacks; /* These are copied from pAllocationCallbacks in the call to e_config_file_init(). Needs to be persistent they'll be referenced internally by the Lua state. */
 };
 
-E_API e_result e_config_file_init(const e_config_file_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile);
+E_API e_result e_config_file_init(const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile);
 E_API void e_config_file_uninit(e_config_file* pConfigFile, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_config_file_load(e_config_file* pConfigFile, e_stream* pStream, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
+E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
 E_API e_result e_config_file_get_string(e_config_file* pConfigFile, const char* pSection, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, char** ppValue);
 E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue);
 /* ==== END e_config_file.h ==== */
@@ -493,6 +522,8 @@ struct e_engine_config
     e_engine_vtable* pVTable;
     void* pVTableUserData;
     e_log* pLog;
+    e_fs_vtable* pFSVTable;
+    void* pFSVTableUserData;
 };
 
 E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable);
@@ -508,6 +539,8 @@ struct e_engine
     void* pVTableUserData;
     e_log* pLog;
     e_bool8 isOwnerOfLog;
+    e_fs fs;
+    e_config_file configFile;
     void* pGL;  /* Cast to GLBapi* to access OpenGL functions. */
     void* pVK;  /* Cast to VkbAPI* to access Vulkan functions. */
 };
@@ -517,6 +550,8 @@ E_API void e_engine_uninit(e_engine* pEngine, const e_allocation_callbacks* pAll
 E_API e_log* e_engine_get_log(e_engine* pEngine);
 E_API e_result e_engine_run(e_engine* pEngine);
 E_API e_result e_engine_exit(e_engine* pEngine, int exitCode);  /* Exits the main loop. */
+E_API e_fs* e_engine_get_file_system(e_engine* pEngine);
+E_API e_config_file* e_engine_get_config_file(e_engine* pEngine);
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend);
 E_API void* e_engine_get_glapi(const e_engine* pEngine);
 E_API void* e_engine_get_vkapi(const e_engine* pEngine);
