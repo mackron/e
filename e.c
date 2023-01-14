@@ -2591,10 +2591,10 @@ static void e_config_file_merge_tables(lua_State* pDst, lua_State* pSrc, const c
     /* Enumerate over each of the items in the source table. */
     while (lua_next(pSrc, -2)) {
         /* We'll support keys of both strings and integers. Anything else needs to be ignored. */
-        if (lua_isstring(pSrc, -2)) {
-            lua_pushstring(pDst, lua_tostring(pSrc, -2));
-        } else if (lua_isinteger(pSrc, -2)) {
+        if (lua_isinteger(pSrc, -2)) {
             lua_pushinteger(pDst, lua_tointeger(pSrc, -2));
+        } else if (lua_isstring(pSrc, -2)) {
+            lua_pushstring(pDst, lua_tostring(pSrc, -2));
         } else {
             /* Not a supported key type. Ignore it. */
             e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Config '%s': Key of type '%s' is not supported in configs. Ignoring.", pName, lua_typename(pSrc, lua_type(pSrc, -2)));
@@ -2607,9 +2607,7 @@ static void e_config_file_merge_tables(lua_State* pDst, lua_State* pSrc, const c
         is the complicated part because the value could be another table. In this case we need to
         call this function recursively.
         */
-        if (lua_isstring(pSrc, -1)) {
-            lua_pushstring(pDst, lua_tostring(pSrc, -1));
-        } else if (lua_isinteger(pSrc, -1)) {
+        if (lua_isinteger(pSrc, -1)) {
             lua_pushinteger(pDst, lua_tointeger(pSrc, -1));
         } else if (lua_isnumber(pSrc, -1)) {
             lua_pushnumber(pDst, lua_tonumber(pSrc, -1));
@@ -2631,14 +2629,17 @@ static void e_config_file_merge_tables(lua_State* pDst, lua_State* pSrc, const c
             At this point the top of the stack will either be nil, or some other type. If it's not
             a table we just overwrite it.
             */
-            if (lua_istable(pSrc, -1)) {
+            if (lua_istable(pDst, -1)) {
                 /* It's a table. It needs to be merged. */
                 e_config_file_merge_tables(pDst, pSrc, pName, pLog);
             } else {
                 /* It's not a table. We need to overwrite it with a brand new table. */
-                lua_createtable(pSrc, 0, 0);
+                lua_pop(pDst, 1);   /* Get rid of the nil that was pushed from lua_gettable(). */
+                lua_createtable(pDst, 0, 0);
                 e_config_file_merge_tables(pDst, pSrc, pName, pLog);
             }
+        } else if (lua_isstring(pSrc, -1)) {
+            lua_pushstring(pDst, lua_tostring(pSrc, -1));
         } else {
             e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Config '%s': Value of type '%s' is not supported in configs. Ignoring.", pName, lua_typename(pSrc, lua_type(pSrc, -2)));
             lua_pop(pDst, 1);   /* Pop the key from the destination stack. */
@@ -2739,8 +2740,11 @@ E_API e_result e_config_file_load(e_config_file* pConfigFile, e_stream* pStream,
     {
         e_config_file_merge_tables((lua_State*)pConfigFile->pLuaState, pSecondaryLua, pName, pLog);
     }
-    lua_close(pSecondaryLua);
+    lua_pop((lua_State*)pConfigFile->pLuaState, 1);
+    lua_pop(pSecondaryLua, 1);
 
+    /* Getting here means we're done. */
+    lua_close(pSecondaryLua);
     return E_SUCCESS;
 }
 
