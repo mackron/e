@@ -1770,7 +1770,7 @@ static e_result e_fs_seek_default(void* pUserData, e_file* pFile, e_int64 offset
     #else
         /* No _fseeki64() so restrict to 31 bits. */
         if (origin > 0x7FFFFFFF) {
-            return MA_OUT_OF_RANGE;
+            return E_OUT_OF_RANGE;
         }
 
         result = fseek(pFileDefault->pFILE, (int)offset, whence);
@@ -2771,9 +2771,14 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
 
 static e_result e_config_file_get_value(e_config_file* pConfigFile, const char* pSection, const char* pName)
 {
-    e_result result = E_SUCCESS;
     lua_State* pLua;
     int oldTop;
+    size_t iPart;
+    const char* pParts[] =
+    {
+        pSection,
+        pName
+    };
 
     E_ASSERT(pConfigFile != NULL);
     E_ASSERT(pName != NULL);
@@ -2783,33 +2788,69 @@ static e_result e_config_file_get_value(e_config_file* pConfigFile, const char* 
 
     oldTop = lua_gettop(pLua);
 
-    /* TODO: Need to recursively handle the name so we can reference like "graphics.resolutionX", without needing to define a section. */
+    /*
+    What we're really doing is retrieving a value equal to "[pSection].[pName]" or simply "[pName]"
+    if no section is specified.
+    */
+    lua_pushglobaltable(pLua);
 
-    if (pSection == NULL) {
-        /* Assume the variable is global. */
-        lua_getglobal(pLua, pName);
-    } else {
-        /* Assume the variable is a table. */
-        /* TODO: Need to recursively do this so to support child tables. "graphics.opengl = {}", "audio.wasapi = {}", etc. */
-        lua_getglobal(pLua, pSection);
+    for (iPart = 0; iPart < E_COUNTOF(pParts); iPart += 1) {
+        const char* pPart = pParts[iPart];
+        size_t offset = 0;
 
-        if (lua_istable(pLua, -1)) {
-            lua_getfield(pLua, -1, pName);
-        } else {
-            /* It's not a table. Need to abort with an error. */
-            result = E_DOES_NOT_EXIST;
+        if (pPart == NULL) {
+            continue;
+        }
+
+        /* For each component in the part. */
+        while (pPart[offset] != '\0') {
+            const char* pSegmentBeg = pPart + offset;
+            const char* pSegmentEnd = pSegmentBeg;
+            
+            /* Find the end of the segment. */
+            for (;;) {
+                if (pPart[offset] == '\0' || pPart[offset] == '.') {
+                    /* Found the end of the segment. */
+                    break;
+                } else {
+                    /* Not the end. Keep going. */
+                    offset += 1;
+                }
+            }
+
+            pSegmentEnd = pPart + offset;
+            if (pSegmentEnd == pSegmentBeg) {
+                /* Not a valid segment. We didn't move forward. Abort. */
+                break;
+            }
+
+            /*printf("TESTING: '%.*s'\n", (unsigned int)(pSegmentEnd - pSegmentBeg), pSegmentBeg);*/
+
+            /* If the item on the stack at -1 is not a table we cannot continue. */
+            if (!lua_istable(pLua, -1)) {
+                break;
+            }
+
+            /* Getting here means we should have the end of the segment. */
+            lua_pushlstring(pLua, pSegmentBeg, (pSegmentEnd - pSegmentBeg));
+            lua_gettable(pLua, -2);
+
+            /* Abort if there is nothing in the table with the specified name. */
+            if (lua_isnoneornil(pLua, -1)) {
+                break;
+            }
+
+            /* Skip past the delimiter in preparation for the next iteration. */
+            if (pPart[offset] != '\0') {
+                offset += 1;
+            }
         }
     }
 
-    /* If the top item is not valid, abort. */
+    /* If we don't have a valid top item we need to abort with an error. */
     if (lua_isnoneornil(pLua, -1)) {
-        result = E_DOES_NOT_EXIST;
-    }
-
-    /* If we failed to retrieve the value, pop everything off the stack and return an error. */
-    if (result != E_SUCCESS) {
         lua_pop(pLua, lua_gettop(pLua) - oldTop);
-        return result;
+        return E_DOES_NOT_EXIST;
     }
 
     return E_SUCCESS;
@@ -5405,7 +5446,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         resolutionX = pConfig->resolutionX;
         if (resolutionX == 0) {
             unsigned int valueFromConfig;
-            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "resolutionX", &valueFromConfig) == E_SUCCESS) {
+            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "display.resolutionX", &valueFromConfig) == E_SUCCESS) {
                 resolutionX = valueFromConfig;
             } else {
                 resolutionX = E_DEFAULT_RESOLUTION_X;
@@ -5415,7 +5456,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         resolutionY = pConfig->resolutionY;
         if (resolutionY == 0) {
             unsigned int valueFromConfig;
-            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "resolutionY", &valueFromConfig) == E_SUCCESS) {
+            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "display.resolutionY", &valueFromConfig) == E_SUCCESS) {
                 resolutionY = valueFromConfig;
             } else {
                 resolutionY = E_DEFAULT_RESOLUTION_Y;
