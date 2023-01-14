@@ -117,6 +117,11 @@
 
 
 
+#define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
+#define E_DEFAULT_RESOLUTION_X      1280
+#define E_DEFAULT_RESOLUTION_Y      720
+
+
 
 #define E_UNUSED(x) (void)x
 
@@ -2929,6 +2934,27 @@ E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSe
 
     return result;
 }
+
+E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pSection, const char* pName, unsigned int* pValue)
+{
+    e_result result;
+    int value;
+
+    if (pValue != NULL) {
+        *pValue = 0;
+    }
+
+    result = e_config_file_get_int(pConfigFile, pSection, pName, &value);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (pValue != NULL) {
+        *pValue = (unsigned int)value;
+    }
+
+    return E_SUCCESS;
+}
 /* ==== END e_config_file.c ==== */
 
 
@@ -3104,8 +3130,20 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     }
 
     /* Now that our file system is set up we can load our config. */
+    result = e_config_file_init(pAllocationCallbacks, &pEngine->configFile);
+    if (result != E_SUCCESS) {
+        e_fs_uninit(&pEngine->fs, pAllocationCallbacks);
+        return result;
+    }
 
-
+    /*
+    We'll try loading a default config from the working directory. This is not a critical error if
+    it fails, but we'll post a warning about it.
+    */
+    result = e_config_file_load_file(&pEngine->configFile, &pEngine->fs, E_DEFAULT_CONFIG_FILE_PATH, pAllocationCallbacks, pEngine->pLog);
+    if (result != E_SUCCESS) {
+        e_log_postf(pEngine->pLog, E_LOG_LEVEL_WARNING, "Failed to load default config file '%s'.", E_DEFAULT_CONFIG_FILE_PATH);
+    }
 
 
     #ifndef E_NO_OPENGL
@@ -5262,15 +5300,14 @@ static e_window_vtable e_gClientWindowVTable =
 };
 
 
-E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pWindowTitle, unsigned int flags, e_client_vtable* pVTable)
+
+E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pConfigFileSection)
 {
     e_client_config config;
 
     E_ZERO_OBJECT(&config);
-    config.pEngine      = pEngine;
-    config.pWindowTitle = pWindowTitle;
-    config.flags        = flags;
-    config.pVTable      = pVTable;
+    config.pEngine = pEngine;
+    config.pConfigFileSection = pConfigFileSection;    
 
     return config;
 }
@@ -5340,6 +5377,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
     pClient->pVTableUserData = pConfig->pVTableUserData;
     pClient->flags           = pConfig->flags;
     pClient->pWindow         = NULL;  /* Will be initialized below. */
+    pClient->pConfigSection  = pConfig->pConfigFileSection;
 
     /* If we don't have a window, we don't have any graphics either. */
     if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) != 0) {
@@ -5348,14 +5386,53 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
 
     /* The window need to be initialized. This has been preallocated and is sitting at the end of the pClient object. */
     if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) == 0) {
+        unsigned int resolutionX;
+        unsigned int resolutionY;
+        const char* pTitle;
+        char* pTitleFromConfig = NULL;
+
         pClient->pWindow = (e_window*)E_OFFSET_PTR(pClient, layout.windowOffset);
 
-        windowConfig = e_window_config_init(pClient->pEngine, pConfig->pWindowTitle, 0, 0, 1280, 720, E_WINDOW_FLAG_OPENGL, &e_gClientWindowVTable);
+        pTitle = pConfig->pWindowTitle;
+        if (pTitle == NULL) {
+            if (e_config_file_get_string(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "title", pAllocationCallbacks, &pTitleFromConfig) == E_SUCCESS) {
+                pTitle = pTitleFromConfig;
+            } else {
+                pTitle = "Unnamed Client";
+            }
+        }
+
+        resolutionX = pConfig->resolutionX;
+        if (resolutionX == 0) {
+            unsigned int valueFromConfig;
+            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "resolutionX", &valueFromConfig) == E_SUCCESS) {
+                resolutionX = valueFromConfig;
+            } else {
+                resolutionX = E_DEFAULT_RESOLUTION_X;
+            }
+        }
+
+        resolutionY = pConfig->resolutionY;
+        if (resolutionY == 0) {
+            unsigned int valueFromConfig;
+            if (e_config_file_get_uint(e_engine_get_config_file(pClient->pEngine), pClient->pConfigSection, "resolutionY", &valueFromConfig) == E_SUCCESS) {
+                resolutionY = valueFromConfig;
+            } else {
+                resolutionY = E_DEFAULT_RESOLUTION_Y;
+            }
+        }
+
+
+        windowConfig = e_window_config_init(pClient->pEngine, pTitle, 0, 0, resolutionX, resolutionY, E_WINDOW_FLAG_OPENGL, &e_gClientWindowVTable);
 
         result = e_window_init_preallocated(&windowConfig, pAllocationCallbacks, pClient->pWindow);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize client window.");
             return result;
+        }
+
+        if (pTitleFromConfig != NULL) {
+            e_free(pTitleFromConfig, pAllocationCallbacks);
         }
     }
 

@@ -99,7 +99,7 @@ int main(int argc, char** argv)
     }
 
     /* We need a client for the game. */
-    clientConfig = e_client_config_init(pEngine, "Test Game 3", 0, NULL);
+    clientConfig = e_client_config_init(pEngine, "game");
 
     result = e_client_init(&clientConfig, NULL, &pClient1);
     if (result != E_SUCCESS) {

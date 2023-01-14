@@ -489,6 +489,7 @@ E_API e_result e_config_file_load(e_config_file* pConfigFile, e_stream* pStream,
 E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
 E_API e_result e_config_file_get_string(e_config_file* pConfigFile, const char* pSection, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, char** ppValue);
 E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue);
+E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pSection, const char* pName, unsigned int* pValue);
 /* ==== END e_config_file.h ==== */
 
 
@@ -923,15 +924,18 @@ struct e_client_vtable
 struct e_client_config
 {
     e_engine* pEngine;
+    const char* pConfigFileSection; /* The section in the config to read properties from, such as resolution, preferred graphics backend, etc. */
     void* pUserData;
     e_client_vtable* pVTable;
     void* pVTableUserData;
     const char* pWindowTitle;
+    unsigned int resolutionX;   /* Only used if the resolution is not specified in a config file. */
+    unsigned int resolutionY;
     unsigned int flags;
     e_graphics_backend graphicsBackend;
 };
 
-E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pWindowTitle, unsigned int flags, e_client_vtable* pVTable);
+E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pConfigFileSection);
 
 
 struct e_client
@@ -944,6 +948,7 @@ struct e_client
     e_window* pWindow;
     e_graphics* pGraphics;
     e_graphics_surface* pWindowRT;
+    const char* pConfigSection;
     e_bool32 freeOnUninit;
 };
 
