@@ -1644,7 +1644,7 @@ static e_result e_fs_alloc_size_default(void* pUserData, size_t* pSize)
     return E_SUCCESS;
 }
 
-static e_result e_fs_open_default(void* pUserData, const char* pFilePath, e_open_modes openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
+static e_result e_fs_open_default(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
 {
     e_file_default* pFileDefault = (e_file_default*)pFile;
     e_result result;
@@ -1652,6 +1652,7 @@ static e_result e_fs_open_default(void* pUserData, const char* pFilePath, e_open
 
     E_ASSERT(pFile != NULL);
     E_UNUSED(pUserData);
+    E_UNUSED(pFS);
     E_UNUSED(pAllocationCallbacks);
 
     if ((openMode & E_OPEN_MODE_WRITE) != 0) {
@@ -1690,7 +1691,7 @@ static e_result e_fs_open_default(void* pUserData, const char* pFilePath, e_open
     return E_SUCCESS;
 }
 
-static e_result e_fs_close_default(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+static void e_fs_close_default(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_file_default* pFileDefault = (e_file_default*)pFile;
 
@@ -1699,8 +1700,6 @@ static e_result e_fs_close_default(void* pUserData, e_file* pFile, const e_alloc
     E_UNUSED(pAllocationCallbacks);
 
     fclose(pFileDefault->pFILE);
-
-    return E_SUCCESS;
 }
 
 static e_result e_fs_read_default(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
@@ -1895,7 +1894,7 @@ static e_stream_vtable e_gFileStreamVTable =
 };
 
 
-E_API e_fs_config e_fs_config_init(e_fs_vtable* pVTable, void* pVTableUserData)
+E_API e_fs_config e_fs_config_init(const e_fs_vtable* pVTable, void* pVTableUserData)
 {
     e_fs_config config;
 
@@ -1976,15 +1975,17 @@ E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallb
         return;
     }
 
-    e_free(pFS, pAllocationCallbacks);
+    if (pFS->freeOnUninit) {
+        e_free(pFS, pAllocationCallbacks);
+    }
 }
 
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
 {
     e_result result;
     size_t allocSize;
     e_file* pFile;
-    e_fs_vtable* pVTable;
+    const e_fs_vtable* pVTable;
     void* pVTableUserData;
 
     if (ppFile == NULL) {
@@ -2020,7 +2021,7 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode
     /* We should be able to assume that we always have a vtable at this point. */
     E_ASSERT(pVTable != NULL);
 
-    result = pVTable->alloc_size(pVTableUserData, &allocSize);
+    result = pVTable->file_alloc_size(pVTableUserData, &allocSize);
     if (result != E_SUCCESS) {
         return result;  /* Failed to retrieve the size fo the e_file allocation. */
     }
@@ -2030,7 +2031,7 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode
         return E_OUT_OF_MEMORY;
     }
 
-    result = pVTable->open(pVTableUserData, pFilePath, openMode, pAllocationCallbacks, pFile);
+    result = pVTable->open(pVTableUserData, pFS, pFilePath, openMode, pAllocationCallbacks, pFile);
     if (result != E_SUCCESS) {
         e_free(pFile, pAllocationCallbacks);
         return result;
@@ -2052,18 +2053,16 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode
     return E_SUCCESS;
 }
 
-E_API e_result e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+E_API void e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
 {
     if (pFile == NULL) {
-        return E_INVALID_ARGS;
+        return;
     }
 
     E_ASSERT(pFile->pVTable != NULL);
     pFile->pVTable->close(pFile->pVTableUserData, pFile, pAllocationCallbacks);
 
     e_free(pFile, pAllocationCallbacks);
-
-    return E_SUCCESS;
 }
 
 E_API e_result e_fs_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
@@ -2190,9 +2189,14 @@ E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo)
     return E_SUCCESS;
 }
 
-E_API e_stream* e_fs_stream(e_file* pFile)
+E_API e_stream* e_fs_file_stream(e_file* pFile)
 {
     return &pFile->stream;
+}
+
+E_API e_fs* e_fs_get(e_file* pFile)
+{
+    return pFile->pFS;
 }
 
 static e_result e_fs_open_and_read_with_extra_byte(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
@@ -2261,6 +2265,149 @@ E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** 
 }
 /* ==== END e_fs.c ==== */
 
+
+
+/* ==== BEG e_archive.c ==== */
+E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
+{
+    e_result result;
+    e_archive* pArchive;
+    size_t allocSize;
+    e_fs_config fsConfig;
+
+    if (ppArchive == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppArchive = NULL;
+
+    if (pVTable == NULL || pStream == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pVTable->archive_alloc_size == NULL || pVTable->init == NULL || pVTable->uninit == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* The first thing we need to do is allocate memory for the archive. */
+    result = pVTable->archive_alloc_size(pVTableUserData, &allocSize);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to retrieve the size somehow. */
+    }
+
+    pArchive = (e_archive*)e_malloc(allocSize, pAllocationCallbacks);
+    if (pArchive == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pArchive->pVTable = pVTable;
+    pArchive->pVTableUserData = pVTableUserData;
+    pArchive->pStream = pStream;
+
+    /*
+    With memory allocated we can now initialize the archive. An archive is a file system, so we
+    need to initialize that first.
+    */
+    fsConfig = e_fs_config_init(&pVTable->fs, pVTableUserData);
+
+    result = e_fs_init_preallocated(&fsConfig, pAllocationCallbacks, &pArchive->fs);
+    if (result != E_SUCCESS) {
+        e_free(pArchive, pAllocationCallbacks);
+        return result;
+    }
+
+    /* With the file system initialized we'll need to initialize the rest. */
+    result = pVTable->init(pVTableUserData, pStream, pAllocationCallbacks, pArchive);
+    if (result != E_SUCCESS) {
+        e_fs_uninit(&pArchive->fs, pAllocationCallbacks);
+        e_free(pArchive, pAllocationCallbacks);
+        return result;
+    }
+
+    *ppArchive = pArchive;
+    return E_SUCCESS;
+}
+
+E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pArchive == NULL) {
+        return;
+    }
+
+    E_ASSERT(pArchive->pVTable->uninit != NULL);
+    pArchive->pVTable->uninit(pArchive->pVTableUserData, pArchive, pAllocationCallbacks);
+
+    e_fs_uninit(&pArchive->fs, pAllocationCallbacks);
+    e_free(pArchive, pAllocationCallbacks);
+}
+
+E_API e_fs* e_archive_fs(e_archive* pArchive)
+{
+    if (pArchive == NULL) {
+        return NULL;
+    }
+
+    return &pArchive->fs;
+}
+
+E_API e_stream* e_archive_stream(e_archive* pArchive)
+{
+    if (pArchive == NULL) {
+        return NULL;
+    }
+
+    return pArchive->pStream;
+}
+
+E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+{
+    return e_fs_open((e_fs*)pArchive, pFilePath, openMode, pAllocationCallbacks, ppFile);
+}
+
+E_API void e_archive_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_fs_close(pFile, pAllocationCallbacks);
+}
+
+E_API e_result e_archive_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_fs_read(pFile, pDst, bytesToRead, pBytesRead);
+}
+
+E_API e_result e_archive_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_fs_write(pFile, pSrc, bytesToWrite, pBytesWritten);
+}
+
+E_API e_result e_archive_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    return e_fs_seek(pFile, offset, origin);
+}
+
+E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor)
+{
+    return e_fs_tell(pFile, pCursor);
+}
+
+E_API e_result e_archive_flush(e_file* pFile)
+{
+    return e_fs_flush(pFile);
+}
+
+E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo)
+{
+    return e_fs_info(pFile, pInfo);
+}
+
+E_API e_archive* e_archive_get(e_file* pFile)
+{
+    if (pFile == NULL) {
+        return NULL;
+    }
+
+    return (e_archive*)e_fs_get(pFile);
+}
+/* ==== END e_archive.c ==== */
 
 
 
@@ -2763,7 +2910,7 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
         e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Could not open \"%s\". %s.\n", pFilePath, e_result_description(result));
     }
 
-    result = e_config_file_load(pConfigFile, e_fs_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
+    result = e_config_file_load(pConfigFile, e_fs_file_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
     e_fs_close(pFile, pAllocationCallbacks);
 
     return result;

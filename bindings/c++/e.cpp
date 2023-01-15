@@ -78,7 +78,7 @@ public:
     }
 
     my_client(my_engine &engine)
-        : my_client(engine, e::client_config(engine, "My Game", 0))
+        : my_client(engine, e::client_config(engine, "game"))
     {
     }
 

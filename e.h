@@ -369,7 +369,7 @@ typedef enum
     E_OPEN_MODE_WRITE    = 0x02,
     E_OPEN_MODE_APPEND   = 0x04,    /* Used with E_OPEN_MODE_WRITE. If specified, writing will append to the end. If E_OPEN_MODE_WRITE is not specified, this is ignored. */
     E_OPEN_MODE_TRUNCATE = 0x08,    /* Used with E_OPEN_MODE_WRITE. If specified, and the file exists, the file will be truncated to length 0. Cannot be used with E_OPEN_MODE_APPEND. */
-} e_open_modes;
+} e_open_mode;
 
 struct e_file_info
 {
@@ -378,29 +378,29 @@ struct e_file_info
 
 struct e_fs_vtable
 {
-    e_result (* alloc_size)(void* pUserData, size_t* pSize);
-    e_result (* open      )(void* pUserData, const char* pFilePath, e_open_modes openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
-    e_result (* close     )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-    e_result (* read      )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-    e_result (* write     )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-    e_result (* seek      )(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin);
-    e_result (* tell      )(void* pUserData, e_file* pFile, e_int64* pCursor);
-    e_result (* flush     )(void* pUserData, e_file* pFile);
-    e_result (* info      )(void* pUserData, e_file* pFile, e_file_info* pInfo);
+    e_result (* file_alloc_size)(void* pUserData, size_t* pSize);
+    e_result (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
+    void     (* close          )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result (* read           )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
+    e_result (* write          )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+    e_result (* seek           )(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin);
+    e_result (* tell           )(void* pUserData, e_file* pFile, e_int64* pCursor);
+    e_result (* flush          )(void* pUserData, e_file* pFile);
+    e_result (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
 };
 
 struct e_fs_config
 {
-    e_fs_vtable* pVTable;   /* Can be null, in which case it will use defaults which is just the platform's standard file IO. */
+    const e_fs_vtable* pVTable;   /* Can be null, in which case it will use defaults which is just the platform's standard file IO. */
     void* pVTableUserData;
 };
 
-E_API e_fs_config e_fs_config_init(e_fs_vtable* pVTable, void* pVTableUserData);
+E_API e_fs_config e_fs_config_init(const e_fs_vtable* pVTable, void* pVTableUserData);
 
 
 struct e_fs
 {
-    e_fs_vtable* pVTable;
+    const e_fs_vtable* pVTable;
     void* pVTableUserData;
     e_bool32 freeOnUninit;
 };
@@ -409,26 +409,69 @@ struct e_file
 {
     e_stream stream;
     e_fs* pFS;  /* Can be null in which case the system's standard file IO routines will be used. */
-    e_fs_vtable* pVTable;
+    const e_fs_vtable* pVTable;
     void* pVTableUserData;
 };
 
 E_API e_result e_fs_init_preallocated(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs* pFS);
 E_API e_result e_fs_init(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs** ppFS);
 E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_modes openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
-E_API e_result e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API void e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_fs_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
 E_API e_result e_fs_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
 E_API e_result e_fs_tell(e_file* pFile, e_int64* pCursor);
 E_API e_result e_fs_flush(e_file* pFile);
 E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo);
-E_API e_stream* e_fs_stream(e_file* pFile);
+E_API e_stream* e_fs_file_stream(e_file* pFile);
+E_API e_fs* e_fs_get(e_file* pFile);
 
 E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFile, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_fs.h ==== */
+
+
+
+/* ==== BEG e_archive.h ==== */
+typedef struct e_archive_vtable e_archive_vtable;
+typedef struct e_archive        e_archive;
+
+/*
+Archives are file systems which means they need to implement the file system vtable. There are also
+some additional callbacks that are required specifically for archives, particularly around loading
+the archive from a stream.
+*/
+struct e_archive_vtable
+{
+    e_fs_vtable fs;
+    e_result (* archive_alloc_size)(void* pUserData, size_t* pSize);
+    e_result (* init              )(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive* pArchive);
+    void     (* uninit            )(void* pUserData, e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
+};
+
+struct e_archive
+{
+    e_fs fs;    /* Archives are file systems. This must be the first member. */
+    const e_archive_vtable* pVTable;
+    void* pVTableUserData;
+    e_stream* pStream;
+};
+
+E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive);
+E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs* e_archive_fs(e_archive* pArchive);
+E_API e_stream* e_archive_stream(e_archive* pArchive);
+E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API void e_archive_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_archive_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
+E_API e_result e_archive_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+E_API e_result e_archive_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
+E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor);
+E_API e_result e_archive_flush(e_file* pFile);
+E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo);
+E_API e_archive* e_archive_get(e_file* pFile);
+/* ==== END e_archive.h ==== */
 
 
 

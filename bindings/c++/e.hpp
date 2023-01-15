@@ -105,18 +105,18 @@ namespace e
 
 
 
-    void client_config_init_inplace(engine &engine, const char* pWindowTitle, unsigned int flags, e_client_config* pConfig)
+    void client_config_init_inplace(engine &engine, const char* pConfigFileSection, e_client_config* pConfig)
     {
-        *pConfig = e_client_config_init(engine, pWindowTitle, flags, NULL);
+        *pConfig = e_client_config_init(engine, pConfigFileSection);
     }
 
     class client_config : public e_client_config
     {
     public:
 
-        client_config(engine &engine, const char* pWindowTitle, unsigned int flags)
+        client_config(engine &engine, const char* pConfigFileSection)
         {
-            client_config_init_inplace(engine, pWindowTitle, flags, this);
+            client_config_init_inplace(engine, pConfigFileSection, this);
         }
     };
 
