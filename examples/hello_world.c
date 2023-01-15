@@ -47,7 +47,7 @@ int main(int argc, char** argv)
 
 
     /* Once we have the engine we can initialize a client. This is where the window is created. */
-    clientConfig = e_client_config_init(g_pEngine, "My Game", 0, NULL);
+    clientConfig = e_client_config_init(g_pEngine, "game");
 
     result = e_client_init(&clientConfig, NULL, &g_pClient);
     if (result != E_SUCCESS) {
