@@ -1199,6 +1199,19 @@ E_API e_result e_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, 
         return result;
     }
 
+    /*
+    If the user did not specify an output variable for the number of bytes read it must mean they
+    are expecting the exact number of bytes requested, because otherwise how would they know how
+    to handle the case where less bytes are available than expected? Therefore, when NULL is passed
+    in for this parameter we're going to return an error if we were unable to read the specified
+    number of bytes.
+    */
+    if (pBytesRead == NULL) {
+        if (bytesRead != bytesToRead) {
+            return E_ERROR;
+        }
+    }
+
     if (pBytesRead != NULL) {
         *pBytesRead = bytesRead;
     }
@@ -1228,6 +1241,17 @@ E_API e_result e_stream_write(e_stream* pStream, const void* pSrc, size_t bytesT
     result = pStream->pVTable->write(pStream->pVTableUserData, pSrc, bytesToWrite, &bytesWritten);
     if (result != E_SUCCESS) {
         return result;
+    }
+
+    /*
+    As with reading, if the caller did not specify an output value for the number of bytes written
+    we must assume it's all or nothing and return an error if the number of bytes written does not
+    match the number of bytes requested to be written.
+    */
+    if (pBytesWritten == NULL) {
+        if (bytesWritten != bytesToWrite) {
+            return E_ERROR;
+        }
     }
 
     if (pBytesWritten != NULL) {
@@ -2328,17 +2352,51 @@ E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUser
     return E_SUCCESS;
 }
 
+E_API e_result e_archive_init_from_file(const e_archive_vtable* pVTable, void* pVTableUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
+{
+    e_result result;
+    e_file* pFile;
+
+    if (ppArchive == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppArchive = NULL;
+
+    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to open the file. */
+    }
+
+    result = e_archive_init(pVTable, pVTableUserData, e_fs_file_stream(pFile), pAllocationCallbacks, ppArchive);
+    if (result != E_SUCCESS) {
+        e_fs_close(pFile, pAllocationCallbacks);
+        return result;
+    }
+
+    (*ppArchive)->pArchiveFile = pFile;
+    return E_SUCCESS;
+}
+
 E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks)
 {
+    e_file* pArchiveFile;
+
     if (pArchive == NULL) {
         return;
     }
+
+    pArchiveFile = pArchive->pArchiveFile;
 
     E_ASSERT(pArchive->pVTable->uninit != NULL);
     pArchive->pVTable->uninit(pArchive->pVTableUserData, pArchive, pAllocationCallbacks);
 
     e_fs_uninit(&pArchive->fs, pAllocationCallbacks);
     e_free(pArchive, pAllocationCallbacks);
+
+    if (pArchiveFile != NULL) {
+        e_fs_close(pArchiveFile, pAllocationCallbacks);
+    }
 }
 
 E_API e_fs* e_archive_fs(e_archive* pArchive)

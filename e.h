@@ -374,6 +374,7 @@ typedef enum
 struct e_file_info
 {
     e_uint64 size;
+    e_bool32 directory;
 };
 
 struct e_fs_vtable
@@ -456,9 +457,11 @@ struct e_archive
     const e_archive_vtable* pVTable;
     void* pVTableUserData;
     e_stream* pStream;
+    e_file* pArchiveFile;   /* This will be non-null if the archive was initailized with e_archive_init_from_file(). */
 };
 
 E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive);
+E_API e_result e_archive_init_from_file(const e_archive_vtable* pVTable, void* pVTableUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive);
 E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs* e_archive_fs(e_archive* pArchive);
 E_API e_stream* e_archive_stream(e_archive* pArchive);
