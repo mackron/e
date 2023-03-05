@@ -297,8 +297,6 @@ E_API e_result e_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin or
 E_API e_result e_stream_tell(e_stream* pStream, e_int64* pCursor);
 
 
-
-
 /*
 Memory streams support both reading and writing within the same stream. To only support read-only
 mode, use e_memory_stream_init_readonly(). With this you can pass in a standard data/size pair.
@@ -597,6 +595,27 @@ E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectory
 E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_archive.h ==== */
+
+
+
+/* ==== BEG e_zip.h ==== */
+typedef struct e_zip e_zip;
+
+E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
+E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
+E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API void e_zip_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_zip_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
+E_API e_result e_zip_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+E_API e_result e_zip_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
+E_API e_result e_zip_tell(e_file* pFile, e_int64* pCursor);
+E_API e_result e_zip_flush(e_file* pFile);
+E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo);
+E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
+E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
+/* ==== END e_zip.h ==== */
 
 
 

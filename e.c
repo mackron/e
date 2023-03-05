@@ -3599,6 +3599,1860 @@ E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_
 
 
 
+/* ==== BEG e_zip.c ==== */
+/* The cache size must be at least 32K, and a power of 2. */
+#ifndef E_ZIP_CACHE_SIZE_IN_BYTES
+#define E_ZIP_CACHE_SIZE_IN_BYTES               32768
+#endif
+
+#ifndef E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES
+#define E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES    4096
+#endif
+
+#define E_ZIP_EOCD_SIGNATURE                    0x06054b50
+#define E_ZIP_EOCD64_SIGNATURE                  0x06064b50
+#define E_ZIP_EOCD64_LOCATOR_SIGNATURE          0x07064b50
+#define E_ZIP_CD_FILE_HEADER_SIGNATURE          0x02014b50
+
+
+typedef struct e_zip_file     e_zip_file;
+typedef struct e_zip_iterator e_zip_iterator;
+typedef struct e_zip_cd_node  e_zip_cd_node;
+
+typedef enum
+{
+    E_ZIP_COMPRESSION_METHOD_STORE   = 0,
+    E_ZIP_COMPRESSION_METHOD_DEFLATE = 8
+} e_zip_compression_method;
+
+typedef struct
+{
+    const char* pPath;
+    size_t pathLen;
+    e_uint16 compressionMethod;
+    e_uint64 compressedSize;
+    e_uint64 uncompressedSize;
+    e_uint64 fileOffset;            /* The offset in bytes from the start of the archive file. */
+    e_bool32 directory;
+} e_zip_file_info;
+
+typedef struct
+{
+    size_t offsetInBytes;           /* The offset in bytes of the item relative to the start of the central directory. */
+} e_zip_index;
+
+struct e_zip_cd_node
+{
+    size_t iFile;                   /* Will be undefined for non leaf nodes. */
+    const char* pName;
+    size_t nameLen;
+    size_t childCount;
+    e_zip_cd_node* pChildren;
+    size_t _descendantRangeBeg;     /* Only used for building the CD node graph. */
+    size_t _descendantRangeEnd;     /* Only used for building the CD node graph. */
+    size_t _descendantPrefixLen;    /* Only used for building the CD node graph. */
+};
+
+struct e_zip_iterator
+{
+    e_fs_iterator iterator;
+    e_zip* pZip;
+    e_zip_cd_node* pDirectoryNode;
+    size_t iChild;
+};
+
+struct e_zip_file
+{
+    e_file file;
+    e_zip_file_info info;
+    e_uint64 absoluteCursorUncompressed;
+    e_uint64 absoluteCursorCompressed;      /* The position of the cursor in the compressed data. */
+    e_deflate_decompressor decompressor;    /* Only used for compressed files. */
+    size_t cacheCap;                        /* The capacity of the cache. Never changes. */
+    size_t cacheSize;                       /* The number of valid bytes in the cache. Can be less than the capacity, but never more. Will be less when holding the tail end fo the file data. */
+    size_t cacheCursor;                     /* The cursor within the cache. The cache size minus the cursor defines how much data remains in the cache. */
+    unsigned char* pCache;                  /* Cache must be at least 32K. Stores uncompressed data. Offset of _pCacheData. */
+    size_t compressedCacheCap;              /* The capacity of the compressed cache. Never changes. */
+    size_t compressedCacheSize;             /* The number of valid bytes in the compressed cache. Can be less than the capacity, but never more. Will be less when holding the tail end fo the file data. */
+    size_t compressedCacheCursor;           /* The cursor within the compressed cache. The compressed cache size minus the cursor defines how much data remains in the compressed cache. */
+    unsigned char* pCompressedCache;        /* Only used for compressed files. */
+    unsigned char _pCacheData[1];           /* Contains the data of pCache and pCompressedCache. */
+};
+
+struct e_zip
+{
+    e_archive archive;                      /* A Zip is an archive, which itself is a file system. Therefore a e_zip object can be plugged into any e_fs API. */
+    size_t fileCount;                       /* Total number of records in the central directory. */
+    e_mutex* pLock;                         /* For mutual exclusion when reading file data across multiple threads. This is an offset of pHeap. */
+    size_t centralDirectorySize;            /* Size in bytes of the central directory. */
+    void* pCentralDirectory;                /* Offset of pHeap. */
+    e_zip_index* pIndex;                    /* Offset of pHeap. There will be fileCount items in this array, and each item is sorted by the file path of each item. */
+    e_zip_cd_node* pCDRootNode;             /* The root node of our accelerated central directory data structure. */
+    void* pHeap;                            /* A single heap allocation for storing the central directory and index. */
+};
+
+
+
+static void e_zip_lock(e_zip* pZip)
+{
+    e_mutex_lock(pZip->pLock);
+}
+
+static void e_zip_unlock(e_zip* pZip)
+{
+    e_mutex_unlock(pZip->pLock);
+}
+
+
+
+typedef struct
+{
+    const char* str;
+    size_t len;
+} e_refstring;
+
+static int e_binary_search_zip_cd_node_compare(void* pUserData, const void* pKey, const void* pVal)
+{
+    const e_refstring* pRefString = (const e_refstring*)pKey;
+    const e_zip_cd_node* pNode = (const e_zip_cd_node*)pVal;
+    int compareResult;
+
+    (void)pUserData;
+
+    compareResult = c89str_strncmp(pRefString->str, pNode->pName, E_MIN(pRefString->len, pNode->nameLen));
+    if (compareResult == 0 && pRefString->len != pNode->nameLen) {
+        compareResult = (pRefString->len < pNode->nameLen) ? -1 : 1;
+    }
+
+    return compareResult;
+}
+
+static e_zip_cd_node* e_zip_cd_node_find_child(e_zip_cd_node* pParent, const char* pChildName, size_t childNameLen)
+{
+    e_refstring str;
+    str.str = pChildName;
+    str.len = childNameLen;
+
+    return e_sorted_search(&str, pParent->pChildren, pParent->childCount, sizeof(*pParent->pChildren), e_binary_search_zip_cd_node_compare, NULL);
+}
+
+
+static e_result e_archive_alloc_size_zip(void* pUserData, size_t* pSize)
+{
+    E_UNUSED(pUserData);
+    E_ASSERT(pSize != NULL);
+
+    *pSize = sizeof(e_zip);
+    return E_SUCCESS;
+}
+
+static e_result e_zip_get_file_info_by_record_offset(e_zip* pZip, size_t offset, e_zip_file_info* pInfo)
+{
+    e_uint16 filePathLen;
+    const unsigned char* pCentralDirectoryRecord;
+
+    E_ASSERT(pZip  != NULL);
+    E_ASSERT(pInfo != NULL);
+
+    E_ZERO_OBJECT(pInfo);
+
+    pCentralDirectoryRecord = (const unsigned char*)E_OFFSET_PTR(pZip->pCentralDirectory, offset);
+
+    /* Check that we're not going to overflow the central directory. */
+    if (offset + 46 > pZip->centralDirectorySize) {   /* 46 is the offset of the file path. */
+        return E_INVALID_FILE;  /* Look like an invalid central directory. */
+    }
+
+    /* Grab the length of the file path. */
+    filePathLen = ((e_uint16)pCentralDirectoryRecord[29] << 8) | pCentralDirectoryRecord[28];
+
+    /* Now we can move to the file path, again making sure we have enough room for the file path. */
+    if (offset + 46 + filePathLen > pZip->centralDirectorySize) {
+        return E_INVALID_FILE;  /* Looks like an invalid central directory. */
+    }
+
+    pInfo->pPath   = (const char*)(pCentralDirectoryRecord + 46);
+    pInfo->pathLen = filePathLen;
+
+    /* We can determine if the entry is a directory by checking if the path ends in a slash. */
+    if (pInfo->pPath[pInfo->pathLen-1] == '/' || pInfo->pPath[pInfo->pathLen-1] == '\\') {
+        pInfo->directory = E_TRUE;
+    }
+
+    /* Compression method. */
+    pInfo->compressionMethod = ((e_uint16)pCentralDirectoryRecord[11] << 8) | pCentralDirectoryRecord[10];
+
+    /* Get the size of the file. */
+    pInfo->compressedSize   = ((e_uint32)pCentralDirectoryRecord[23] << 24) | ((e_uint32)pCentralDirectoryRecord[22] << 16) | ((e_uint32)pCentralDirectoryRecord[21] << 8) | (e_uint32)pCentralDirectoryRecord[20];
+    pInfo->uncompressedSize = ((e_uint32)pCentralDirectoryRecord[27] << 24) | ((e_uint32)pCentralDirectoryRecord[26] << 16) | ((e_uint32)pCentralDirectoryRecord[25] << 8) | (e_uint32)pCentralDirectoryRecord[24];
+
+    /* File offset. */
+    pInfo->fileOffset = ((e_uint32)pCentralDirectoryRecord[45] << 24) | ((e_uint32)pCentralDirectoryRecord[44] << 16) | ((e_uint32)pCentralDirectoryRecord[43] << 8) | pCentralDirectoryRecord[42];
+
+
+    /*
+    Load Zip64 data if necessary. It's in the extra data. The extra data is made up of a
+    number of blocks. Each block has a 2 byte ID and a 2 byte size. When reading from
+    each block, we need to make sure we don't try reading beyond the reported size of
+    the extra data.
+    
+    The Zip64 data will be stored in a block with the ID of 0x0001. The presence of each
+    member inside this block is conditional to whether or not it's set to 0xFFFFFFFF in
+    the main part of the central directory record.
+    */
+    if (pInfo->compressedSize == 0xFFFFFFFF || pInfo->uncompressedSize == 0xFFFFFFFF || pInfo->fileOffset == 0xFFFFFFFF) {
+        e_uint16 extraDataSize   = ((e_uint16)pCentralDirectoryRecord[31] << 8) | pCentralDirectoryRecord[30];
+        e_uint16 extraDataOffset = 0;
+
+        const unsigned char* pExtraData = (const unsigned char*)(pCentralDirectoryRecord + 46 + filePathLen);
+
+        /* For each chunk in the extra data. */
+        for (;;) {
+            e_uint16 chunkID;
+            e_uint16 chunkSize;
+
+            if (extraDataOffset == extraDataSize) {
+                break;  /* We're done. */
+            }
+
+            if (extraDataOffset > extraDataSize) {
+                return E_INVALID_FILE;  /* We've somehow read past the extra data. Abort. */
+            }
+
+            if ((extraDataSize - extraDataOffset) < 4) {
+                return E_INVALID_FILE;  /* Not enough data in the extra data to read the chunk header. */
+            }
+
+            chunkID   = ((e_uint16)pExtraData[extraDataOffset+1] << 8) | pExtraData[extraDataOffset+0];
+            chunkSize = ((e_uint16)pExtraData[extraDataOffset+3] << 8) | pExtraData[extraDataOffset+2];
+
+            /* Increment the offset to make it easy to parse the data in the next section. */
+            extraDataOffset += 4;
+
+            if ((extraDataSize - extraDataOffset) < chunkSize) {
+                return E_INVALID_FILE;  /* Not enough data in the extra data to read the chunk. */
+            }
+
+            if (chunkID == 0x0001) {
+                /* Zip64 data. */
+                e_uint32 chunkLocalOffset = 0;
+
+                if (pInfo->uncompressedSize == 0xFFFFFFFF) {
+                    if (chunkLocalOffset + 8 > chunkSize) {
+                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
+                    }
+
+                    pInfo->uncompressedSize = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
+                    chunkLocalOffset += 8;
+                }
+
+                if (pInfo->compressedSize == 0xFFFFFFFF) {
+                    if (chunkLocalOffset + 8 > chunkSize) {
+                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
+                    }
+
+                    pInfo->compressedSize = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
+                    chunkLocalOffset += 8;
+                }
+
+                if (pInfo->fileOffset == 0xFFFFFFFF) {
+                    if (chunkLocalOffset + 8 > chunkSize) {
+                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
+                    }
+
+                    pInfo->fileOffset = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
+                    chunkLocalOffset += 8;
+                }
+            }
+
+            extraDataOffset += chunkSize;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+static const char* e_zip_get_file_path_by_record_offset(e_zip* pZip, size_t offset, size_t* pLength)
+{
+    e_uint16 length;
+    const char* pCentralDirectoryRecord;
+
+    E_ASSERT(pLength != NULL);
+
+    *pLength = 0;
+
+    pCentralDirectoryRecord = (const char*)E_OFFSET_PTR(pZip->pCentralDirectory, offset);
+
+    /* Check that we're not going to overflow the central directory. */
+    if (offset + 46 > pZip->centralDirectorySize) {   /* 46 is the offset of the file path. */
+        return NULL;    /* Look like an invalid central directory. */
+    }
+
+    /* Grab the length of the file. */
+    length = ((e_uint16)pCentralDirectoryRecord[29] << 8) | pCentralDirectoryRecord[28];
+
+    /* Now we can move to the file path, again making sure we have enough room for the file path. */
+    if (offset + 46 + length > pZip->centralDirectorySize) {
+        return NULL;    /* Looks like an invalid central directory. */
+    }
+
+    /* We now how enough information to get the file path. */
+    *pLength = length;
+    return pCentralDirectoryRecord + 46;
+}
+
+static e_result e_zip_find_file_by_path(e_zip* pZip, const char* pFilePath, size_t filePathLen, size_t* pFileIndex)
+{
+    e_result result;
+    c89str_path_iterator pathIterator;
+    e_zip_cd_node* pCurrentNode;
+
+    E_ASSERT(pZip       != NULL);
+    E_ASSERT(pFilePath  != NULL);
+    E_ASSERT(pFileIndex != NULL);
+
+    /* Start at the root node. */
+    pCurrentNode = pZip->pCDRootNode;
+
+    result = e_result_from_errno(c89str_path_first(pFilePath, filePathLen, &pathIterator));
+    if (result != E_SUCCESS) {
+        return result;  /* Probably trying to find the root item which does not have an index. */
+    }
+
+    for (;;) {
+        e_zip_cd_node* pChildNode;
+        
+        pChildNode = e_zip_cd_node_find_child(pCurrentNode, pathIterator.pFullPath + pathIterator.segmentOffset, pathIterator.segmentLength);
+        if (pChildNode == NULL) {
+            return E_DOES_NOT_EXIST;
+        }
+
+        pCurrentNode = pChildNode;
+
+        result = e_result_from_errno(c89str_path_next(&pathIterator));
+        if (result != E_SUCCESS) {
+            /* We've reached the end. The file we're on must be the file index. */
+            *pFileIndex = pCurrentNode->iFile;
+            return E_SUCCESS;
+        }
+    }
+
+    /* Should never get here. */
+    return E_DOES_NOT_EXIST;
+}
+
+static e_result e_zip_get_file_info_by_path(e_zip* pZip, const char* pFilePath, size_t filePathLen, e_zip_file_info* pInfo)
+{
+    e_result result;
+    size_t iFile;
+
+    E_ASSERT(pZip      != NULL);
+    E_ASSERT(pFilePath != NULL);
+    E_ASSERT(pInfo     != NULL);
+
+    result = e_zip_find_file_by_path(pZip, pFilePath, filePathLen, &iFile);
+    if (result != E_SUCCESS) {
+        return result;  /* Most likely the file could not be found. */
+    }
+
+    return e_zip_get_file_info_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, pInfo);
+}
+
+static int e_zip_qsort_compare(void* pUserData, const void* a, const void* b)
+{
+    e_zip* pZip = (e_zip*)pUserData;
+    const e_zip_index* pZipIndex0 = (const e_zip_index*)a;
+    const e_zip_index* pZipIndex1 = (const e_zip_index*)b;
+    size_t fileNameLen0;
+    const char* pFileName0;
+    size_t fileNameLen1;
+    const char* pFileName1;
+    int compareResult;
+
+    E_ASSERT(pZip != NULL);
+
+    pFileName0 = e_zip_get_file_path_by_record_offset(pZip, pZipIndex0->offsetInBytes, &fileNameLen0);
+    if (pFileName0 == NULL) {
+        pFileName0 = "";    /* File couldn't be found. Just treat it as an empty string. */
+    }
+
+    pFileName1 = e_zip_get_file_path_by_record_offset(pZip, pZipIndex1->offsetInBytes, &fileNameLen1);
+    if (pFileName1 == NULL) {
+        pFileName1 = "";    /* File couldn't be found. Just treat it as an empty string. */
+    }
+
+    compareResult = strncmp(pFileName0, pFileName1, E_MIN(fileNameLen0, fileNameLen1));
+    if (compareResult == 0 && fileNameLen0 != fileNameLen1) {
+        /* The strings are the same up to the length of the shorter string. The shorter string is considered to be less than the longer string. */
+        compareResult = (fileNameLen0 < fileNameLen1) ? -1 : 1;
+    }
+
+    return compareResult;
+}
+
+static void e_zip_cd_node_build(e_zip* pZip, e_zip_cd_node** ppRunningChildrenPointer, e_zip_cd_node* pNode)
+{
+    size_t iFile;
+    size_t iChild;
+
+    E_ASSERT(pZip  != NULL);
+    E_ASSERT(pNode != NULL);
+    E_ASSERT(pNode->_descendantRangeEnd <= pZip->fileCount);
+    E_ASSERT(ppRunningChildrenPointer != NULL);
+
+    pNode->childCount = 0;
+    pNode->pChildren  = *ppRunningChildrenPointer;
+
+    /*
+    We need to loop through our file range and add any direct children first. Then once that's
+    done, we iterate over each child node and fill them out recursively.
+    */
+    for (iFile = pNode->_descendantRangeBeg; iFile < pNode->_descendantRangeEnd; iFile += 1) {
+        const char* pFullFilePath;
+        size_t fullFilePathLen;
+        const char* pShortFilePath;
+        size_t shortFilePathLen;
+        c89str_path_iterator shortFilePathIterator;
+
+        pFullFilePath = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, &fullFilePathLen);
+        if (pFullFilePath == NULL) {
+            continue;   /* Should never happen. Just ignore the file if we couldn't find it by the given offset. */
+        }
+
+        /* If the full file path length is equal to the descendant prefix length, it means it's a leaf node. */
+        E_ASSERT(fullFilePathLen >= pNode->_descendantPrefixLen);
+        if (fullFilePathLen == pNode->_descendantPrefixLen) {
+            continue;
+        }
+
+        /* The short file path is simply the full file path without the descendant prefix. */
+        pShortFilePath   = pFullFilePath   + pNode->_descendantPrefixLen;
+        shortFilePathLen = fullFilePathLen - pNode->_descendantPrefixLen;
+
+        /* Make sure we're not sitting on a path separator. */
+        if (pShortFilePath[0] == '\\' || pShortFilePath[0] == '/') {
+            pShortFilePath   += 1;
+            shortFilePathLen -= 1;
+        }
+
+        /*
+        Now we need to check if we need to add a child. Because this main file listing is sorted,
+        we need only check the last child item. If it's not equal, we have a new child item.
+        */
+        if (c89str_path_first(pShortFilePath, shortFilePathLen, &shortFilePathIterator) == C89STR_SUCCESS) {
+            if (pNode->childCount == 0 || pNode->pChildren[pNode->childCount-1].nameLen != shortFilePathIterator.segmentLength || c89str_strncmp(pNode->pChildren[pNode->childCount-1].pName, shortFilePathIterator.pFullPath + shortFilePathIterator.segmentOffset, E_MIN(pNode->pChildren[pNode->childCount-1].nameLen, shortFilePathIterator.segmentLength)) != 0) {
+                /* Child doesn't exist. Need to add it to the list. */
+                pNode->pChildren[pNode->childCount].iFile                = iFile;
+                pNode->pChildren[pNode->childCount].pName                = shortFilePathIterator.pFullPath + shortFilePathIterator.segmentOffset;
+                pNode->pChildren[pNode->childCount].nameLen              = shortFilePathIterator.segmentLength;
+                pNode->pChildren[pNode->childCount]._descendantRangeBeg  = iFile;
+                pNode->pChildren[pNode->childCount]._descendantRangeEnd  = pNode->_descendantRangeEnd;
+                pNode->pChildren[pNode->childCount]._descendantPrefixLen = (fullFilePathLen - shortFilePathLen) + shortFilePathIterator.segmentLength;
+
+                /* Update the end range for the previous child if we have one. */
+                if (pNode->childCount > 0) {
+                    pNode->pChildren[pNode->childCount-1]._descendantRangeEnd = iFile;
+                }
+
+                pNode->childCount         += 1;
+                *ppRunningChildrenPointer += 1;
+            }
+        } else {
+            /*
+            Couldn't get the first segment. This probably means we found an explicit directory
+            listing. We just ignore it.
+            */
+            if (pNode->childCount > 0) {
+                pNode->pChildren[pNode->childCount-1]._descendantRangeEnd = iFile;
+            }
+        }
+    }
+
+    /* We've initialized each of the child nodes. We now need to recursively process them. */
+    for (iChild = 0; iChild < pNode->childCount; iChild += 1) {
+        e_zip_cd_node_build(pZip, ppRunningChildrenPointer, &pNode->pChildren[iChild]);
+    }
+}
+
+static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive* pArchive)
+{
+    e_zip* pZip = (e_zip*)pArchive;
+    e_result result;
+    e_uint32 sig;
+    int eocdPositionFromEnd;
+    e_uint16 cdRecordCount16;
+    e_uint64 cdRecordCount64;
+    e_uint32 cdSizeInBytes32;
+    e_uint64 cdSizeInBytes64;
+    e_uint32 cdOffset32;
+    e_uint64 cdOffset64;
+
+    E_UNUSED(pUserData);
+    E_ASSERT(pZip != NULL);
+
+    /*
+    The correct way to load a Zip file is to read from the central directory. The end of the
+    central directory is the first thing we need to find and is sitting at the end of the file. The
+    most efficient way to find this is to look for the end of central directory signature. The
+    EOCD record is at least 22 bytes, but may be larger if there is a comment. The maximum size
+    will be 22 + 65535.
+
+    The way we'll do it is we'll first assume there is no comment and try reading from byte -22
+    starting from the end. If the first 4 bytes are equal to the EOCD signature we'll treat that as
+    the start of the EOCD and read from there. If this fails it probably means there's a comment in
+    which case we'll go to byte -(22 + 65535) and scan from there.
+    */
+    result = e_stream_seek(pStream, -22, E_SEEK_ORIGIN_END);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to seek to our EOCD. This cannot be a valid Zip file. */
+    }
+
+    result = e_stream_read(pStream, &sig, 4, NULL);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (sig == E_ZIP_EOCD_SIGNATURE) {
+        /* Found the EOCD. It's at position -22. */
+        eocdPositionFromEnd = -22;
+    } else {
+        /*
+        The EOCD record is not located at position -22. There might be a comment which means the
+        EOCD signature is sitting further up the file. The comment has a maximum if 65535
+        characters, so we'll start searching from -(22 + 65535).
+        */
+        result = e_stream_seek(pStream, -(22 + 65535), E_SEEK_ORIGIN_END);
+        if (result != E_SUCCESS) {
+            /*
+            We failed the seek, but it most likely means we were just trying to seek to far back in
+            which case we can just fall back to a seek to position 0.
+            */
+            result = e_stream_seek(pStream, 0, E_SEEK_ORIGIN_START);
+            if (result != E_SUCCESS) {
+                return result;
+            }
+        }
+
+        /*
+        We now need to scan byte-by-byte until we find the signature. We could allocate this on the
+        stack, but that takes a little bit too much stack space that I feel comfortable with. We
+        could also allocate a buffer on the heap, but that just needlessly inefficient. Instead
+        we'll run in a loop and read into a 4K stack allocated buffer.
+        */
+        {
+            unsigned char buffer[4096];
+            size_t bufferCursor;
+            size_t bufferSize;
+            size_t totalBytesScanned;
+
+            totalBytesScanned = 0;
+            bufferCursor = 0;
+            for (;;) {
+                size_t bufferRemaining;
+                e_bool32 foundEOCD = E_FALSE;
+
+                result = e_stream_read(pStream, buffer + bufferCursor, sizeof(buffer) - bufferCursor, &bufferSize);
+                if (result != E_SUCCESS) {
+                    return E_INVALID_FILE;  /* If we get here it most likely means we've reached the end of the file. In any case, we're can't continue. */
+                }
+
+                /* Make sure we account for the offset when determining the buffer size. */
+                bufferSize += bufferCursor;
+                if (bufferSize < 4) {
+                    return E_INVALID_FILE;  /* Didn't read enough data. Not even enough to read a full signature. */
+                }
+
+                for (; bufferCursor <= (bufferSize - 4); bufferCursor += 1) {
+                    /* Is it safe to do unaligned access like this on all platforms? Safer to do a byte-by-byte comparison? */
+                    if (*(e_uint32*)(buffer + bufferCursor) == E_ZIP_EOCD_SIGNATURE) {
+                        /* The signature has been found. */
+                        foundEOCD = E_TRUE;
+                        break;
+                    }
+                }
+
+                totalBytesScanned += bufferCursor;
+
+                if (foundEOCD) {
+                    /*
+                    We found the EOCD. A complication here is that the stream's cursor won't
+                    be sitting in the correct location because we were reading in chunks.
+                    */
+                    eocdPositionFromEnd = -(22 + 65535) + (int)totalBytesScanned;   /* Safe cast to int. */
+
+                    result = e_stream_seek(pStream, eocdPositionFromEnd + 4, E_SEEK_ORIGIN_END);  /* +4 so go just past the signatures. */
+                    if (result != E_SUCCESS) {
+                        return result;
+                    }
+
+                    /* Just setting the signature here to keep the state of our local variables consistent. */
+                    sig = E_ZIP_EOCD_SIGNATURE;
+
+                    /* Get out of the chunk loop. */
+                    break;
+                }
+
+                /*
+                Getting here means we didn't find the signature in this chunk. We need to move the
+                cursor back and read another chunk.
+                */
+                bufferRemaining = bufferSize - bufferCursor;
+                E_MOVE_MEMORY(buffer, buffer + bufferCursor, bufferRemaining);
+                bufferCursor = bufferRemaining;
+            }
+        }
+    }
+
+    /*
+    Getting here means we must have found the EOCD record. We can now parse it. The EOCD will give
+    us information that we could use to determine if it's a Zip64 record.
+
+    We're ignoring the disk properties. Split Zip files are not being supported here.
+    */
+    result = e_stream_seek(pStream, 2 + 2 + 2, E_SEEK_ORIGIN_CURRENT);  /* Skip past disk stuff. */
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    result = e_stream_read(pStream, &cdRecordCount16, 2, NULL);
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    result = e_stream_read(pStream, &cdSizeInBytes32, 4, NULL);
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    result = e_stream_read(pStream, &cdOffset32, 4, NULL);
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    /*
+    The last part will be the comment. We don't care about this, and this is the last part of the
+    file so we just leave it.
+    */
+
+    /*
+    We'll now need to decide if we need to read some Zip64 information. To determine this we just
+    need to look at the content of the record count, size and offset.
+    */
+    if (cdRecordCount16 == 0xFFFF || cdSizeInBytes32 == 0xFFFFFFFF || cdOffset32 == 0xFFFFFFFF) {
+        /*
+        It's a Zip64 file. We need to find the EOCD64 locator which will be 20 bytes before the EOCD
+        that we just read. If we can't find the EOCD64 locator we'll just abort.
+        */
+        e_uint64 eocd64SizeInBytes;
+        e_int64 eocd64OffsetInBytes;
+
+        result = e_stream_seek(pStream, eocdPositionFromEnd - 20, E_SEEK_ORIGIN_END);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        result = e_stream_read(pStream, &sig, 4, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        if (sig != E_ZIP_EOCD64_LOCATOR_SIGNATURE) {
+            /* TODO: We can try falling back to a method that scans for the EOCD64. Would work just like the regular EOCD that we just read. */
+            return E_INVALID_FILE;  /* Couldn't find the EOCD64 locator. Abort. */
+        }
+
+        /* We don't use the next 4 bytes so skip it. */
+        result = e_stream_seek(pStream, 4, E_SEEK_ORIGIN_CURRENT);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        /* The next 8 bytes contains the offset to the EOCD64. */
+        result = e_stream_read(pStream, &eocd64OffsetInBytes, 8, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        /*
+        The next 4 bytes contains the number of disks. We're not supporting split Zip files, so we
+        don't need to care about this. Just seek straight to the EOCD64 record.
+        */
+        result = e_stream_seek(pStream, eocd64OffsetInBytes, E_SEEK_ORIGIN_START);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+
+        /* Getting here means we've found the EOCD64. We can now parse it. */
+        result = e_stream_read(pStream, &sig, 4, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        if (sig != E_ZIP_EOCD64_SIGNATURE) {
+            return E_INVALID_FILE;  /* Couldn't find the EOCD64. Abort. */
+        }
+
+        /* Getting here means we've found the EOCD64 locator. The next 8 bytes contains the size of the EOCD64 minus 12. */
+        result = e_stream_read(pStream, &eocd64SizeInBytes, 8, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        /* The EOCD64 must be at least 36 bytes. */
+        if (eocd64SizeInBytes < 36) {
+            return E_INVALID_FILE;
+        }
+
+        /* We can skip past everything up to the record count, which is 20 bytes. */
+        result = e_stream_seek(pStream, 20, E_SEEK_ORIGIN_CURRENT);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        /* The next three items are the record count, size in bytes and offset, which are all 8 bytes. */
+        result = e_stream_read(pStream, &cdRecordCount64, 8, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        result = e_stream_read(pStream, &cdSizeInBytes64, 8, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+
+        result = e_stream_read(pStream, &cdOffset64, 8, NULL);
+        if (result != E_SUCCESS) {
+            return E_INVALID_FILE;
+        }
+        
+        if (cdRecordCount64 > E_SIZE_MAX) {
+            return E_TOO_BIG;   /* Too many records. Will never fit what we need in memory. */
+        }
+        if (cdSizeInBytes64 > E_SIZE_MAX) {
+            return E_TOO_BIG;   /* Central directory is too big to fit into memory. */
+        }
+
+        pZip->fileCount = cdRecordCount64;
+        
+    } else {
+        /* It's a 32-bit archive. */
+        pZip->fileCount = cdRecordCount16;
+        pZip->centralDirectorySize = cdSizeInBytes32;
+
+        cdSizeInBytes64 = cdSizeInBytes32;
+        cdOffset64 = cdOffset32;
+    }
+
+    /* We need to seek to the start of the central directory and read it's contents. */
+    result = e_stream_seek(pStream, cdOffset64, E_SEEK_ORIGIN_START);
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    /* At this point we'll be sitting on the central directory. */
+
+    /*
+    We don't parse the central directory here. Instead we just allocate a block of memory and read
+    straight into that. Then when we need to load a file we just iterate over the central
+    directory.
+    */
+    if (cdSizeInBytes64 > E_SIZE_MAX) {
+        return E_TOO_BIG;   /* The size of the central directory is too big. */
+    }
+
+    pZip->centralDirectorySize = (size_t)cdSizeInBytes64;
+
+
+    pZip->pHeap = e_malloc(e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount), pAllocationCallbacks);
+    if (pZip->pHeap == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pZip->pLock             = (e_mutex*    )E_OFFSET_PTR(pZip->pHeap, 0);
+    pZip->pCentralDirectory =               E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size());
+    pZip->pIndex            = (e_zip_index*)E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize);
+    pZip->pCDRootNode       = NULL; /* <-- This will be set later. */
+
+    result = e_stream_read(pStream, pZip->pCentralDirectory, pZip->centralDirectorySize, NULL);
+    if (result != E_SUCCESS) {
+        return E_INVALID_FILE;
+    }
+
+    /* Build the index. It needs to be sorted by name. We'll treat this as case-sensitive. */
+    {
+        e_memory_stream cdStream;
+        size_t iFile;
+        size_t nodeUpperBoundCount;
+
+        result = e_memory_stream_init_readonly(pZip->pCentralDirectory, pZip->centralDirectorySize, &cdStream);
+        if (result != E_SUCCESS) {
+            e_free(pZip->pHeap, pAllocationCallbacks);
+            return result;
+        }
+
+        for (iFile = 0; iFile < pZip->fileCount; iFile += 1) {
+            size_t fileOffset;
+            e_uint16 fileNameLen;
+            e_uint16 extraLen;
+            e_uint16 commentLen;
+
+            result = e_memory_stream_tell(&cdStream, &fileOffset);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+
+            pZip->pIndex[iFile].offsetInBytes = fileOffset;
+
+
+            /*
+            We need to seek to the next item. To do this we need to retrieve the lengths of the
+            variable-length fields. These start from offset 28.
+            */
+            result = e_memory_stream_seek(&cdStream, 28, E_SEEK_ORIGIN_CURRENT);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+
+            result = e_memory_stream_read(&cdStream, &fileNameLen, 2, NULL);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+
+            result = e_memory_stream_read(&cdStream, &extraLen, 2, NULL);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+
+            result = e_memory_stream_read(&cdStream, &commentLen, 2, NULL);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+
+            /* We have the necessary information we need to move past this record. */
+            result = e_memory_stream_seek(&cdStream, fileOffset + 46 + fileNameLen + extraLen + commentLen, E_SEEK_ORIGIN_START);
+            if (result != E_SUCCESS) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return result;
+            }
+        }
+
+        /*
+        TODO: Look at some real-world Zip archives from various archivers (7zip, Windows, etc.) and
+        check how the sorting looks before our explicit sort. If most real-world archives are already
+        mostly sorted, it might be more efficient to just do a simple insertion sort.
+        */
+        e_qsort_s(pZip->pIndex, pZip->fileCount, sizeof(e_zip_index), e_zip_qsort_compare, pZip);
+
+        /* Testing. */
+        #if 0
+        {
+            size_t i;
+            for (i = 0; i < pZip->fileCount; i += 1) {
+                size_t nameLen;
+                const char* pName = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[i].offsetInBytes, &nameLen);
+
+                printf("File name = %.*s\n", (int)nameLen, pName);
+            }
+        }
+        #endif
+
+        /*
+        We're going to build an accelerated data structure for the central directory. Nothing over
+        the top - just a simple tree based on directory names.
+
+        It's just a graph. Each node in the graph is either a directory or a file. Leaf nodes can
+        possibly be files or an empty directory which means a flag is required to indicate whether
+        or not the node is a directory. Sub-folders and files are just child nodes. Children are
+        sorted by name to allow for fast lookups.
+
+        The items in the central directory has already been sorted thanks to the index that we
+        constructed above. If we just iterate linearly based on that index everything should be
+        sorted naturally.
+
+        The graph is constructed in two passes. The first pass simply counts the number of nodes so
+        we can allocate a single block of memory. The second pass fills the data.
+        */
+
+        /*
+        The first pass is just to count the number of nodes so we can allocate some memory in one
+        chunk. We start the count at one to accommodate for the root node. This pass is not
+        necessarily calculating an exact count, but instead it calculates an upper bound count. The
+        reason for this is how directories are handled. Sometimes they are listed explicitly, but I
+        have seen cases where they're not. If we could guarantee all folders were explicitly listed
+        we would be able to avoid this pass.
+
+        We can take advantage of the fact that the file listing has been sorted. For each entry we
+        just compare the path with the previous one, and for every segment in the new path that's
+        different we increment the counter (it should always be at least one since the file name
+        itself should always be different).
+        */
+        {
+            const char* pPrevPath;
+            size_t prevPathLen;
+            
+            /* Consider the root directory to be the previous path. */
+            pPrevPath = "";
+            prevPathLen = 0;
+
+            /* Start the count at 1 to account for the root node. */
+            nodeUpperBoundCount = 1;
+
+            for (iFile = 0; iFile < pZip->fileCount; iFile += 1) {
+                const char* pFilePath;
+                size_t filePathLen;
+
+                pFilePath = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, &filePathLen);
+                if (pFilePath == NULL) {
+                    continue;   /* Just skip the file if we can't get the name. Should never happen. */
+                }
+
+                /*
+                Now that we have the file path all we need to do is compare is to the previous path
+                and increment the counter for every segment in the current path that is different
+                to the previous path. We'll need to use a path iterator for each of these.
+                */
+                {
+                    c89str_path_iterator nextIterator;
+                    c89str_path_iterator prevIterator;
+
+                    c89str_path_first(pFilePath, filePathLen, &nextIterator);   /* <-- This should never fail. */
+
+                    if (c89str_path_first(pPrevPath, prevPathLen, &prevIterator) == C89STR_SUCCESS) {
+                        /*
+                        First just move the next iterator forward until we reach the end of the previous
+                        iterator, or if the segments differ between the two.
+                        */
+                        for (;;) {
+                            if (c89str_path_iterators_compare(&nextIterator, &prevIterator) != 0) {
+                                break;  /* Iterators don't match. */
+                            }
+
+                            /* Getting here means the segments match. We need to move to the next one. */
+                            if (c89str_path_next(&nextIterator) != C89STR_SUCCESS) {
+                                break;  /* We reached the end of the next iterator before the previous. The only difference will be the file name. */
+                            }
+
+                            if (c89str_path_next(&prevIterator) != C89STR_SUCCESS) {
+                                break;  /* We reached the end of the prev iterator. Get out of the loop. */
+                            }
+                        }
+                    }
+
+                    /* Increment the counter to account for the segment that the next iterator is currently sitting on. */
+                    nodeUpperBoundCount += 1;
+
+                    /* Now we need to increment the counter for every new segment. */
+                    while (c89str_path_next(&nextIterator) == C89STR_SUCCESS) {
+                        nodeUpperBoundCount += 1;
+                    }
+                }
+
+                /* Getting here means we're done with the count for this item. Move to the next one. */
+                pPrevPath = pFilePath;
+                prevPathLen = filePathLen;
+            }
+        }
+
+        /*
+        Now that we've got the count we can go ahead and resize our heap allocation. It's important
+        to remember to update our pointers here.
+        */
+        {
+            void* pNewHeap = e_realloc(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount) + (sizeof(*pZip->pCDRootNode) * nodeUpperBoundCount), pAllocationCallbacks);
+            if (pNewHeap == NULL) {
+                e_free(pZip->pHeap, pAllocationCallbacks);
+                return E_OUT_OF_MEMORY;
+            }
+
+            pZip->pHeap = pNewHeap;
+            pZip->pLock             = (e_mutex*      )E_OFFSET_PTR(pZip->pHeap, 0);
+            pZip->pCentralDirectory =                 E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size());
+            pZip->pIndex            = (e_zip_index*  )E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize);
+            pZip->pCDRootNode       = (e_zip_cd_node*)E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount));
+        }
+
+        /*
+        Memory has been allocated so we can now fill it out. This is slightly tricky because we want
+        to do it in a single pass with a single memory allocation. Each node will hold a pointer to
+        an array which will contain their children. The size of this array is unknown at this point
+        so we need to come up with a system that allows us to fill each node in order.
+
+        Fortunately our file listing is sorted which gives us a good start. We want to fill out
+        higher level nodes first and then move down to leaf nodes. We're going to run through the
+        file listing in sorted order. For the current file path, we need to look at it's directory
+        structure. For each segment of the directory there will be a node. For each of these
+        segments we'll run an inner loop that adds child nodes for each file that shares the same
+        prefix.
+
+        To put simply, for each node, we need to attach all of it's children before the child nodes
+        themselves have been filled with their children. We can do this recursively. The first node
+        we're filling is the root node.
+        */
+        {
+            e_zip_cd_node* pRunningChildrenPointer = &pZip->pCDRootNode[1];
+
+            /* The root node needs to be set up first. */
+            pZip->pCDRootNode->pName                = "";
+            pZip->pCDRootNode->nameLen              = 0;
+            pZip->pCDRootNode->_descendantRangeBeg  = 0;
+            pZip->pCDRootNode->_descendantRangeEnd  = pZip->fileCount;
+            pZip->pCDRootNode->_descendantPrefixLen = 0;
+
+            e_zip_cd_node_build(pZip, &pRunningChildrenPointer, pZip->pCDRootNode);
+        }
+    }
+
+    /*
+    We need a mutex to make reading from multiple files across different threads thread-safe. This
+    needs to be done last because we can't be changing the address of the mutex, which may happen
+    due to the realloc() above.
+    */
+    result = e_mutex_init_preallocated(pZip->pLock);
+    if (result != E_SUCCESS) {
+        /*
+        Initialization of the mutex failed, but it's not really a critical error. It just means it
+        won't be thread safe. In practice, this will only happen on single-threaded platforms which
+        we'll never be running on anyway.
+        */
+    }
+
+    /* That's all we need to do for now. */
+    return E_SUCCESS;
+}
+
+static void e_archive_uninit_zip(void* pUserData, e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_zip* pZip = (e_zip*)pArchive;
+
+    E_ASSERT(pZip != NULL);
+    E_UNUSED(pUserData);
+
+    e_free(pZip->pHeap, pAllocationCallbacks);
+}
+
+static e_result e_archive_file_alloc_size_zip(void* pUserData, size_t* pSize)
+{
+    E_UNUSED(pUserData);
+
+    *pSize = sizeof(e_zip_file) + E_ZIP_CACHE_SIZE_IN_BYTES + E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
+    return E_SUCCESS;
+}
+
+static e_result e_archive_open_zip(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
+{
+    e_zip* pZip = (e_zip*)pFS;
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+    e_result result;
+
+    E_UNUSED(pUserData);
+    (void)pAllocationCallbacks;
+
+    E_ZERO_OBJECT(pZipFile);
+
+    /* Write mode is currently unsupported. */
+    if ((openMode & (E_OPEN_MODE_WRITE | E_OPEN_MODE_APPEND | E_OPEN_MODE_TRUNCATE)) != 0) {
+        return E_INVALID_OPERATION;
+    }
+
+    /* We need to find the file info by it's path. */
+    result = e_zip_get_file_info_by_path(pZip, pFilePath, (size_t)-1, &pZipFile->info);
+    if (result != E_SUCCESS) {
+        return result;  /* Probably not found. */
+    }
+
+    /* We can't be trying to open a directory. */
+    if (pZipFile->info.directory) {
+        return E_IS_DIRECTORY;
+    }
+
+    /* Validate the compression method. We're only supporting Store and Deflate. */
+    if (pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_STORE && pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_DEFLATE) {
+        return E_INVALID_FILE;
+    }
+
+    /* Make double sure the cursor is at the start. */
+    pZipFile->absoluteCursorUncompressed = 0;
+    pZipFile->cacheCap = E_ZIP_CACHE_SIZE_IN_BYTES;
+
+    /*
+    We allocated memory for a compressed cache, even when the file is not compressed. Make use
+    of this memory if the file is not compressed.
+    */
+    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_STORE) {
+        pZipFile->cacheCap          += E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
+        pZipFile->compressedCacheCap = 0;
+    } else {
+        pZipFile->compressedCacheCap = E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
+    }
+
+    pZipFile->pCache           = pZipFile->_pCacheData;
+    pZipFile->pCompressedCache = pZipFile->_pCacheData + pZipFile->cacheCap;
+
+    /*
+    We need to move the file offset forward so that it's pointing to the first byte of the actual
+    data. It's currently sitting at the top of the local header which isn't really useful for us.
+    To move forward we need to get the length of the file path and the extra data and seek past
+    the local header.
+    */
+    e_zip_lock(pZip);
+    {
+        e_stream* pArchiveStream;
+        e_uint16 fileNameLen;
+        e_uint16 extraLen;
+
+        pArchiveStream = e_archive_stream(&pZip->archive);
+
+        result = e_stream_seek(pArchiveStream, pZipFile->info.fileOffset + 26, E_SEEK_ORIGIN_START);
+        if (result != E_SUCCESS) {
+            e_zip_unlock(pZip);
+            return result;
+        }
+
+        result = e_stream_read(pArchiveStream, &fileNameLen, 2, NULL);
+        if (result != E_SUCCESS) {
+            e_zip_unlock(pZip);
+            return result;
+        }
+
+        result = e_stream_read(pArchiveStream, &extraLen, 2, NULL);
+        if (result != E_SUCCESS) {
+            e_zip_unlock(pZip);
+            return result;
+        }
+
+        pZipFile->info.fileOffset += (e_uint32)30 + fileNameLen + extraLen;
+    }
+    e_zip_unlock(pZip);
+
+
+    /* Initialize the decompressor if necessary. */
+    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_DEFLATE) {
+        result = e_deflate_decompressor_init(&pZipFile->decompressor);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+    }
+
+
+    return E_SUCCESS;
+}
+
+static void e_archive_close_zip(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+
+    /* Nothing to do here. */
+    (void)pZipFile;
+    (void)pAllocationCallbacks;
+}
+
+static e_result e_archive_read_zip_store(e_zip_file* pZipFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    e_result result;
+    e_zip* pZip;
+    e_uint64 bytesRemainingInFile;
+    size_t bytesRead;
+
+    E_ASSERT(pZipFile   != NULL);
+    E_ASSERT(pBytesRead != NULL);
+
+    pZip = (e_zip*)pZipFile->file.pFS;
+
+    bytesRemainingInFile = pZipFile->info.uncompressedSize - pZipFile->absoluteCursorUncompressed;
+    if (bytesToRead > bytesRemainingInFile) {
+        bytesToRead = (size_t)bytesRemainingInFile;
+    }
+
+    bytesRead = 0;
+
+    /*
+    Before we spend any time locking the archive we should read from the cache. If the cache gets
+    exhausted before we've finished reading, we can then lock the archive and ready the rest of
+    the data.
+    */
+    {
+        size_t bytesRemainingInCache = pZipFile->cacheSize - pZipFile->cacheCursor;
+        size_t bytesToReadFromCache = bytesToRead;
+        if (bytesToReadFromCache > bytesRemainingInCache) {
+            bytesToReadFromCache = bytesRemainingInCache;
+        }
+
+        E_COPY_MEMORY(pDst, pZipFile->pCache + pZipFile->cacheCursor, bytesToReadFromCache);
+        pZipFile->cacheCursor += bytesToReadFromCache;
+
+        bytesRead = bytesToReadFromCache;
+    }
+
+    if (bytesRead < bytesToRead) {
+        /*
+        There's more data to read. If there's more data remaining than the cache capacity, we
+        simply load some data straight into the output buffer. Any remainder we load into the
+        cache and then read from that.
+        */
+        e_zip_lock(pZip);
+        {
+            size_t bytesRemainingToRead = bytesToRead - bytesRead;
+            size_t bytesToReadFromArchive;
+
+            result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + (pZipFile->absoluteCursorUncompressed + bytesRead), E_SEEK_ORIGIN_START);
+            if (result != E_SUCCESS) {
+                e_zip_unlock(pZip);
+                return result;
+            }
+
+            if (bytesRemainingToRead > pZipFile->cacheCap) {
+                size_t bytesReadFromArchive;
+
+                bytesToReadFromArchive = (bytesRemainingToRead / pZipFile->cacheCap) * pZipFile->cacheCap;
+
+                result = e_stream_read(e_archive_stream(&pZip->archive), E_OFFSET_PTR(pDst, bytesRead), bytesToReadFromArchive, &bytesReadFromArchive);
+                if (result != E_SUCCESS) {
+                    e_zip_unlock(pZip);
+                    return result;
+                }
+
+                bytesRead += bytesReadFromArchive;
+                bytesRemainingToRead -= bytesReadFromArchive; 
+            }
+
+            /*
+            At this point we should have less than the cache capacity remaining to read. We need to
+            read into the cache, and then read any leftover from it.
+            */
+            if (bytesRemainingToRead > 0) {
+                E_ASSERT(bytesRemainingToRead < pZipFile->cacheCap);
+
+                result = e_stream_read(e_archive_stream(&pZip->archive), pZipFile->pCache, E_MIN(pZipFile->cacheCap, (pZipFile->info.uncompressedSize - (pZipFile->absoluteCursorUncompressed + bytesRead))), &pZipFile->cacheSize);
+                if (result != E_SUCCESS) {
+                    e_zip_unlock(pZip);
+                    return result;
+                }
+
+                pZipFile->cacheCursor = 0;
+
+                E_COPY_MEMORY(E_OFFSET_PTR(pDst, bytesRead), pZipFile->pCache + pZipFile->cacheCursor, bytesRemainingToRead);
+                pZipFile->cacheCursor += bytesRemainingToRead;
+
+                bytesRead += bytesRemainingToRead;
+            }
+        }
+        e_zip_unlock(pZip);
+    }
+
+    pZipFile->absoluteCursorUncompressed += bytesRead;
+
+    /* We're done. */
+    *pBytesRead = bytesRead;
+    return E_SUCCESS;
+}
+
+static e_result e_archive_read_zip_deflate(e_zip_file* pZipFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    e_result result;
+    e_zip* pZip;
+    e_uint64 uncompressedBytesRemainingInFile;
+    size_t uncompressedBytesRead;
+
+    E_ASSERT(pZipFile != NULL);
+    E_ASSERT(pBytesRead != NULL);
+
+    pZip = (e_zip*)pZipFile->file.pFS;
+
+    uncompressedBytesRemainingInFile = pZipFile->info.uncompressedSize - pZipFile->absoluteCursorUncompressed;
+    if (bytesToRead > uncompressedBytesRemainingInFile) {
+        bytesToRead = (size_t)uncompressedBytesRemainingInFile;
+    }
+
+    uncompressedBytesRead = 0;
+
+
+    /*
+    The way reading works for deflate is that we need to read from the cache until it's exhausted,
+    and then refill it and read from it again. We need to do this until we've read the requested
+    number of bytes.
+    */
+    for (;;) {
+        /* Read from the cache first. */
+        size_t bytesRemainingInCache = pZipFile->cacheSize - pZipFile->cacheCursor;
+        size_t bytesToReadFromCache = bytesToRead - uncompressedBytesRead;
+        if (bytesToReadFromCache > bytesRemainingInCache) {
+            bytesToReadFromCache = bytesRemainingInCache;
+        }
+
+        E_COPY_MEMORY(E_OFFSET_PTR(pDst, uncompressedBytesRead), pZipFile->pCache + pZipFile->cacheCursor, bytesToReadFromCache);
+        pZipFile->cacheCursor += bytesToReadFromCache;
+
+        uncompressedBytesRead += bytesToReadFromCache;
+
+        /* If we've read the requested number of bytes we can stop. */
+        if (uncompressedBytesRead == bytesToRead) {
+            break;
+        }
+
+        
+        /*
+        Getting here means we've exchausted the cache but still have more data to read. We now need
+        to refill the cache and read from it again.
+
+        This needs to be run in a loop because we may need to read multiple times to get enough input
+        data to fill the entire output cache, which must be at least 32KB.
+        */
+        pZipFile->cacheCursor = 0;
+        pZipFile->cacheSize   = 0;
+
+        for (;;) {
+            size_t compressedBytesRead;
+            size_t compressedBytesToRead;
+            int decompressFlags = E_DEFLATE_FLAG_HAS_MORE_INPUT;    /* The default stance is that we have more input available. */
+            e_result decompressResult;
+
+            /* If we've already read the entire compressed file we need to set the flag to indicate there is no more input. */
+            if (pZipFile->absoluteCursorCompressed == pZipFile->info.compressedSize) {
+                decompressFlags &= ~E_DEFLATE_FLAG_HAS_MORE_INPUT;
+            }
+
+            /*
+            We need only lock while we read the compressed data into our cache. We don't need to keep
+            the archive locked while we do the decompression phase.
+
+            We need only read more input data from the stream if we've run out of data in the
+            compressed cache.
+            */
+            if (pZipFile->compressedCacheSize == 0) {
+                E_ASSERT(pZipFile->compressedCacheCursor == 0); /* The cursor should never go past the size. */
+
+                e_zip_lock(pZip);
+                {
+                    /* Make sure we're positioned correctly in the stream before we read. */
+                    result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + pZipFile->absoluteCursorCompressed, E_SEEK_ORIGIN_START);
+                    if (result != E_SUCCESS) {
+                        e_zip_unlock(pZip);
+                        return result;
+                    }
+
+                    /*
+                    Read the compressed data into the cache. The number of compressed bytes we read needs
+                    to be clamped to the number of bytes remaining in the file and the number of bytes
+                    remaining in the cache.
+                    */
+                    compressedBytesToRead = E_MIN(pZipFile->compressedCacheCap - pZipFile->compressedCacheCursor, (pZipFile->info.compressedSize - pZipFile->absoluteCursorCompressed));
+
+                    result = e_stream_read(e_archive_stream(&pZip->archive), pZipFile->pCompressedCache + pZipFile->compressedCacheCursor, compressedBytesToRead, &compressedBytesRead);
+                    /*
+                    We'll inspect the result later after we've escaped from the locked section just to
+                    keep the lock as small as possible.
+                    */
+
+                    pZipFile->absoluteCursorCompressed += compressedBytesRead;
+                }
+                e_zip_unlock(pZip);
+
+                /* If we've reached the end of the compressed data, we need to set a flag which we later pass through to the decompressor. */
+                if (result == E_AT_END && compressedBytesRead < compressedBytesToRead) {
+                    decompressFlags &= ~E_DEFLATE_FLAG_HAS_MORE_INPUT;
+                }
+
+                if (result != E_SUCCESS && result != E_AT_END) {
+                    return result;  /* Failed to read the compressed data. */
+                }
+
+                pZipFile->compressedCacheSize += compressedBytesRead;
+            }
+
+
+            /*
+            At this point we should have the compressed data. Here is where we decompress it into
+            the cache. We need to set up a few parameters here. The input buffer needs to start from
+            the current cursor position of the compressed cache. The input size is the number of
+            bytes in the compressed cache between the cursor and the end of the cache. The output
+            buffer is from the current cursor position.
+            */
+            {
+                size_t inputBufferSize = pZipFile->compressedCacheSize - pZipFile->compressedCacheCursor;
+                size_t outputBufferSize = pZipFile->cacheCap - pZipFile->cacheSize;
+
+                decompressResult = e_deflate_decompress(&pZipFile->decompressor, pZipFile->pCompressedCache + pZipFile->compressedCacheCursor, &inputBufferSize, pZipFile->pCache, pZipFile->pCache + pZipFile->cacheSize, &outputBufferSize, decompressFlags);
+                if (decompressResult < 0) {
+                    return E_ERROR; /* Failed to decompress the data. */
+                }
+
+                /* Move our input cursors forward since we've just consumed some input. */
+                pZipFile->compressedCacheCursor += inputBufferSize;
+
+                /* We've just generated some uncompressed data, so push out the size of the cache to accommodate it. */
+                pZipFile->cacheSize += outputBufferSize;
+
+                /*
+                If the compressed cache has been fully exhausted we need to reset it so more data
+                can be read from the stream.
+                */
+                if (pZipFile->compressedCacheCursor == pZipFile->compressedCacheSize) {
+                    pZipFile->compressedCacheCursor = 0;
+                    pZipFile->compressedCacheSize   = 0;
+                }
+
+                /*
+                We need to inspect the result of the decompression to determine how to continue. If
+                we've reached the end we need only break from the inner loop.
+                */
+                if (decompressResult == E_NEEDS_MORE_INPUT) {
+                    continue;   /* Do another round of reading and decompression. */
+                } else {
+                    break;      /* We've reached the end of the compressed data or the output buffer is full. */
+                }
+            }
+        }
+    }
+
+    pZipFile->absoluteCursorUncompressed += uncompressedBytesRead;
+
+    /* We're done. */
+    *pBytesRead = uncompressedBytesRead;
+    return E_SUCCESS;
+}
+
+static e_result e_archive_read_zip(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+
+    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_STORE) {
+        return e_archive_read_zip_store(pZipFile, pDst, bytesToRead, pBytesRead);
+    } else if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_DEFLATE) {
+        return e_archive_read_zip_deflate(pZipFile, pDst, bytesToRead, pBytesRead);
+    } else {
+        return E_INVALID_FILE;  /* Should never get here. */
+    }
+
+    return E_SUCCESS;
+}
+
+static e_result e_archive_write_zip(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    E_UNUSED(pUserData);
+    
+    /* Writing not supported. */
+    (void)pFile;
+    (void)pSrc;
+    (void)bytesToWrite;
+    (void)pBytesWritten;
+    return E_NOT_IMPLEMENTED;
+}
+
+static e_result e_archive_seek_zip(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+    e_uint64 newAbsoluteCursor;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+
+    /*
+    We can do fast seeking if we are moving within the cache. Otherwise we just move the cursor and
+    clear the cache. The next time we read, it'll see that the cache is empty which will trigger a
+    fresh read of data from the archive stream.
+    */
+    if (origin == E_SEEK_ORIGIN_CURRENT) {
+        if (offset > 0) {
+            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed + (e_uint64)offset;
+        } else {
+            if ((e_uint64)E_ABS(offset) > pZipFile->absoluteCursorUncompressed) {
+                return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
+            }
+
+            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed - E_ABS(offset);
+        }
+    } else if (origin == E_SEEK_ORIGIN_START) {
+        if (offset < 0) {
+            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
+        }
+
+        newAbsoluteCursor = (e_uint64)offset;
+    } else if (origin == E_SEEK_ORIGIN_END) {
+        if (offset > 0) {
+            return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
+        }
+
+        if ((e_uint64)E_ABS(offset) > pZipFile->absoluteCursorUncompressed) {
+            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
+        }
+
+        newAbsoluteCursor = pZipFile->info.uncompressedSize - E_ABS(offset);
+    } else {
+        return E_INVALID_ARGS;
+    }
+
+    if (newAbsoluteCursor > pZipFile->info.uncompressedSize) {
+        return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
+    }
+
+    if (newAbsoluteCursor > pZipFile->absoluteCursorUncompressed) {
+        /* Moving forward. */
+        e_uint64 delta = newAbsoluteCursor - pZipFile->absoluteCursorUncompressed;
+        if (delta <= (pZipFile->cacheSize - pZipFile->cacheCursor)) {
+            pZipFile->cacheCursor += (size_t)delta; /* Safe cast. */
+            pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
+            return E_SUCCESS;
+        } else {
+            /* Seeking beyond the cache. Fall through. */
+        }
+    } else {
+        /* Moving backward. */
+        e_uint64 delta = pZipFile->absoluteCursorUncompressed - newAbsoluteCursor;
+        if (delta <= pZipFile->cacheCursor) {
+            pZipFile->cacheCursor -= (size_t)delta;
+            pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
+            return E_SUCCESS;
+        } else {
+            /* Seeking beyond the cache. Fall through. */
+        }
+    }
+
+    /* Getting here means we're seeking beyond the cache. Just clear it. The next read will read in fresh data. */
+    pZipFile->cacheSize   = 0;
+    pZipFile->cacheCursor = 0;
+
+    /*
+    Seeking is more complicated for compressed files. We need to actually read to the seek point.
+    There is no seek table to accelerate this.
+    */
+    if (pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_STORE) {
+        pZipFile->compressedCacheCursor = 0;
+        pZipFile->compressedCacheSize   = 0;
+
+        /*
+        When seeking backwards we need to move everything back to the start and then just
+        read-and-discard until we reach the end.
+        */
+        if (pZipFile->absoluteCursorUncompressed > newAbsoluteCursor) {
+            pZipFile->absoluteCursorUncompressed = 0;
+            pZipFile->absoluteCursorCompressed   = 0;
+        }
+
+        /* Now we just keep reading until we get to the seek point. */
+        while (pZipFile->absoluteCursorUncompressed < newAbsoluteCursor) {
+            e_uint8 temp[4096];
+            size_t bytesToRead;
+            size_t bytesRead;
+            e_result result;
+
+            bytesToRead = newAbsoluteCursor - pZipFile->absoluteCursorUncompressed;
+            if (bytesToRead > sizeof(temp)) {
+                bytesToRead = sizeof(temp);
+            }
+            
+            result = e_archive_read_zip(pUserData, pFile, temp, bytesToRead, &bytesRead);
+            if (result != E_SUCCESS) {
+                return result;
+            }
+
+            pZipFile->absoluteCursorUncompressed += bytesRead;
+
+            if (bytesRead == 0) {
+                return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
+            }
+        }
+    }
+
+    /* Make sure the absolute cursor is set to the new position. */
+    pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
+
+    return E_SUCCESS;
+}
+
+static e_result e_archive_tell_zip(void* pUserData, e_file* pFile, e_int64* pCursor)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+
+    *pCursor = pZipFile->absoluteCursorUncompressed;
+    return E_SUCCESS;
+}
+
+static e_result e_archive_flush_zip(void* pUserData, e_file* pFile)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+    E_UNUSED(pZipFile);
+
+    /* Nothing to do here. */
+
+    return E_SUCCESS;
+}
+
+static e_result e_archive_info_zip(void* pUserData, e_file* pFile, e_file_info* pInfo)
+{
+    e_zip_file* pZipFile = (e_zip_file*)pFile;
+
+    E_ASSERT(pZipFile != NULL);
+    E_UNUSED(pUserData);
+
+    pInfo->size      = pZipFile->info.uncompressedSize;
+    pInfo->directory = E_FALSE; /* An opened file should never be a directory. */
+    
+    return E_SUCCESS;
+}
+
+
+static void e_zip_iterator_init(e_zip* pZip, e_zip_cd_node* pChild, e_zip_iterator* pIterator)
+{
+    e_zip_file_info info;
+
+    E_ASSERT(pIterator != NULL);
+    E_ASSERT(pChild    != NULL);
+    E_ASSERT(pZip      != NULL);
+
+    pIterator->pZip = pZip;
+
+    /* Name. */
+    c89str_strncpy_s((char*)pIterator + sizeof(*pIterator), pChild->nameLen + 1, pChild->pName, pChild->nameLen);
+    pIterator->iterator.pName   = (const char*)pIterator + sizeof(*pIterator);
+    pIterator->iterator.nameLen = pChild->nameLen;
+
+    /* Info. */
+    pIterator->iterator.info.size = 0;
+
+    if (pChild->childCount > 0) {
+        /* The node has children. Must be a directory. */
+        pIterator->iterator.info.directory = E_TRUE;
+    } else {
+        /* The node does not have children. Could still be a directory. */
+        e_zip_get_file_info_by_record_offset(pZip, pZip->pIndex[pChild->iFile].offsetInBytes, &info);
+        pIterator->iterator.info.directory = info.directory;
+
+        if (!pIterator->iterator.info.directory) {
+            pIterator->iterator.info.size = info.uncompressedSize;
+        }
+    }
+}
+
+static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_zip* pZip = (e_zip*)pFS;
+    e_zip_iterator* pIterator;
+    c89str_path_iterator directoryPathIterator;
+    e_zip_cd_node* pCurrentNode;
+
+    E_UNUSED(pUserData);
+
+    if (pZip == NULL) {
+        return NULL;
+    }
+
+    if (pDirectoryPath == NULL) {
+        pDirectoryPath = "";
+    }
+
+    /* Skip past any leading slash. */
+    if (pDirectoryPath[0] == '/' || pDirectoryPath[0] == '\\') {
+        pDirectoryPath += 1;
+    }
+
+
+    /* Always start from the root node. */
+    pCurrentNode = pZip->pCDRootNode;
+
+    /*
+    All we need to do is find the node the corresponds to the specified directory path. To do this
+    we just iterate over each segment in the path and get the children one after the other.
+    */
+    if (e_result_from_errno(c89str_path_first(pDirectoryPath, (size_t)-1, &directoryPathIterator)) == E_SUCCESS) {
+        for (;;) {
+            /* Try finding the child node. If this cannot be found, the directory does not exist. */
+            e_zip_cd_node* pChildNode;
+
+            pChildNode = e_zip_cd_node_find_child(pCurrentNode, directoryPathIterator.pFullPath + directoryPathIterator.segmentOffset, directoryPathIterator.segmentLength);
+            if (pChildNode == E_SUCCESS) {
+                return NULL;    /* Does not exist. */
+            }
+
+            pCurrentNode = pChildNode;
+            
+            /* Go to the next segment if we have one. */
+            if (e_result_from_errno(c89str_path_next(&directoryPathIterator)) != E_SUCCESS) {
+                break;  /* Nothing left in the directory path. We have what we're looking for. */
+            }
+        }
+    } else {
+        /*
+        We failed to initialize the path iterator which can only mean we were given an empty path
+        in which case it should be treated as the root directory. The node will already be set to
+        the root node at this point so there's nothing more do to.
+        */
+        E_ASSERT(pCurrentNode == pZip->pCDRootNode);
+    }
+
+    /* If the current node does not have any children, there is no first item and therefore nothing to return. */
+    if (pCurrentNode->childCount == 0) {
+        return NULL;
+    }
+
+    /*
+    Now that we've found the node we have enough information to allocate the iterator. We allocate
+    room for a copy of the name so we can null terminate it.
+    */
+    pIterator = (e_zip_iterator*)e_realloc(NULL, sizeof(*pIterator) + pCurrentNode->pChildren[0].nameLen + 1, pAllocationCallbacks);
+    if (pIterator == NULL) {
+        return NULL;
+    }
+
+    e_zip_iterator_init(pZip, &pCurrentNode->pChildren[0], pIterator);
+
+    /* Internal variables for iteration. */
+    pIterator->pDirectoryNode = pCurrentNode;
+    pIterator->iChild         = 0;
+
+    return (e_fs_iterator*)pIterator;
+}
+
+static e_fs_iterator* e_archive_next_zip(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_zip_iterator* pIteratorZip = (e_zip_iterator*)pIterator;
+    e_zip_iterator* pNewIteratorZip;
+    
+
+    E_UNUSED(pUserData);
+
+    if (pIteratorZip == NULL) {
+        return NULL;
+    }
+
+    /* All we're doing is going to the next child. If there's nothing left we just free the iterator and return null. */
+    pIteratorZip->iChild += 1;
+    if (pIteratorZip->iChild >= pIteratorZip->pDirectoryNode->childCount) {
+        e_free(pIteratorZip, pAllocationCallbacks);
+        return NULL;    /* Nothing left. */
+    }
+
+    /* Getting here means there's another child to iterate. */
+    pNewIteratorZip = (e_zip_iterator*)e_realloc(pIteratorZip, sizeof(*pIteratorZip) + pIteratorZip->pDirectoryNode->pChildren[pIteratorZip->iChild].nameLen + 1, pAllocationCallbacks);
+    if (pNewIteratorZip == NULL) {
+        e_free(pIteratorZip, pAllocationCallbacks);
+        return NULL;    /* Out of memory. */
+    }
+
+    e_zip_iterator_init(pNewIteratorZip->pZip, &pNewIteratorZip->pDirectoryNode->pChildren[pNewIteratorZip->iChild], pNewIteratorZip);
+
+    return (e_fs_iterator*)pNewIteratorZip;
+}
+
+static void e_archive_free_iterator_zip(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    E_UNUSED(pUserData);
+    e_free(pIterator, pAllocationCallbacks);
+}
+
+static e_archive_vtable e_gArchiveVTableZip =
+{
+    /* e_fs */
+    e_archive_file_alloc_size_zip,
+    e_archive_open_zip,
+    e_archive_close_zip,
+    e_archive_read_zip,
+    e_archive_write_zip,
+    e_archive_seek_zip,
+    e_archive_tell_zip,
+    e_archive_flush_zip,
+    e_archive_info_zip,
+    e_archive_first_zip,
+    e_archive_next_zip,
+    e_archive_free_iterator_zip,
+
+    /* e_archive */
+    e_archive_alloc_size_zip,
+    e_archive_init_zip,
+    e_archive_uninit_zip
+};
+
+
+E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip)
+{
+    return e_archive_init(&e_gArchiveVTableZip, NULL, pStream, pAllocationCallbacks, (e_archive**)ppZip);
+}
+
+E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip)
+{
+    return e_archive_init_from_file(&e_gArchiveVTableZip, NULL, pFS, pFilePath, pAllocationCallbacks, (e_archive**)ppZip);
+}
+
+E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_archive_uninit((e_archive*)pZip, pAllocationCallbacks);
+}
+
+E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+{
+    return e_archive_open((e_archive*)pZip, pFilePath, openMode, pAllocationCallbacks, ppFile);
+}
+
+E_API void e_zip_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_archive_close(pFile, pAllocationCallbacks);
+}
+
+E_API e_result e_zip_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_archive_read(pFile, pDst, bytesToRead, pBytesRead);
+}
+
+E_API e_result e_zip_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_archive_write(pFile, pSrc, bytesToWrite, pBytesWritten);
+}
+
+E_API e_result e_zip_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    return e_archive_seek(pFile, offset, origin);
+}
+
+E_API e_result e_zip_tell(e_file* pFile, e_int64* pCursor)
+{
+    return e_archive_tell(pFile, pCursor);
+}
+
+E_API e_result e_zip_flush(e_file* pFile)
+{
+    return e_archive_flush(pFile);
+}
+
+E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo)
+{
+    return e_archive_info(pFile, pInfo);
+}
+
+E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    return e_archive_first((e_archive*)pZip, pDirectoryPath, pAllocationCallbacks);
+}
+
+E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    return e_archive_next(pIterator, pAllocationCallbacks);
+}
+
+E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_archive_free_iterator(pIterator, pAllocationCallbacks);
+}
+/* ==== END e_zip.c ==== */
+
+
+
 /* ==== BEG e_log.c ==== */
 const char* e_log_level_to_string(e_log_level level)
 {
