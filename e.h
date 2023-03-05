@@ -70,6 +70,12 @@ do stuff. This is where you'd probably step your clients.
     #define E_SIZEOF_PTR    4
 #endif
 
+#if E_SIZEOF_PTR == 8
+    #define E_64BIT
+#else
+    #define E_32BIT
+#endif
+
 #if defined(MA_USE_STDINT)
     #include <stdint.h>
     typedef int8_t                  e_int8;
@@ -207,6 +213,16 @@ E_API void  e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks);
 
 
 
+/* ==== BEG e_misc.h ==== */
+E_API void e_qsort_s(void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
+
+E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
+E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
+E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
+/* ==== END e_misc.h ==== */
+
+
+
 /* ==== BEG e_threading.h ==== */
 typedef int (* e_thread_start_callback)(void* arg);
 
@@ -228,6 +244,8 @@ E_API e_result e_thread_join(e_thread* pThread, int* pExitCode);
 
 typedef struct e_mutex e_mutex;
 
+E_API size_t e_mutex_alloc_size();
+E_API e_result e_mutex_init_preallocated(e_mutex* pMutex);
 E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, e_mutex** ppMutex);
 E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_mutex_lock(e_mutex* pMutex);
@@ -357,11 +375,16 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream);
 
 
 /* ==== BEG e_fs.h ==== */
-typedef struct e_fs_vtable e_fs_vtable;
-typedef struct e_fs_config e_fs_config;
-typedef struct e_fs        e_fs;
-typedef struct e_file      e_file;
-typedef struct e_file_info e_file_info;
+typedef struct e_fs_vtable         e_fs_vtable;
+typedef struct e_fs_config         e_fs_config;
+typedef struct e_fs                e_fs;
+typedef struct e_fs_iterator       e_fs_iterator;       /* For iterating over files in a directory (not recursive). File system's must extend from this struct. */
+typedef struct e_file              e_file;
+typedef struct e_file_info         e_file_info;
+
+typedef struct e_archive_vtable    e_archive_vtable;
+typedef struct e_archive           e_archive;
+typedef struct e_archive_extension e_archive_extension; /* For internal use only. Used for mapping extensions to archive types. */
 
 typedef enum
 {
@@ -377,17 +400,30 @@ struct e_file_info
     e_bool32 directory;
 };
 
+struct e_fs_iterator
+{
+    e_fs* pFS;
+    const e_fs_vtable* pFSVTable;   /* In case pFS is null. */
+    void* pFSVTableUserData;        /* In case pFS is null. */
+    const char* pName;              /* Must be null terminated. The FS implementation is responsible for manageing the memory allocation, but it would normally be allocated at the end of the struct. */
+    size_t nameLen;
+    e_file_info info;
+};
+
 struct e_fs_vtable
 {
-    e_result (* file_alloc_size)(void* pUserData, size_t* pSize);
-    e_result (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
-    void     (* close          )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-    e_result (* read           )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-    e_result (* write          )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-    e_result (* seek           )(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin);
-    e_result (* tell           )(void* pUserData, e_file* pFile, e_int64* pCursor);
-    e_result (* flush          )(void* pUserData, e_file* pFile);
-    e_result (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
+    e_result       (* file_alloc_size)(void* pUserData, size_t* pSize);
+    e_result       (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
+    void           (* close          )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result       (* read           )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
+    e_result       (* write          )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+    e_result       (* seek           )(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin);
+    e_result       (* tell           )(void* pUserData, e_file* pFile, e_int64* pCursor);
+    e_result       (* flush          )(void* pUserData, e_file* pFile);
+    e_result       (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
+    e_fs_iterator* (* first_file     )(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+    e_fs_iterator* (* next_file      )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Must return null when there are no more files. In this case, free_iterator must be called internally. */
+    void           (* free_iterator  )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Free the `e_fs_iterator` object here since `first` and `next` where the ones who allocated it. Also do any uninitialization routines. */
 };
 
 struct e_fs_config
@@ -399,10 +435,19 @@ struct e_fs_config
 E_API e_fs_config e_fs_config_init(const e_fs_vtable* pVTable, void* pVTableUserData);
 
 
+struct e_archive_extension
+{
+    e_archive_vtable* pArchiveVTable;
+    void* pArchiveVTableUserData;
+    char pExtension[16];   /* Null terminated. */
+};
+
 struct e_fs
 {
     const e_fs_vtable* pVTable;
     void* pVTableUserData;
+    e_archive_extension* pArchiveExtensions;
+    size_t archiveExtensionCount;
     e_bool32 freeOnUninit;
 };
 
@@ -427,16 +472,19 @@ E_API e_result e_fs_flush(e_file* pFile);
 E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo);
 E_API e_stream* e_fs_file_stream(e_file* pFile);
 E_API e_fs* e_fs_get(e_file* pFile);
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
+E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks);
 
 E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFile, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void* pData, size_t dataSize, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_fs.h ==== */
 
 
 
 /* ==== BEG e_archive.h ==== */
-typedef struct e_archive_vtable e_archive_vtable;
-typedef struct e_archive        e_archive;
 
 /*
 Archives are file systems which means they need to implement the file system vtable. There are also
@@ -474,6 +522,9 @@ E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor);
 E_API e_result e_archive_flush(e_file* pFile);
 E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo);
 E_API e_archive* e_archive_get(e_file* pFile);
+E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
+E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_archive.h ==== */
 
 

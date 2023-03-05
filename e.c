@@ -311,6 +311,7 @@ typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
 static e_result e_platform_exit_main_loop(int exitCode);
 
+
 #if defined(E_WINDOWS)
 #include <windows.h>
 
@@ -384,7 +385,7 @@ static e_result e_platform_init(void)
     automatically resize every window by 200%. The size of the window controls the resolution the game runs at,
     but we want that resolution to be set explicitly via something like an options menu. Thus, we don't want the
     operating system to be changing the size of the window to anything other than what we explicitly request. To
-    do this, we just tell the operation system that it shouldn't do DPI scaling and that we'll do it ourselves
+    do this, we just tell the operating system that it shouldn't do DPI scaling and that we'll do it ourselves
     manually.
     */
     e_make_dpi_aware_win32();
@@ -856,20 +857,44 @@ static e_allocation_callbacks gDefaultAllocationCallbacks =
 };
 
 
+static e_allocation_callbacks e_allocation_callbacks_init_default()
+{
+    e_allocation_callbacks allocationCallbacks;
+
+    allocationCallbacks.pUserData = NULL;
+    allocationCallbacks.onMalloc  = e_malloc_default;
+    allocationCallbacks.onRealloc = e_realloc_default;
+    allocationCallbacks.onFree    = e_free_default;
+
+    return allocationCallbacks;
+}
+
 static e_allocation_callbacks e_allocation_callbacks_init_copy(const e_allocation_callbacks* pAllocationCallbacks)
 {
     if (pAllocationCallbacks != NULL) {
         return *pAllocationCallbacks;
     } else {
-        e_allocation_callbacks callbacks;
-
-        callbacks.pUserData = NULL;
-        callbacks.onMalloc  = e_malloc_default;
-        callbacks.onRealloc = e_realloc_default;
-        callbacks.onFree    = e_free_default;
-
-        return callbacks;
+        return e_allocation_callbacks_init_default();
     }
+}
+
+static c89str_allocation_callbacks e_allocation_callbacks_to_c89str(const e_allocation_callbacks* pAllocationCallbacks)
+{
+    c89str_allocation_callbacks allocationCallbacks;
+
+    if (pAllocationCallbacks != NULL) {
+        allocationCallbacks.pUserData = pAllocationCallbacks->pUserData;
+        allocationCallbacks.onMalloc  = pAllocationCallbacks->onMalloc;
+        allocationCallbacks.onRealloc = pAllocationCallbacks->onRealloc;
+        allocationCallbacks.onFree    = pAllocationCallbacks->onFree;
+    } else {
+        allocationCallbacks.pUserData = NULL;
+        allocationCallbacks.onMalloc  = e_malloc_default;
+        allocationCallbacks.onRealloc = e_realloc_default;
+        allocationCallbacks.onFree    = e_free_default;
+    }
+
+    return allocationCallbacks;
 }
 
 
@@ -1007,6 +1032,109 @@ E_API void e_aligned_free(void* p, const e_allocation_callbacks* pAllocationCall
 }
 
 
+/* ==== BEG e_misc.c ==== */
+static E_INLINE void e_swap(void* a, void* b, size_t sz)
+{
+    char* _a = (char*)a;
+    char* _b = (char*)b;
+
+    while (sz > 0) {
+        char temp = *_a;
+        *_a++ = *_b;
+        *_b++ = temp;
+        sz -= 1;
+    }
+}
+
+E_API void e_qsort_s(void* pBase, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
+{
+    char* pLeft;
+    char* pRight;
+    char* pPivot;
+
+    if (count < 2) {
+        return;
+    }
+
+    pLeft  = (char*)pBase;
+    pRight = (char*)pBase + (count - 1) * stride;
+    pPivot = (char*)pBase + (count / 2) * stride;
+
+    while (pLeft < pRight) {
+        while (pLeft < pRight && compareProc(pUserData, pLeft, pPivot) < 0) {
+            pLeft += stride;
+        }
+
+        while (pLeft < pRight && compareProc(pUserData, pPivot, pRight) <= 0) {
+            pRight -= stride;
+        }
+        
+        if (pLeft < pRight) {
+            e_swap(pLeft, pRight, stride);
+        }
+    }
+
+    if (compareProc(pUserData, pPivot, pLeft) <= 0) {
+        e_swap(pLeft, pPivot, stride);
+    }
+
+    qsort_s(pBase, (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
+    qsort_s(pLeft + stride, (count - 1) - (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
+}
+
+E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
+{
+    size_t iStart;
+    size_t iEnd;
+    size_t iMid;
+
+    iStart = 0;
+    iEnd = count;
+
+    while (iStart < iEnd) {
+        int compareResult;
+
+        iMid = (iStart + iEnd) / 2;
+
+        compareResult = compareProc(pUserData, pKey, (char*)pList + (iMid * stride));
+        if (compareResult < 0) {
+            iEnd = iMid;
+        } else if (compareResult > 0) {
+            iStart = iMid + 1;
+        } else {
+            return (void*)((char*)pList + (iMid * stride));
+        }
+    }
+
+    return NULL;
+}
+
+E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
+{
+    size_t i;
+
+    for (i = 0; i < count; i+= 1) {
+        int compareResult = compareProc(pUserData, pKey, (char*)pList + (i * stride));
+        if (compareResult == 0) {
+            return (void*)((char*)pList + (i * stride));
+        }
+    }
+
+    return NULL;
+}
+
+E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
+{
+    const size_t threshold = 0; /* TODO: Change this to something valid once we've properly tested our binary search implementation. */
+
+    if (count < threshold) {
+        return e_linear_search(pKey, pList, count, stride, compareProc, pUserData);
+    } else {
+        return e_binary_search(pKey, pList, count, stride, compareProc, pUserData);
+    }
+}
+/* ==== END e_misc.c ==== */
+
 
 
 static e_result e_result_from_c89thread(int result)
@@ -1107,6 +1235,33 @@ E_API e_result e_thread_join(e_thread* pThread, int* pExitCode)
 
 
 
+struct e_mutex
+{
+    c89mtx_t mtx;
+    e_bool32 freeOnUninit;
+};
+
+E_API size_t e_mutex_alloc_size()
+{
+    return sizeof(e_mutex);
+}
+
+E_API e_result e_mutex_init_preallocated(e_mutex* pMutex)
+{
+    e_result result;
+
+    if (pMutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_result_from_c89thread(c89mtx_init(&pMutex->mtx, c89mtx_plain));
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
 E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, e_mutex** ppMutex)
 {
     e_result result;
@@ -1118,16 +1273,18 @@ E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, 
 
     *ppMutex = NULL;
 
-    pMutex = (e_mutex*)e_malloc(sizeof(c89mtx_t), pAllocationCallbacks);
+    pMutex = (e_mutex*)e_malloc(e_mutex_alloc_size(), pAllocationCallbacks);
     if (pMutex == NULL) {
         return E_OUT_OF_MEMORY;
     }
 
-    result = e_result_from_c89thread(c89mtx_init((c89mtx_t*)pMutex, c89mtx_plain));
+    result = e_mutex_init_preallocated(pMutex);
     if (result != E_SUCCESS) {
         e_free(pMutex, pAllocationCallbacks);
         return result;
     }
+
+    pMutex->freeOnUninit = E_TRUE;
 
     *ppMutex = pMutex;
     return E_SUCCESS;
@@ -1140,17 +1297,20 @@ E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAlloca
     }
 
     c89mtx_destroy((c89mtx_t*)pMutex);
-    e_free(pMutex, pAllocationCallbacks);
+
+    if (pMutex->freeOnUninit) {
+        e_free(pMutex, pAllocationCallbacks);
+    }
 }
 
 E_API void e_mutex_lock(e_mutex* pMutex)
 {
-    c89mtx_lock((c89mtx_t*)pMutex);
+    c89mtx_lock(&pMutex->mtx);
 }
 
 E_API void e_mutex_unlock(e_mutex* pMutex)
 {
-    c89mtx_unlock((c89mtx_t*)pMutex);
+    c89mtx_unlock(&pMutex->mtx);
 }
 /* ==== END e_threading.c ==== */
 
@@ -1875,6 +2035,221 @@ static e_result e_fs_info_default(void* pUserData, e_file* pFile, e_file_info* p
     return E_SUCCESS;
 }
 
+
+
+/* Unfortunately file iteration is platform-specific. */
+#if defined(E_WINDOWS)
+typedef struct
+{
+    e_fs_iterator iterator;
+    HANDLE hFind;
+} e_fs_iterator_default;
+
+static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+
+    E_ASSERT(pIteratorDefault != NULL);
+    E_UNUSED(pUserData);
+
+    FindClose(pIteratorDefault->hFind);
+    e_free(pIteratorDefault, pAllocationCallbacks);
+}
+
+static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_result result;
+    c89str_allocation_callbacks cstr89AllocationCallbacks = e_allocation_callbacks_to_c89str(pAllocationCallbacks);
+    wchar_t* queryW = NULL;
+    size_t queryWLen;
+    c89str query = NULL;
+    size_t queryLen;
+    HANDLE hFind;
+    WIN32_FIND_DATAW findData;
+    size_t fileNameLenIncludingNullTerminator;
+    e_fs_iterator_default* pIterator;
+
+    E_ASSERT(pDirectoryPath != NULL);
+    E_UNUSED(pUserData);
+
+    /*
+    A few notes here. We want to use FindFirstFileW() and not FindFirstFileA() for two reasons:
+
+        1) We want to support Unicode paths for non-English languages
+        2) We want to support paths longer than MAX_PATH
+
+    To support longer file paths, we need to prepend "\\?\" to the path.
+
+    For FindFirstFileW() to work, we need to ensure we normalize our slashes to backslashes. We also need to ensure
+    we remove the trailing slash.
+
+    In addition, FindFirstFileW() uses wildcards to determine what to search for. We need to append "\*" to the end
+    of the query so that everything is returned.
+
+    Our iteration system does not include the "." and ".." directories, so they'll need to be skipped as well.
+    */
+
+    /* First thing is to append the directory path we originally specified. */
+    result = e_result_from_errno(c89str_new(&query, &cstr89AllocationCallbacks, pDirectoryPath));
+    if (result != E_SUCCESS) {
+        return NULL;
+    }
+
+    /* Next we need to normalize the slashes. */
+    c89str_replace_all(&query, &cstr89AllocationCallbacks, "/", 1, "\\", 1);    /* This will not fail. */
+
+    /* Next we need to remove the trailing slash. */
+    c89str_len(&query, &queryLen);  /* This will not fail. */
+    if (queryLen > 0) {
+        if (query[queryLen-1] == '/' || query[queryLen-1] == '\\') {
+            c89str_remove(&query, &cstr89AllocationCallbacks, queryLen-1, 1);    /* This will not fail. */
+        }
+    }
+
+    /* Now we need to append the wildcard. */
+    result = e_result_from_errno(c89str_catn(&query, &cstr89AllocationCallbacks, "\\*", 2));
+    if (result != E_SUCCESS) {
+        c89str_delete(&query, &cstr89AllocationCallbacks);
+        return NULL;
+    }
+
+    /* Now we need to prepend the "\\?\" to the path. */
+    result = e_result_from_errno(c89str_prependn(&query, &cstr89AllocationCallbacks, "\\\\?\\", 4));
+    if (result != E_SUCCESS) {
+        c89str_delete(&query, &cstr89AllocationCallbacks);
+        return NULL;
+    }
+
+    /*
+    Before we can call FindFirstFileW() we need to convert the string to wide characters using
+    MultiByteToWideChar(). The first step is to calculate the length.
+    */
+    queryWLen = MultiByteToWideChar(CP_UTF8, 0, query, -1, NULL, 0);    /* -1 because our string is null terminated. */
+    if (queryWLen == 0) {
+        c89str_delete(&query, &cstr89AllocationCallbacks);
+        return NULL;
+    }
+
+    queryW = (wchar_t*)e_malloc(sizeof(*queryW) * (queryWLen+1), pAllocationCallbacks); /* +1 for the null terminator. */
+    if (queryW == NULL) {
+        c89str_delete(&query, &cstr89AllocationCallbacks);
+        return NULL;
+    }
+
+    queryWLen = MultiByteToWideChar(CP_UTF8, 0, query, -1, queryW, (int)queryWLen); /* -1 because our string is null terminated. */
+    if (queryWLen == 0) {
+        e_free(queryW, pAllocationCallbacks);
+        return NULL;
+    }
+
+    /* We're done with the UT8-8 query. From here on out queryW will be used. */
+    c89str_delete(&query, &cstr89AllocationCallbacks);
+    query = NULL;
+
+    /*
+    We can now call into FindFirstFileW(). We can't allocate the iterator until we know the name of
+    the first file because we'll be allocating the memory for the name at the end of the struct.
+    */
+    hFind = FindFirstFileW(queryW, &findData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        e_free(queryW, pAllocationCallbacks);
+        return NULL;
+    }
+
+    /* We're done with the wide character query. */
+    e_free(queryW, pAllocationCallbacks);
+    queryW = NULL;
+
+    /* Before we can allocate the iterator we need to convert the file name to UTF-8. */
+    fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, NULL, 0, NULL, NULL); /* -1 because our string is null terminated. */
+    if (fileNameLenIncludingNullTerminator == 0) {
+        FindClose(hFind);
+        return NULL;
+    }
+
+    /* Now that we have the length of the file name, we can allocate the iterator. */
+    pIterator = (e_fs_iterator_default*)e_malloc(sizeof(*pIterator) + fileNameLenIncludingNullTerminator, pAllocationCallbacks);
+    if (pIterator == NULL) {
+        FindClose(hFind);
+        return NULL;
+    }
+
+    pIterator->iterator.pFS = pFS;
+
+    /* The name will be stored at the end of the struct. */
+    pIterator->iterator.pName = (char*)pIterator + sizeof(*pIterator);
+    pIterator->iterator.nameLen = fileNameLenIncludingNullTerminator - 1; /* -1 because we don't want to include the null terminator. */
+
+    /* We can now convert the file name to UTF-8. */
+    fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, (char*)pIterator->iterator.pName, (int)fileNameLenIncludingNullTerminator, NULL, NULL); /* -1 because our string is null terminated. */
+    if (fileNameLenIncludingNullTerminator == 0) {
+        e_free(pIterator, pAllocationCallbacks);
+        FindClose(hFind);
+        return NULL;
+    }
+
+    /* The file info will be located in fileData. We'll need to copy over the relevant details. */
+    pIterator->iterator.info.directory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    pIterator->iterator.info.size = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+
+    /* Now just write out hFind item to the iterator so we have a hold of it for later and we're finally done. */
+    pIterator->hFind = hFind;
+
+    return (e_fs_iterator*)pIterator;
+}
+
+static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+    WIN32_FIND_DATAW findData;
+
+    E_ASSERT(pIteratorDefault != NULL);
+    E_UNUSED(pUserData);
+
+    /* We need to call FindNextFileW() to get the next file. */
+    if (FindNextFileW(pIteratorDefault->hFind, &findData)) {
+        e_fs_iterator_default* pNewIteratorDefault;
+
+        /* We need to convert the file name to UTF-8. We'll first need to grab the length. */
+        int fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, NULL, 0, NULL, NULL); /* -1 because our string is null terminated. */
+        if (fileNameLenIncludingNullTerminator == 0) {
+            return NULL;
+        }
+
+        /* We need to reallocate the iterator to accomodate the length of the new file name. */
+        pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIterator, sizeof(*pNewIteratorDefault) + fileNameLenIncludingNullTerminator, pAllocationCallbacks);
+        if (pNewIteratorDefault == NULL) {
+            return NULL;
+        }
+
+        pNewIteratorDefault->iterator.pName = (char*)pNewIteratorDefault + sizeof(*pNewIteratorDefault);
+        pNewIteratorDefault->iterator.nameLen = fileNameLenIncludingNullTerminator - 1; /* -1 because we don't want to include the null terminator. */
+
+        /* We can now convert the file name to UTF-8. */
+        fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, (char*)pNewIteratorDefault->iterator.pName, (int)fileNameLenIncludingNullTerminator, NULL, NULL); /* -1 because our string is null terminated. */
+        if (fileNameLenIncludingNullTerminator == 0) {
+            return NULL;
+        }
+
+        /* The file info will be located in fileData. We'll need to copy over the relevant details. */
+        pNewIteratorDefault->iterator.info.directory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        pNewIteratorDefault->iterator.info.size = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+
+        return (e_fs_iterator*)pNewIteratorDefault;
+    }
+
+    /* Getting here means the iterator is done. We can uninitialize it and return null. */
+    e_fs_free_iterator_default(pUserData, pIterator, pAllocationCallbacks);
+
+    return NULL;
+}
+
+
+#endif
+
+/* TODO: POSIX implementation. */
+
+
 static e_fs_vtable e_gDefaultFSVTable =
 {
     e_fs_alloc_size_default,
@@ -1885,7 +2260,10 @@ static e_fs_vtable e_gDefaultFSVTable =
     e_fs_seek_default,
     e_fs_tell_default,
     e_fs_flush_default,
-    e_fs_info_default
+    e_fs_info_default,
+    e_fs_first_default,
+    e_fs_next_default,
+    e_fs_free_iterator_default
 };
 
 
@@ -2057,11 +2435,23 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode,
 
     result = pVTable->open(pVTableUserData, pFS, pFilePath, openMode, pAllocationCallbacks, pFile);
     if (result != E_SUCCESS) {
+        /*
+        If we failed to open the file because it doesn't exist we need to try loading it from an
+        archive, but only if we're not trying to open the file in write mode. We're currently only
+        supporting reading from archives.
+        */
+        if (result == E_DOES_NOT_EXIST && (openMode & E_OPEN_MODE_WRITE) == 0) {
+            /* TODO: Implement me. */
+        }
+
         e_free(pFile, pAllocationCallbacks);
         return result;
     }
 
+    /* Getting here means we were able to open the file directly from this FS (not from an archive - that will have handled earlier in a separate path). */
+
     /* We need to make sure the file is given the vtable that was used to initialize it. This is because pFS is allowed to be null. */
+    pFile->pFS = pFS;
     pFile->pVTable = pVTable;
     pFile->pVTableUserData = pVTableUserData;
 
@@ -2223,6 +2613,109 @@ E_API e_fs* e_fs_get(e_file* pFile)
     return pFile->pFS;
 }
 
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_fs_iterator* pIterator;
+    const e_fs_vtable* pVTable = &e_gDefaultFSVTable;
+    void* pVTableUserData = NULL;
+
+    if (pFS != NULL) {
+        pVTable         = pFS->pVTable;
+        pVTableUserData = pFS->pVTableUserData;
+    }
+
+    if (pDirectoryPath == NULL) {
+        pDirectoryPath = "";
+    }
+
+    if (pVTable->first_file == NULL) {
+        return NULL;
+    }
+
+    pIterator = pVTable->first_file(pVTableUserData, pFS, pDirectoryPath, pAllocationCallbacks);
+
+    /* Just make double sure the FS information is set in case the backend doesn't do it. */
+    if (pIterator != NULL) {
+        pIterator->pFS = pFS;
+        pIterator->pFSVTable = pVTable;
+        pIterator->pFSVTableUserData = pVTableUserData;
+    }
+
+    /* We want to skip over any "." and ".." directories. */
+    while (pIterator != NULL && (c89str_strcmp(pIterator->pName, ".") == 0 || c89str_strcmp(pIterator->pName, "..") == 0)) {
+        pIterator = e_fs_next(pIterator, pAllocationCallbacks);
+    }
+
+    return pIterator;
+}
+
+E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pIterator == NULL) {
+        return NULL;
+    }
+
+    if (pIterator->pFSVTable->next_file == NULL) {
+        return NULL;
+    }
+
+    /* We don't want to include any "." and ".." directories. */
+    do
+    {
+        pIterator = pIterator->pFSVTable->next_file(pIterator->pFSVTableUserData, pIterator, pAllocationCallbacks);
+    } while (pIterator != NULL && (c89str_strcmp(pIterator->pName, ".") == 0 || c89str_strcmp(pIterator->pName, "..") == 0));
+
+    return pIterator;
+}
+
+E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pIterator == NULL) {
+        return;
+    }
+
+    if (pIterator->pFSVTable->free_iterator == NULL) {
+        return;
+    }
+
+    pIterator->pFSVTable->free_iterator(pIterator->pFSVTableUserData, pIterator, pAllocationCallbacks);
+
+}
+
+E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_archive_extension* pNewExtension;
+    size_t extensionLen;
+
+    if (pFS == NULL || pArchiveVTable == NULL || pExtension == NULL || pExtension[0] == '\0') {
+        return E_INVALID_ARGS;
+    }
+
+    /* The length of the extension cannot exceed the buffer we'll be storing it in. */
+    extensionLen = c89str_strlen(pExtension);
+    if (extensionLen+1 > sizeof(pNewExtension->pExtension)) {   /* +1 to account for the null terminator. */
+        return E_INVALID_ARGS;
+    }
+
+    /* We need to append the extension to the end of the list. */
+    pNewExtension = (e_archive_extension*)e_realloc(pFS->pArchiveExtensions, sizeof(*pFS->pArchiveExtensions) * (pFS->archiveExtensionCount + 1), pAllocationCallbacks);
+    if (pNewExtension == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pArchiveExtensions = pNewExtension;
+
+    /* We can now initialize the new extension. */
+    pNewExtension[pFS->archiveExtensionCount].pArchiveVTable = pArchiveVTable;
+    pNewExtension[pFS->archiveExtensionCount].pArchiveVTableUserData = pArchiveVTableUserData;
+    c89str_strncpy_s(pNewExtension[pFS->archiveExtensionCount].pExtension, sizeof(pNewExtension[pFS->archiveExtensionCount].pExtension), pExtension, extensionLen);
+
+    /* We're done so we can commit the new extension by incrementing the counter. */
+    pFS->archiveExtensionCount += 1;
+
+    return E_SUCCESS;
+}
+
 static e_result e_fs_open_and_read_with_extra_byte(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_result result;
@@ -2286,6 +2779,26 @@ E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFilePath, void** ppDat
 E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks)
 {
     return e_fs_open_and_read_with_extra_byte(pFS, pFilePath, (void**)ppStr, pLength, pAllocationCallbacks);
+}
+
+E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void* pData, size_t dataSize, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_result result;
+    e_file* pFile;
+    
+    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_WRITE | E_OPEN_MODE_TRUNCATE, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_fs_write(pFile, pData, dataSize, NULL);
+    e_fs_close(pFile, pAllocationCallbacks);
+
+    if (result != E_SUCCESS) {    
+        return result;
+    }
+
+    return E_SUCCESS;
 }
 /* ==== END e_fs.c ==== */
 
@@ -2464,6 +2977,21 @@ E_API e_archive* e_archive_get(e_file* pFile)
     }
 
     return (e_archive*)e_fs_get(pFile);
+}
+
+E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    return e_fs_first((e_fs*)pArchive, pDirectoryPath, pAllocationCallbacks);
+}
+
+E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    return e_fs_next(pIterator, pAllocationCallbacks);
+}
+
+E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_fs_free_iterator(pIterator, pAllocationCallbacks);
 }
 /* ==== END e_archive.c ==== */
 
