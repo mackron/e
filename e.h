@@ -128,8 +128,15 @@ typedef void* e_ptr;
 
 typedef enum
 {
-    E_SUCCESS = 0,
+    /* Engine-specific non-error codes. */
+    E_HAS_MORE_OUTPUT = 102,    /* Some stream has more output data to be read, but there's not enough room in the output buffer. */
+    E_NEEDS_MORE_INPUT = 100,   /* Some stream needs more input data before it can be processed. */
+
+    /* General non-error codes. */
     E_DONE = 1,
+    E_SUCCESS = 0,
+
+    /* General error codes. */
     E_ERROR = -1,
     E_INVALID_ARGS = -2,
     E_INVALID_OPERATION = -3,
@@ -182,6 +189,9 @@ typedef enum
     E_IN_PROGRESS = -50,
     E_CANCELLED = -51,
     E_MEMORY_ALREADY_MAPPED = -52,
+
+    /* Engine-specific error codes. */
+    E_CHECKSUM_MISMATCH = -100
 } e_result;
 
 typedef enum

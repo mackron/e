@@ -2679,7 +2679,6 @@ E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callb
     }
 
     pIterator->pFSVTable->free_iterator(pIterator->pFSVTableUserData, pIterator, pAllocationCallbacks);
-
 }
 
 E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks)
