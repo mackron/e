@@ -384,6 +384,67 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream);
 
 
 
+/* ==== BEG e_deflate.h ==== */
+enum
+{
+    E_DEFLATE_FLAG_PARSE_ZLIB_HEADER = 1,
+    E_DEFLATE_FLAG_HAS_MORE_INPUT = 2,
+    E_DEFLATE_FLAG_USING_NON_WRAPPING_OUTPUT_BUF = 4,
+    E_DEFLATE_FLAG_COMPUTE_ADLER32 = 8
+};
+
+enum
+{
+    E_DEFLATE_MAX_HUFF_TABLES    = 3,
+    E_DEFLATE_MAX_HUFF_SYMBOLS_0 = 288,
+    E_DEFLATE_MAX_HUFF_SYMBOLS_1 = 32,
+    E_DEFLATE_MAX_HUFF_SYMBOLS_2 = 19,
+    E_DEFLATE_FAST_LOOKUP_BITS   = 10,
+    E_DEFLATE_FAST_LOOKUP_SIZE   = 1 << E_DEFLATE_FAST_LOOKUP_BITS
+};
+
+typedef struct
+{
+    e_uint8 codeSize[E_DEFLATE_MAX_HUFF_SYMBOLS_0];
+    e_int16 lookup[E_DEFLATE_FAST_LOOKUP_SIZE];
+    e_int16 tree[E_DEFLATE_MAX_HUFF_SYMBOLS_0 * 2];
+} e_deflate_huff_table;
+
+#ifdef E_64BIT
+    typedef e_uint64 e_deflate_bitBufferfer;
+#else
+    typedef e_uint32 e_deflate_bitBufferfer;
+#endif
+
+typedef struct e_deflate_decompressor
+{
+    e_uint32 state;
+    e_uint32 bitCount;
+    e_uint32 zhdr0;
+    e_uint32 zhdr1;
+    e_uint32 zAdler32;
+    e_uint32 final;
+    e_uint32 type;
+    e_uint32 checkAdler32;
+    e_uint32 dist;
+    e_uint32 counter;
+    e_uint32 extraCount;
+    e_uint32 tableSizes[E_DEFLATE_MAX_HUFF_TABLES];
+    e_deflate_bitBufferfer bitBuffer;
+    size_t distFromOutBufStart;
+    e_deflate_huff_table tables[E_DEFLATE_MAX_HUFF_TABLES];
+    e_uint8 rawHeader[4];
+    e_uint8 lenCodes[E_DEFLATE_MAX_HUFF_SYMBOLS_0 + E_DEFLATE_MAX_HUFF_SYMBOLS_1 + 137];
+} e_deflate_decompressor;
+
+E_API e_result e_deflate_decompressor_init(e_deflate_decompressor* pDecompressor);
+E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const e_uint8* pInputBuffer, size_t* pInputBufferSize, e_uint8* pOutputBufferStart, e_uint8* pOutputBufferNext, size_t* pOutputBufferSize, e_uint32 flags);
+/* ==== END e_deflate.h ==== */
+
+
+
+
+
 /* ==== BEG e_fs.h ==== */
 typedef struct e_fs_vtable         e_fs_vtable;
 typedef struct e_fs_config         e_fs_config;

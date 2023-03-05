@@ -170,6 +170,9 @@ static void e_zero_memory_default(void* p, size_t sz)
 #define E_ALIGN(x, a)              ((x + (a-1)) & ~(a-1))
 #define E_ALIGN_64(x)              E_ALIGN(x, 8)
 
+#define E_READ_LE16(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U))
+#define E_READ_LE32(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint32)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint32)(((const e_uint8*)(p))[3]) << 24U))
+#define E_READ_LE64(p) ((e_uint64)(((const e_uint8*)(p))[0]) | ((e_uint64)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint64)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint64)(((const e_uint8*)(p))[3]) << 24U) | ((e_uint64)(((const e_uint8*)(p))[4]) << 32U) | ((e_uint64)(((const e_uint8*)(p))[5]) << 40U) | ((e_uint64)(((const e_uint8*)(p))[6]) << 48U) | ((e_uint64)(((const e_uint8*)(p))[7]) << 56U))
 
 
 E_API const char* e_result_description(e_result result)
@@ -1761,6 +1764,606 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream)
     return e_memory_stream_remove(pStream, pStream->cursor, (*pStream->pDataSize - pStream->cursor));
 }
 /* ==== END e_stream.c ==== */
+
+
+
+
+/* ==== BEG e_deflate.c ==== */
+/*
+This is all taken from the old public domain version of miniz.c but restyled for consistency with
+the rest of the code base.
+*/
+#ifdef _MSC_VER
+   #define E_DEFLATE_MACRO_END while (0, 0)
+#else
+   #define E_DEFLATE_MACRO_END while (0)
+#endif
+
+#define E_DEFLATE_CR_BEGIN switch(pDecompressor->state) { case 0:
+#define E_DEFLATE_CR_RETURN(stateIndex, result) do { status = result; pDecompressor->state = stateIndex; goto common_exit; case stateIndex:; } E_DEFLATE_MACRO_END
+#define E_DEFLATE_CR_RETURN_FOREVER(stateIndex, result) do { for (;;) { E_DEFLATE_CR_RETURN(stateIndex, result); } } E_DEFLATE_MACRO_END
+#define E_DEFLATE_CR_FINISH }
+
+/*
+TODO: If the caller has indicated that there's no more input, and we attempt to read beyond the input buf, then something is wrong with the input because the inflator never
+reads ahead more than it needs to. Currently E_DEFLATE_GET_BYTE() pads the end of the stream with 0's in this scenario.
+*/
+#define E_DEFLATE_GET_BYTE(stateIndex, c) do { \
+    if (pInputBufferCurrent >= pInputBufferEnd) { \
+        for (;;) { \
+            if (flags & E_DEFLATE_FLAG_HAS_MORE_INPUT) { \
+                E_DEFLATE_CR_RETURN(stateIndex, E_NEEDS_MORE_INPUT); \
+                if (pInputBufferCurrent < pInputBufferEnd) { \
+                    c = *pInputBufferCurrent++; \
+                    break; \
+                } \
+            } else { \
+                c = 0; \
+                break; \
+            } \
+        } \
+    } else c = *pInputBufferCurrent++; } E_DEFLATE_MACRO_END
+
+#define E_DEFLATE_NEED_BITS(stateIndex, n) do { unsigned int c; E_DEFLATE_GET_BYTE(stateIndex, c); bitBuffer |= (((e_deflate_bitBufferfer)c) << bitCount); bitCount += 8; } while (bitCount < (unsigned int)(n))
+#define E_DEFLATE_SKIP_BITS(stateIndex, n) do { if (bitCount < (unsigned int)(n)) { E_DEFLATE_NEED_BITS(stateIndex, n); } bitBuffer >>= (n); bitCount -= (n); } E_DEFLATE_MACRO_END
+#define E_DEFLATE_GET_BITS(stateIndex, b, n) do { if (bitCount < (unsigned int)(n)) { E_DEFLATE_NEED_BITS(stateIndex, n); } b = bitBuffer & ((1 << (n)) - 1); bitBuffer >>= (n); bitCount -= (n); } E_DEFLATE_MACRO_END
+
+/*
+E_DEFLATE_HUFF_BITBUF_FILL() is only used rarely, when the number of bytes remaining in the input buffer falls below 2.
+It reads just enough bytes from the input stream that are needed to decode the next Huffman code (and absolutely no more). It works by trying to fully decode a
+Huffman code by using whatever bits are currently present in the bit buffer. If this fails, it reads another byte, and tries again until it succeeds or until the
+bit buffer contains >=15 bits (deflate's max. Huffman code size).
+*/
+#define E_DEFLATE_HUFF_BITBUF_FILL(stateIndex, pHuff) \
+    do { \
+        temp = (pHuff)->lookup[bitBuffer & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)]; \
+        if (temp >= 0) { \
+            codeLen = temp >> 9; \
+            if ((codeLen) && (bitCount >= codeLen)) { \
+                break; \
+            } \
+        } else if (bitCount > E_DEFLATE_FAST_LOOKUP_BITS) { \
+            codeLen = E_DEFLATE_FAST_LOOKUP_BITS; \
+            do { \
+               temp = (pHuff)->tree[~temp + ((bitBuffer >> codeLen++) & 1)]; \
+            } while ((temp < 0) && (bitCount >= (codeLen + 1))); \
+            if (temp >= 0) {\
+                break; \
+            } \
+        } \
+        E_DEFLATE_GET_BYTE(stateIndex, c); \
+        bitBuffer |= (((e_deflate_bitBufferfer)c) << bitCount); \
+        bitCount += 8; \
+    } while (bitCount < 15);
+
+/*
+E_DEFLATE_HUFF_DECODE() decodes the next Huffman coded symbol. It's more complex than you would initially expect because the zlib API expects the decompressor to never read
+beyond the final byte of the deflate stream. (In other words, when this macro wants to read another byte from the input, it REALLY needs another byte in order to fully
+decode the next Huffman code.) Handling this properly is particularly important on raw deflate (non-zlib) streams, which aren't followed by a byte aligned adler-32.
+The slow path is only executed at the very end of the input buffer.
+*/
+#define E_DEFLATE_HUFF_DECODE(stateIndex, sym, pHuff) do { \
+    int temp; \
+    unsigned int codeLen; \
+    unsigned int c; \
+    if (bitCount < 15) { \
+        if ((pInputBufferEnd - pInputBufferCurrent) < 2) { \
+            E_DEFLATE_HUFF_BITBUF_FILL(stateIndex, pHuff); \
+        } else { \
+            bitBuffer |= (((e_deflate_bitBufferfer)pInputBufferCurrent[0]) << bitCount) | (((e_deflate_bitBufferfer)pInputBufferCurrent[1]) << (bitCount + 8)); \
+            pInputBufferCurrent += 2; \
+            bitCount += 16; \
+        } \
+    } \
+    if ((temp = (pHuff)->lookup[bitBuffer & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)]) >= 0) { \
+        codeLen = temp >> 9, temp &= 511; \
+    } \
+    else { \
+        codeLen = E_DEFLATE_FAST_LOOKUP_BITS; do { temp = (pHuff)->tree[~temp + ((bitBuffer >> codeLen++) & 1)]; } while (temp < 0); \
+    } sym = temp; bitBuffer >>= codeLen; bitCount -= codeLen; } E_DEFLATE_MACRO_END
+
+
+#define e_deflate_init(r) do { (r)->state = 0; } E_DEFLATE_MACRO_END
+#define e_deflate_get_adler32(r) (r)->checkAdler32
+
+E_API e_result e_deflate_decompressor_init(e_deflate_decompressor* pDecompressor)
+{
+    if (pDecompressor == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    e_deflate_init(pDecompressor);
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const e_uint8* pInputBuffer, size_t* pInputBufferSize, e_uint8* pOutputBufferStart, e_uint8* pOutputBufferNext, size_t* pOutputBufferSize, const e_uint32 flags)
+{
+    static const int sLengthBase[31] =
+    {
+        3,  4,  5,  6,   7,   8,   9,   10,  11,  13,
+        15, 17, 19, 23,  27,  31,  35,  43,  51,  59,
+        67, 83, 99, 115, 131, 163, 195, 227, 258, 0,
+        0
+    };
+    static const int sLengthExtra[31] =
+    {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 1, 1, 2, 2, 2, 2,
+        3, 3, 3, 3, 4, 4, 4, 4,
+        5, 5, 5, 5, 0, 0, 0
+    };
+    static const int sDistBase[32] =
+    {
+        1,   2,   3,   4,   5,    7,    9,    13,   17,   25,   33,   49,    65,    97,    129, 193,
+        257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577, 0,   0
+    };
+    static const int sDistExtra[32] =
+    {
+        0,  0,  0,  0,  1,  1,  2,  2,
+        3,  3,  4,  4,  5,  5,  6,  6,
+        7,  7,  8,  8,  9,  9,  10, 10,
+        11, 11, 12, 12, 13, 13
+    };
+    static const e_uint8 sLengthDeZigZag[19] =
+    {
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
+    };
+    static const int sMinTableSizes[3] = { 257, 1, 4 };
+
+    e_result status = E_ERROR;
+    e_uint32 bitCount;
+    e_uint32 dist;
+    e_uint32 counter;
+    e_uint32 extraCount;
+    e_deflate_bitBufferfer bitBuffer;
+    const e_uint8* pInputBufferCurrent = pInputBuffer;
+    const e_uint8* const pInputBufferEnd = pInputBuffer + *pInputBufferSize;
+    e_uint8 *pOutputBufferCurrent = pOutputBufferNext;
+    e_uint8 *const pOutputBufferEnd = pOutputBufferNext + *pOutputBufferSize;
+    size_t outputBufferSizeMask = (flags & E_DEFLATE_FLAG_USING_NON_WRAPPING_OUTPUT_BUF) ? (size_t)-1 : ((pOutputBufferNext - pOutputBufferStart) + *pOutputBufferSize) - 1, distFromOutBufStart;
+
+    /* Ensure the output buffer's size is a power of 2, unless the output buffer is large enough to hold the entire output file (in which case it doesn't matter). */
+    if (((outputBufferSizeMask + 1) & outputBufferSizeMask) || (pOutputBufferNext < pOutputBufferStart)) {
+        *pInputBufferSize = *pOutputBufferSize = 0;
+        return E_INVALID_ARGS;
+    }
+    
+    bitCount = pDecompressor->bitCount; bitBuffer = pDecompressor->bitBuffer; dist = pDecompressor->dist; counter = pDecompressor->counter; extraCount = pDecompressor->extraCount; distFromOutBufStart = pDecompressor->distFromOutBufStart;
+    E_DEFLATE_CR_BEGIN
+    
+    bitBuffer = bitCount = dist = counter = extraCount = pDecompressor->zhdr0 = pDecompressor->zhdr1 = 0;
+    pDecompressor->zAdler32 = pDecompressor->checkAdler32 = 1;
+
+    if (flags & E_DEFLATE_FLAG_PARSE_ZLIB_HEADER) {
+        E_DEFLATE_GET_BYTE(1, pDecompressor->zhdr0);
+        E_DEFLATE_GET_BYTE(2, pDecompressor->zhdr1);
+        
+        counter = (((pDecompressor->zhdr0 * 256 + pDecompressor->zhdr1) % 31 != 0) || (pDecompressor->zhdr1 & 32) || ((pDecompressor->zhdr0 & 15) != 8));
+        
+        if (!(flags & E_DEFLATE_FLAG_USING_NON_WRAPPING_OUTPUT_BUF)) {
+            counter |= (((1U << (8U + (pDecompressor->zhdr0 >> 4))) > 32768U) || ((outputBufferSizeMask + 1) < (size_t)(1U << (8U + (pDecompressor->zhdr0 >> 4)))));
+        }
+        
+        if (counter) {
+            E_DEFLATE_CR_RETURN_FOREVER(36, E_ERROR);
+        }
+    }
+
+    do {
+        E_DEFLATE_GET_BITS(3, pDecompressor->final, 3); pDecompressor->type = pDecompressor->final >> 1;
+
+        if (pDecompressor->type == 0) {
+            E_DEFLATE_SKIP_BITS(5, bitCount & 7);
+
+            for (counter = 0; counter < 4; ++counter) {
+                if (bitCount) {
+                    E_DEFLATE_GET_BITS(6, pDecompressor->rawHeader[counter], 8);
+                } else {
+                    E_DEFLATE_GET_BYTE(7, pDecompressor->rawHeader[counter]);
+                }
+            }
+
+            if ((counter = (pDecompressor->rawHeader[0] | (pDecompressor->rawHeader[1] << 8))) != (unsigned int)(0xFFFF ^ (pDecompressor->rawHeader[2] | (pDecompressor->rawHeader[3] << 8)))) {
+                E_DEFLATE_CR_RETURN_FOREVER(39, E_ERROR);
+            }
+
+            while ((counter) && (bitCount)) {
+                E_DEFLATE_GET_BITS(51, dist, 8);
+
+                while (pOutputBufferCurrent >= pOutputBufferEnd) {
+                    E_DEFLATE_CR_RETURN(52, E_HAS_MORE_OUTPUT);
+                }
+
+                *pOutputBufferCurrent++ = (e_uint8)dist;
+                counter--;
+            }
+
+            while (counter) {
+                size_t n;
+                
+                while (pOutputBufferCurrent >= pOutputBufferEnd) {
+                    E_DEFLATE_CR_RETURN(9, E_HAS_MORE_OUTPUT);
+                }
+
+                while (pInputBufferCurrent >= pInputBufferEnd) {
+                    if (flags & E_DEFLATE_FLAG_HAS_MORE_INPUT) {
+                        E_DEFLATE_CR_RETURN(38, E_NEEDS_MORE_INPUT);
+                    } else {
+                        E_DEFLATE_CR_RETURN_FOREVER(40, E_ERROR);
+                    }
+                }
+
+                n = E_MIN(E_MIN((size_t)(pOutputBufferEnd - pOutputBufferCurrent), (size_t)(pInputBufferEnd - pInputBufferCurrent)), counter);
+                E_COPY_MEMORY(pOutputBufferCurrent, pInputBufferCurrent, n); pInputBufferCurrent += n; pOutputBufferCurrent += n; counter -= (unsigned int)n;
+            }
+        }
+        else if (pDecompressor->type == 3) {
+            E_DEFLATE_CR_RETURN_FOREVER(10, E_ERROR);
+        } else {
+            if (pDecompressor->type == 1) {
+                e_uint8 *p = pDecompressor->tables[0].codeSize;
+                unsigned int i;
+
+                pDecompressor->tableSizes[0] = 288;
+                pDecompressor->tableSizes[1] = 32;
+                memset(pDecompressor->tables[1].codeSize, 5, 32);
+
+                for (i = 0; i <= 143; ++i) {
+                    *p++ = 8;
+                }
+                
+                for (; i <= 255; ++i) {
+                    *p++ = 9;
+                }
+                
+                for (; i <= 279; ++i) {
+                    *p++ = 7;
+                }
+                
+                for (; i <= 287; ++i) {
+                    *p++ = 8;
+                }
+            } else {
+                for (counter = 0; counter < 3; counter++) {
+                    E_DEFLATE_GET_BITS(11, pDecompressor->tableSizes[counter], "\05\05\04"[counter]);
+                    pDecompressor->tableSizes[counter] += sMinTableSizes[counter];
+                }
+
+                E_ZERO_MEMORY(&pDecompressor->tables[2].codeSize, sizeof(pDecompressor->tables[2].codeSize));
+
+                for (counter = 0; counter < pDecompressor->tableSizes[2]; counter++) {
+                    unsigned int s;
+                    E_DEFLATE_GET_BITS(14, s, 3);
+                    pDecompressor->tables[2].codeSize[sLengthDeZigZag[counter]] = (e_uint8)s;
+                }
+
+                pDecompressor->tableSizes[2] = 19;
+            }
+
+            for (; (int)pDecompressor->type >= 0; pDecompressor->type--) {
+                int tree_next;
+                int tree_cur;
+                e_deflate_huff_table *pTable;
+                unsigned int i;
+                unsigned int j;
+                unsigned int usedSyms;
+                unsigned int total;
+                unsigned int symIndex;
+                unsigned int nextCode[17];
+                unsigned int totalSyms[16];
+                
+                pTable = &pDecompressor->tables[pDecompressor->type];
+                
+                E_ZERO_MEMORY(totalSyms, sizeof(totalSyms));
+                E_ZERO_MEMORY(pTable->lookup, sizeof(pTable->lookup));
+                E_ZERO_MEMORY(pTable->tree, sizeof(pTable->tree));
+
+                for (i = 0; i < pDecompressor->tableSizes[pDecompressor->type]; ++i) {
+                    totalSyms[pTable->codeSize[i]]++;
+                }
+
+                usedSyms = 0;
+                total = 0;
+                nextCode[0] = nextCode[1] = 0;
+
+                for (i = 1; i <= 15; ++i) {
+                    usedSyms += totalSyms[i];
+                    nextCode[i + 1] = (total = ((total + totalSyms[i]) << 1));
+                }
+
+                if ((65536 != total) && (usedSyms > 1)) {
+                    E_DEFLATE_CR_RETURN_FOREVER(35, E_ERROR);
+                }
+
+                for (tree_next = -1, symIndex = 0; symIndex < pDecompressor->tableSizes[pDecompressor->type]; ++symIndex) {
+                    unsigned int revCode = 0;
+                    unsigned int l;
+                    unsigned int curCode;
+                    unsigned int codeSize = pTable->codeSize[symIndex];
+                    
+                    if (!codeSize) {
+                        continue;
+                    }
+
+                    curCode = nextCode[codeSize]++;
+                    
+                    for (l = codeSize; l > 0; l--, curCode >>= 1) {
+                        revCode = (revCode << 1) | (curCode & 1);
+                    }
+
+                    if (codeSize <= E_DEFLATE_FAST_LOOKUP_BITS) {
+                        e_int16 k = (e_int16)((codeSize << 9) | symIndex);
+                        
+                        while (revCode < E_DEFLATE_FAST_LOOKUP_SIZE) {
+                            pTable->lookup[revCode] = k;
+                            revCode += (1 << codeSize);
+                        }
+                        
+                        continue;
+                    }
+
+                    if (0 == (tree_cur = pTable->lookup[revCode & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)])) {
+                        pTable->lookup[revCode & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)] = (e_int16)tree_next;
+                        tree_cur = tree_next;
+                        tree_next -= 2;
+                    }
+
+                    revCode >>= (E_DEFLATE_FAST_LOOKUP_BITS - 1);
+
+                    for (j = codeSize; j > (E_DEFLATE_FAST_LOOKUP_BITS + 1); j--) {
+                        tree_cur -= ((revCode >>= 1) & 1);
+
+                        if (!pTable->tree[-tree_cur - 1]) {
+                            pTable->tree[-tree_cur - 1] = (e_int16)tree_next; tree_cur = tree_next; tree_next -= 2;
+                        } else {
+                            tree_cur = pTable->tree[-tree_cur - 1];
+                        }
+                    }
+
+                    tree_cur -= ((revCode >>= 1) & 1);
+                    pTable->tree[-tree_cur - 1] = (e_int16)symIndex;
+                }
+
+                if (pDecompressor->type == 2) {
+                    for (counter = 0; counter < (pDecompressor->tableSizes[0] + pDecompressor->tableSizes[1]); ) {
+                        unsigned int s;
+                        
+                        E_DEFLATE_HUFF_DECODE(16, dist, &pDecompressor->tables[2]);
+                        
+                        if (dist < 16) {
+                            pDecompressor->lenCodes[counter++] = (e_uint8)dist;
+                            continue;
+                        }
+
+                        if ((dist == 16) && (!counter)) {
+                            E_DEFLATE_CR_RETURN_FOREVER(17, E_ERROR);
+                        }
+
+                        extraCount = "\02\03\07"[dist - 16];
+                        E_DEFLATE_GET_BITS(18, s, extraCount);
+                        s += "\03\03\013"[dist - 16];
+                        memset(pDecompressor->lenCodes + counter, (dist == 16) ? pDecompressor->lenCodes[counter - 1] : 0, s);
+                        counter += s;
+                    }
+
+                    if ((pDecompressor->tableSizes[0] + pDecompressor->tableSizes[1]) != counter) {
+                        E_DEFLATE_CR_RETURN_FOREVER(21, E_ERROR);
+                    }
+
+                    E_COPY_MEMORY(pDecompressor->tables[0].codeSize, pDecompressor->lenCodes, pDecompressor->tableSizes[0]); E_COPY_MEMORY(pDecompressor->tables[1].codeSize, pDecompressor->lenCodes + pDecompressor->tableSizes[0], pDecompressor->tableSizes[1]);
+                }
+            }
+            for (;;) {
+                e_uint8 *pSrc;
+                for (;;) {
+                    if (((pInputBufferEnd - pInputBufferCurrent) < 4) || ((pOutputBufferEnd - pOutputBufferCurrent) < 2)) {
+                        E_DEFLATE_HUFF_DECODE(23, counter, &pDecompressor->tables[0]);
+                        
+                        if (counter >= 256) {
+                          break;
+                        }
+                        
+                        while (pOutputBufferCurrent >= pOutputBufferEnd) {
+                            E_DEFLATE_CR_RETURN(24, E_HAS_MORE_OUTPUT);
+                        }
+                    
+                        *pOutputBufferCurrent++ = (e_uint8)counter;
+                    } else {
+                        int sym2;
+                        unsigned int codeLen;
+#ifdef E_64BIT      
+                        if (bitCount < 30) {
+                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE32(pInputBufferCurrent)) << bitCount);
+                            pInputBufferCurrent += 4;
+                            bitCount += 32;
+                        }
+#else               
+                        if (bitCount < 15) {
+                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE16(pInputBufferCurrent)) << bitCount);
+                            pInputBufferCurrent += 2;
+                            bitCount += 16;
+                        }
+#endif              
+                        if ((sym2 = pDecompressor->tables[0].lookup[bitBuffer & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)]) >= 0) {
+                            codeLen = sym2 >> 9;
+                        } else {
+                            codeLen = E_DEFLATE_FAST_LOOKUP_BITS;
+
+                            do {
+                                sym2 = pDecompressor->tables[0].tree[~sym2 + ((bitBuffer >> codeLen++) & 1)];
+                            } while (sym2 < 0);
+                        }
+                    
+                        counter = sym2;
+                        bitBuffer >>= codeLen;
+                        bitCount -= codeLen;
+                    
+                        if (counter & 256) {
+                            break;
+                        }
+                    
+#ifndef E_64BIT     
+                        if (bitCount < 15) {
+                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE16(pInputBufferCurrent)) << bitCount);
+                            pInputBufferCurrent += 2;
+                            bitCount += 16;
+                        }
+#endif              
+                        if ((sym2 = pDecompressor->tables[0].lookup[bitBuffer & (E_DEFLATE_FAST_LOOKUP_SIZE - 1)]) >= 0) {
+                            codeLen = sym2 >> 9;
+                        } else {
+                            codeLen = E_DEFLATE_FAST_LOOKUP_BITS;
+
+                            do {
+                                sym2 = pDecompressor->tables[0].tree[~sym2 + ((bitBuffer >> codeLen++) & 1)];
+                            } while (sym2 < 0);
+                        }
+                    
+                        bitBuffer >>= codeLen; bitCount -= codeLen;
+                        
+                        pOutputBufferCurrent[0] = (e_uint8)counter;
+                        if (sym2 & 256) {
+                            pOutputBufferCurrent++;
+                            counter = sym2;
+                            break;
+                        }
+
+                        pOutputBufferCurrent[1] = (e_uint8)sym2;
+                        pOutputBufferCurrent += 2;
+                    }
+                }
+                
+                if ((counter &= 511) == 256) {
+                    break;
+                }
+                
+                extraCount = sLengthExtra[counter - 257];
+                counter = sLengthBase[counter - 257];
+                
+                if (extraCount) {
+                    unsigned int extraBits;
+                    E_DEFLATE_GET_BITS(25, extraBits, extraCount);
+                    counter += extraBits;
+                }
+                
+                E_DEFLATE_HUFF_DECODE(26, dist, &pDecompressor->tables[1]);
+                
+                extraCount = sDistExtra[dist];
+                dist = sDistBase[dist];
+                
+                if (extraCount) {
+                    unsigned int extraBits;
+                    E_DEFLATE_GET_BITS(27, extraBits, extraCount);
+                    dist += extraBits;
+                }
+                
+                distFromOutBufStart = pOutputBufferCurrent - pOutputBufferStart;
+                if ((dist > distFromOutBufStart) && (flags & E_DEFLATE_FLAG_USING_NON_WRAPPING_OUTPUT_BUF)) {
+                    E_DEFLATE_CR_RETURN_FOREVER(37, E_ERROR);
+                }
+                
+                pSrc = pOutputBufferStart + ((distFromOutBufStart - dist) & outputBufferSizeMask);
+                
+                if ((E_MAX(pOutputBufferCurrent, pSrc) + counter) > pOutputBufferEnd) {
+                    while (counter--) {
+                        while (pOutputBufferCurrent >= pOutputBufferEnd) {
+                            E_DEFLATE_CR_RETURN(53, E_HAS_MORE_OUTPUT);
+                        }
+                        
+                        *pOutputBufferCurrent++ = pOutputBufferStart[(distFromOutBufStart++ - dist) & outputBufferSizeMask];
+                    }
+                
+                    continue;
+                }
+                
+                do {
+                    pOutputBufferCurrent[0] = pSrc[0];
+                    pOutputBufferCurrent[1] = pSrc[1];
+                    pOutputBufferCurrent[2] = pSrc[2];
+                    pOutputBufferCurrent += 3;
+                    pSrc += 3;
+                } while ((int)(counter -= 3) > 2);
+                
+                if ((int)counter > 0) {
+                    pOutputBufferCurrent[0] = pSrc[0];
+                
+                    if ((int)counter > 1) {
+                        pOutputBufferCurrent[1] = pSrc[1];
+                    }
+                
+                    pOutputBufferCurrent += counter;
+                }
+            }
+        }
+    } while (!(pDecompressor->final & 1));
+
+    if (flags & E_DEFLATE_FLAG_PARSE_ZLIB_HEADER) {
+        E_DEFLATE_SKIP_BITS(32, bitCount & 7);
+        
+        for (counter = 0; counter < 4; ++counter) {
+            unsigned int s;
+            if (bitCount) {
+                E_DEFLATE_GET_BITS(41, s, 8);
+            } else {
+                E_DEFLATE_GET_BYTE(42, s);
+            }
+            
+            pDecompressor->zAdler32 = (pDecompressor->zAdler32 << 8) | s;
+        }
+    }
+
+    E_DEFLATE_CR_RETURN_FOREVER(34, E_SUCCESS);
+    E_DEFLATE_CR_FINISH
+
+common_exit:
+    pDecompressor->bitCount = bitCount;
+    pDecompressor->bitBuffer = bitBuffer;
+    pDecompressor->dist = dist;
+    pDecompressor->counter = counter;
+    pDecompressor->extraCount = extraCount;
+    pDecompressor->distFromOutBufStart = distFromOutBufStart;
+
+    *pInputBufferSize  = pInputBufferCurrent  - pInputBuffer;
+    *pOutputBufferSize = pOutputBufferCurrent - pOutputBufferNext;
+
+    if ((flags & (E_DEFLATE_FLAG_PARSE_ZLIB_HEADER | E_DEFLATE_FLAG_COMPUTE_ADLER32)) && (status >= 0)) {
+        const e_uint8* ptr = pOutputBufferNext;
+        size_t buf_len = *pOutputBufferSize;
+        e_uint32 s1 = pDecompressor->checkAdler32 & 0xffff;
+        e_uint32 s2 = pDecompressor->checkAdler32 >> 16;
+        size_t block_len = buf_len % 5552;
+
+        while (buf_len) {
+            e_uint32 i;
+
+            for (i = 0; i + 7 < block_len; i += 8, ptr += 8) {
+                s1 += ptr[0], s2 += s1; s1 += ptr[1], s2 += s1; s1 += ptr[2], s2 += s1; s1 += ptr[3], s2 += s1;
+                s1 += ptr[4], s2 += s1; s1 += ptr[5], s2 += s1; s1 += ptr[6], s2 += s1; s1 += ptr[7], s2 += s1;
+            }
+
+            for (; i < block_len; ++i) {
+                s1 += *ptr++, s2 += s1;
+            }
+
+            s1 %= 65521U;
+            s2 %= 65521U;
+            buf_len -= block_len;
+            block_len = 5552;
+        }
+
+        pDecompressor->checkAdler32 = (s2 << 16) + s1;
+
+        if ((status == E_SUCCESS) && (flags & E_DEFLATE_FLAG_PARSE_ZLIB_HEADER) && (pDecompressor->checkAdler32 != pDecompressor->zAdler32)) {
+            status = E_CHECKSUM_MISMATCH;
+        }
+    }
+
+    return status;
+}
+/* ==== END e_deflate.c ==== */
+
+
 
 
 
