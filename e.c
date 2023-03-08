@@ -2659,7 +2659,7 @@ static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator
     e_free(pIteratorDefault, pAllocationCallbacks);
 }
 
-static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_result result;
     c89str_allocation_callbacks cstr89AllocationCallbacks = e_allocation_callbacks_to_c89str(pAllocationCallbacks);
@@ -2693,7 +2693,7 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     */
 
     /* First thing is to append the directory path we originally specified. */
-    result = e_result_from_errno(c89str_new(&query, &cstr89AllocationCallbacks, pDirectoryPath));
+    result = e_result_from_errno(c89str_newn(&query, &cstr89AllocationCallbacks, pDirectoryPath, directoryPathLen));
     if (result != E_SUCCESS) {
         return NULL;
     }
@@ -2980,9 +2980,210 @@ E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallb
         return;
     }
 
+    /* Opened archives need to be closed. */
+    while (pFS->openedArchiveCount > 0) {
+        pFS->openedArchiveCount -= 1;
+        e_archive_uninit(pFS->pOpenedArchives[pFS->openedArchiveCount].pArchive, pAllocationCallbacks);
+        e_free(pFS->pOpenedArchives[pFS->openedArchiveCount].pFilePath, pAllocationCallbacks);
+    }
+    e_free(pFS->pOpenedArchives, pAllocationCallbacks);
+
+    /* Archive extensions need to be freed. */
+    e_free(pFS->pArchiveExtensions, pAllocationCallbacks);
+
     if (pFS->freeOnUninit) {
         e_free(pFS, pAllocationCallbacks);
     }
+}
+
+static e_result e_fs_open_archive(e_fs* pFS, const char* pArchiveFilePath, size_t archiveFilePathLen, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
+{
+    /* If the archive is already open, just return the existing archive. */
+    e_result result;
+    size_t iArchive;
+    size_t iArchiveExtension;
+    /* */ char* pArchiveFilePathCopy;
+    const char* pArchiveFilePathExtension;
+    size_t archiveFilePathExtensionLen;
+    e_archive_extension* pArchiveExtension = NULL;
+    e_archive* pArchive;
+
+    for (iArchive = 0; iArchive < pFS->openedArchiveCount; iArchive += 1) {
+        if (c89str_strncmp(pFS->pOpenedArchives[iArchive].pFilePath, pArchiveFilePath, archiveFilePathLen) == 0) {
+            *ppArchive = pFS->pOpenedArchives[iArchive].pArchive;
+            return E_SUCCESS;
+        }
+    }
+
+    /*
+    Getting here means the archive isn't already open. We need to open it and add it to our
+    internal list. In order to open the archive we need to know what vtable to use. To determine
+    the vtable we need to inspect the extension.
+    */
+    if (archiveFilePathLen == (size_t)-1) {
+        archiveFilePathLen = c89str_strlen(pArchiveFilePath);
+    }
+
+    pArchiveFilePathExtension = c89str_path_extension(pArchiveFilePath, archiveFilePathLen);
+    if (pArchiveFilePathExtension == NULL) {
+        return E_INVALID_ARGS;  /* No extension. */
+    }
+
+    archiveFilePathExtensionLen = archiveFilePathLen - (pArchiveFilePathExtension - pArchiveFilePath);
+
+    for (iArchiveExtension = 0; iArchiveExtension < pFS->archiveExtensionCount; iArchiveExtension += 1) {
+        size_t extensionLen = c89str_strlen(pFS->pArchiveExtensions[iArchiveExtension].pExtension);
+        if (extensionLen != archiveFilePathExtensionLen) {
+            continue;   /* Extension lengths are different. Cannot be this one. */
+        }
+
+        if (c89str_strnicmp(pArchiveFilePathExtension, pFS->pArchiveExtensions[iArchiveExtension].pExtension, extensionLen) != 0) {
+            continue;   /* Extensions don't match. */
+        }
+
+        /* We have a match. */
+        pArchiveExtension = &pFS->pArchiveExtensions[iArchiveExtension];
+        break;
+    }
+
+    if (pArchiveExtension == NULL) {
+        return E_DOES_NOT_EXIST;    /* Couldn't find a matching extension for this archive. Don't think we should ever hit this in practice because it should be checked at a higher level. */
+    }
+
+    /* At this point we should have the vtable so we can now try opening it. The path needs to be null terminated. */
+    pArchiveFilePathCopy = (char*)e_malloc(archiveFilePathLen + 1, pAllocationCallbacks);
+    if (pArchiveFilePathCopy == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    c89str_strncpy_s(pArchiveFilePathCopy, archiveFilePathLen + 1, pArchiveFilePath, archiveFilePathLen);
+
+    result = e_archive_init_from_file(pArchiveExtension->pArchiveVTable, pArchiveExtension->pArchiveVTableUserData, pFS, pArchiveFilePathCopy, pAllocationCallbacks, &pArchive);
+    if (result != E_SUCCESS) {
+        e_free(pArchiveFilePathCopy, pAllocationCallbacks);
+        return result;
+    }
+
+    /* We need to add the archive to our internal list. */
+    if (pFS->openedArchiveCount == pFS->openedArchiveCap) {
+        e_fs_opened_archive* pNewOpenedArchives;
+        size_t newCapacity = pFS->openedArchiveCap * 2;
+        if (newCapacity == 0) {
+            newCapacity = 1;
+        }
+    
+        pNewOpenedArchives = (e_fs_opened_archive*)e_realloc(pFS->pOpenedArchives, sizeof(*pNewOpenedArchives) * newCapacity, pAllocationCallbacks);
+        if (pNewOpenedArchives == NULL) {
+            e_archive_uninit(pArchive, pAllocationCallbacks);
+            e_free(pArchiveFilePathCopy, pAllocationCallbacks);
+            return E_OUT_OF_MEMORY;
+        }
+    
+        pFS->pOpenedArchives = pNewOpenedArchives;
+        pFS->openedArchiveCap = newCapacity;
+    }
+
+    pFS->pOpenedArchives[pFS->openedArchiveCount].pArchive = pArchive;
+    pFS->pOpenedArchives[pFS->openedArchiveCount].pFilePath = pArchiveFilePathCopy;
+    pFS->openedArchiveCount += 1;
+
+    *ppArchive = pArchive;
+    return E_SUCCESS;
+}
+
+static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+{
+    /*
+    This is the main function we use for opening from an archive. We need to iterate over each
+    segment in the file path and then iterate over the files within that directory. For each
+    file in the directory that looks like an archive, we need to open that archive and try opening
+    the file from there.
+    */
+    e_result result;
+    c89str_path_iterator iFilePathSegment;
+
+    /* Start iterating over each segment in the file path. */
+    result = e_result_from_errno(c89str_path_first(pFilePath, (size_t)-1, &iFilePathSegment));
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    do
+    {
+        /*
+        If this segment of the path points to an explicit archive then we *must* try loading from
+        the archive at all times. We cannot be attempting to search all other archives or else
+        we'll risk opening the wrong file.
+        */
+        if (e_fs_is_path_archive(pFS, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset, iFilePathSegment.segmentLength)) {
+            /* It's an explicit archive. We must try loading from this path. */
+            e_archive* pArchive;
+            result = e_fs_open_archive(pFS, iFilePathSegment.pFullPath, iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength, pAllocationCallbacks, &pArchive);
+            if (result != E_SUCCESS) {
+                return result;  /* Failed to open the archive. We cannot continue since this was explicitly asked for. */
+            }
+
+            /* We have the archive. We need to try opening the file from it. */
+            result = e_fs_open((e_fs*)pArchive, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1, openMode, pAllocationCallbacks, ppFile);
+            if (result != E_SUCCESS) {
+                return result;  /* Failed to open the file. */
+            }
+
+            return E_SUCCESS;
+        } else {
+            /* This part of the segment is not asking for an explicit archive. We need to iterate over all the archives in this directory and try loading from each one. */
+            e_fs_iterator* pFileIterator;
+            for (pFileIterator = e_fs_first(pFS, iFilePathSegment.pFullPath, iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength, pAllocationCallbacks); pFileIterator != NULL; pFileIterator = e_fs_next(pFileIterator, pAllocationCallbacks)) {
+                if (e_fs_is_path_archive(pFS, pFileIterator->pName, pFileIterator->nameLen)) {
+                    /* It's an archive. Try loading from it. */
+                    e_file* pFile;
+                    e_archive* pArchive;
+
+                    /* To load from the archive we actually need to construct a string. */
+                    /* TODO: Try allocating this into a stack allocated buffer first, and if it's too small, which will be very rare, fall back to a heap allocation. */
+                    char  pArchiveFilePathStack[1024];
+                    char* pArchiveFilePathHeap = NULL;
+                    char* pArchiveFilePath;
+
+                    /* Try using the stack buffer first. */
+                    if (c89str_snprintf(pArchiveFilePathStack, sizeof(pArchiveFilePathStack), "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName) < sizeof(pArchiveFilePathStack)) {
+                        /* It does not fit in the stack buffer. Fall back to a heap allocation. */
+                        pArchiveFilePath = pArchiveFilePathStack;
+                    } else {
+                        pArchiveFilePathHeap = (char*)e_malloc(iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1 + pFileIterator->nameLen + 1, pAllocationCallbacks);
+                        if (pArchiveFilePathHeap == NULL) {
+                            return E_OUT_OF_MEMORY;
+                        }
+
+                        c89str_sprintf(pArchiveFilePathHeap, "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName);
+                        pArchiveFilePath = pArchiveFilePathHeap;
+                    }
+
+                    result = e_fs_open_archive(pFS, pArchiveFilePath, (size_t)-1, pAllocationCallbacks, &pArchive);
+                    e_free(pArchiveFilePathHeap, pAllocationCallbacks);
+
+                    if (result == E_SUCCESS) {
+                        /* We have the archive. We need to try opening the file from it. */
+                        result = e_fs_open((e_fs*)pArchive, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1, openMode, pAllocationCallbacks, &pFile);
+                        if (result == E_SUCCESS) {
+                            /* The file was opened successfully. We're done. */
+                            *ppFile = pFile;
+                            return E_SUCCESS;
+                        } else {
+                            /* Getting here means the file could not be found in this archive. Keep searching. */
+                        }
+                    } else {
+                        /* Getting here means we couldn't open the archive. */
+                    }
+                } else {
+                    /* It's not an archive. Keep searching. */
+                }
+            }
+        }
+    } while (e_result_from_errno(c89str_path_next(&iFilePathSegment)) == E_SUCCESS);
+
+    /* Getting here means we could not find the file. */
+    return E_DOES_NOT_EXIST;
 }
 
 E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
@@ -3038,16 +3239,17 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode,
 
     result = pVTable->open(pVTableUserData, pFS, pFilePath, openMode, pAllocationCallbacks, pFile);
     if (result != E_SUCCESS) {
+        e_free(pFile, pAllocationCallbacks);
+
         /*
         If we failed to open the file because it doesn't exist we need to try loading it from an
         archive, but only if we're not trying to open the file in write mode. We're currently only
-        supporting reading from archives.
+        supporting read mode with archives.
         */
         if (result == E_DOES_NOT_EXIST && (openMode & E_OPEN_MODE_WRITE) == 0) {
-            /* TODO: Implement me. */
+            result = e_fs_open_from_archive(pFS, pFilePath, openMode, pAllocationCallbacks, ppFile);
         }
 
-        e_free(pFile, pAllocationCallbacks);
         return result;
     }
 
@@ -3216,7 +3418,7 @@ E_API e_fs* e_fs_get(e_file* pFile)
     return pFile->pFS;
 }
 
-E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_fs_iterator* pIterator;
     const e_fs_vtable* pVTable = &e_gDefaultFSVTable;
@@ -3235,7 +3437,7 @@ E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, const e_a
         return NULL;
     }
 
-    pIterator = pVTable->first_file(pVTableUserData, pFS, pDirectoryPath, pAllocationCallbacks);
+    pIterator = pVTable->first_file(pVTableUserData, pFS, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
 
     /* Just make double sure the FS information is set in case the backend doesn't do it. */
     if (pIterator != NULL) {
@@ -3316,6 +3518,36 @@ E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArc
     pFS->archiveExtensionCount += 1;
 
     return E_SUCCESS;
+}
+
+E_API e_bool32 e_fs_is_path_archive(e_fs* pFS, const char* pFilePath, size_t filePathLen)
+{
+    size_t iExtension;
+
+    if (pFS == NULL || pFilePath == NULL) {
+        return E_FALSE;
+    }
+
+    if (filePathLen == 0 || filePathLen == (size_t)-1) {
+        filePathLen = c89str_strlen(pFilePath);
+    }
+
+    /* We need to loop through each extension and check if the file path ends with it. */
+    for (iExtension = 0; iExtension < pFS->archiveExtensionCount; ++iExtension) {
+        size_t extensionLen = c89str_strlen(pFS->pArchiveExtensions[iExtension].pExtension);
+
+        /* The extension must be shorter than the file path. */
+        if (extensionLen > filePathLen) {
+            continue;
+        }
+
+        /* We need to check if the file path ends with the extension. We're going case-sensitive here for the momemnt. I'm not sure yet what the correct approach would be. */
+        if (c89str_strnicmp(pFilePath + (filePathLen - extensionLen), pFS->pArchiveExtensions[iExtension].pExtension, extensionLen) == 0) {
+            return E_TRUE;
+        }
+    }
+
+    return E_FALSE;
 }
 
 static e_result e_fs_open_and_read_with_extra_byte(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
@@ -3581,9 +3813,9 @@ E_API e_archive* e_archive_get(e_file* pFile)
     return (e_archive*)e_fs_get(pFile);
 }
 
-E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
-    return e_fs_first((e_fs*)pArchive, pDirectoryPath, pAllocationCallbacks);
+    return e_fs_first((e_fs*)pArchive, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
 }
 
 E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
@@ -5241,7 +5473,7 @@ static void e_zip_iterator_init(e_zip* pZip, e_zip_cd_node* pChild, e_zip_iterat
     }
 }
 
-static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_zip* pZip = (e_zip*)pFS;
     e_zip_iterator* pIterator;
@@ -5271,7 +5503,7 @@ static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char
     All we need to do is find the node the corresponds to the specified directory path. To do this
     we just iterate over each segment in the path and get the children one after the other.
     */
-    if (e_result_from_errno(c89str_path_first(pDirectoryPath, (size_t)-1, &directoryPathIterator)) == E_SUCCESS) {
+    if (e_result_from_errno(c89str_path_first(pDirectoryPath, directoryPathLen, &directoryPathIterator)) == E_SUCCESS) {
         for (;;) {
             /* Try finding the child node. If this cannot be found, the directory does not exist. */
             e_zip_cd_node* pChildNode;
@@ -5379,6 +5611,10 @@ static e_archive_vtable e_gArchiveVTableZip =
     e_archive_uninit_zip
 };
 
+E_API e_archive_vtable* e_zip_vtable()
+{
+    return &e_gArchiveVTableZip;
+}
 
 E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip)
 {
@@ -5435,9 +5671,9 @@ E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo)
     return e_archive_info(pFile, pInfo);
 }
 
-E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks)
+E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
-    return e_archive_first((e_archive*)pZip, pDirectoryPath, pAllocationCallbacks);
+    return e_archive_first((e_archive*)pZip, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
 }
 
 E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)

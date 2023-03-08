@@ -490,7 +490,7 @@ struct e_fs_vtable
     e_result       (* tell           )(void* pUserData, e_file* pFile, e_int64* pCursor);
     e_result       (* flush          )(void* pUserData, e_file* pFile);
     e_result       (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
-    e_fs_iterator* (* first_file     )(void* pUserData, e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+    e_fs_iterator* (* first_file     )(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
     e_fs_iterator* (* next_file      )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Must return null when there are no more files. In this case, free_iterator must be called internally. */
     void           (* free_iterator  )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Free the `e_fs_iterator` object here since `first` and `next` where the ones who allocated it. Also do any uninitialization routines. */
 };
@@ -511,12 +511,21 @@ struct e_archive_extension
     char pExtension[16];   /* Null terminated. */
 };
 
+typedef struct
+{
+    e_archive* pArchive;
+    char* pFilePath;   /* Null terminated. */
+} e_fs_opened_archive;
+
 struct e_fs
 {
     const e_fs_vtable* pVTable;
     void* pVTableUserData;
     e_archive_extension* pArchiveExtensions;
     size_t archiveExtensionCount;
+    e_fs_opened_archive* pOpenedArchives;
+    size_t openedArchiveCount;
+    size_t openedArchiveCap;
     e_bool32 freeOnUninit;
 };
 
@@ -541,10 +550,11 @@ E_API e_result e_fs_flush(e_file* pFile);
 E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo);
 E_API e_stream* e_fs_file_stream(e_file* pFile);
 E_API e_fs* e_fs_get(e_file* pFile);
-E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_bool32 e_fs_is_path_archive(e_fs* pFS, const char* pFilePath, size_t filePathLen);
 
 E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFile, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks);
@@ -591,7 +601,7 @@ E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor);
 E_API e_result e_archive_flush(e_file* pFile);
 E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo);
 E_API e_archive* e_archive_get(e_file* pFile);
-E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_archive.h ==== */
@@ -600,6 +610,8 @@ E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_
 
 /* ==== BEG e_zip.h ==== */
 typedef struct e_zip e_zip;
+
+E_API e_archive_vtable* e_zip_vtable();
 
 E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
 E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
@@ -612,7 +624,7 @@ E_API e_result e_zip_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
 E_API e_result e_zip_tell(e_file* pFile, e_int64* pCursor);
 E_API e_result e_zip_flush(e_file* pFile);
 E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo);
-E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 /* ==== END e_zip.h ==== */
