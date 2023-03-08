@@ -3064,6 +3064,16 @@ static e_result e_fs_open_archive(e_fs* pFS, const char* pArchiveFilePath, size_
         return result;
     }
 
+    /* The new archive should inherit any archive extensions so it can work recursively. */
+    for (iArchiveExtension = 0; iArchiveExtension < pFS->archiveExtensionCount; iArchiveExtension += 1) {
+        result = e_fs_register_archive_extension((e_fs*)pArchive, pFS->pArchiveExtensions[iArchiveExtension].pArchiveVTable, pFS->pArchiveExtensions[iArchiveExtension].pArchiveVTableUserData, pFS->pArchiveExtensions[iArchiveExtension].pExtension, pAllocationCallbacks);
+        if (result != E_SUCCESS) {
+            e_archive_uninit(pArchive, pAllocationCallbacks);
+            e_free(pArchiveFilePathCopy, pAllocationCallbacks);
+            return result;
+        }
+    }
+
     /* We need to add the archive to our internal list. */
     if (pFS->openedArchiveCount == pFS->openedArchiveCap) {
         e_fs_opened_archive* pNewOpenedArchives;
