@@ -684,6 +684,93 @@ static e_result e_platform_exit_main_loop(int exitCode)
 #endif  /* E_WINDOWS */
 
 
+#if defined(E_POSIX)
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/Xatom.h>
+#include <X11/extensions/Xrandr.h>
+#include <X11/extensions/Xinerama.h>
+#include <X11/extensions/XInput2.h>
+
+static e_result e_platform_init(void)
+{
+    return E_SUCCESS;
+}
+
+static e_result e_platform_uninit(void)
+{
+    return E_SUCCESS;
+}
+
+
+struct e_platform_window
+{
+    int dummy;
+};
+
+static size_t e_platform_window_sizeof(void)
+{
+    return sizeof(e_platform_window);
+}
+
+static e_result e_platform_window_init_preallocated(const e_window_config* pConfig, e_window* pOwnerWindow, const e_allocation_callbacks* pAllocationCallbacks, e_platform_window* pWindow)
+{
+    E_ASSERT(pWindow != NULL);
+    E_UNUSED(pAllocationCallbacks);
+
+    /* TODO */
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_uninit(e_platform_window* pWindow, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    E_ASSERT(pWindow != NULL);
+    E_UNUSED(pAllocationCallbacks);
+
+    /* TODO */
+
+    return E_SUCCESS;
+}
+
+static void* e_platform_window_get_object(const e_platform_window* pWindow, e_platform_object_type type)
+{
+    (void)pWindow;
+    (void)type;
+
+    /* TODO */
+
+    return NULL;
+}
+
+static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned int sizeX, unsigned int sizeY)
+{
+    E_ASSERT(pWindow != NULL);
+
+    /* TODO */
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData)
+{
+    E_ASSERT(pExitCode != NULL);
+    E_ASSERT(iterationCallback != NULL);
+
+    /* TODO */
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_exit_main_loop(int exitCode)
+{
+    /* TODO */
+
+    return E_SUCCESS;
+}
+#endif  /* E_POSIX */
+
+
 #if defined(E_EMSCRIPTEN)
 #include <emscripten.h>
 #include <EGL/egl.h>
@@ -829,6 +916,57 @@ static e_result e_platform_exit_main_loop(int exitCode)
     return E_SUCCESS;
 }
 #endif  /* E_EMSCRIPTEN */
+
+
+
+E_API e_handle e_dlopen(const char* pFilePath)
+{
+#if defined(E_WINDOWS)
+    return (e_handle)LoadLibraryA(pFilePath);
+#else
+    return (e_handle)dlopen(pFilePath, RTLD_LAZY);
+#endif
+}
+
+E_API void e_dlclose(e_handle hLibrary)
+{
+#if defined(E_WINDOWS)
+    FreeLibrary((HMODULE)hLibrary);
+#else
+    dlclose(hLibrary);
+#endif
+}
+
+E_API void* e_dlsym(e_handle hLibrary, const char* pSymbol)
+{
+#if defined(E_WINDOWS)
+    return (void*)GetProcAddress((HMODULE)hLibrary, pSymbol);
+#else
+    return dlsym(hLibrary, pSymbol);
+#endif
+}
+
+E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes)
+{
+#if defined(E_WINDOWS)
+    DWORD errorCode = GetLastError();
+    if (errorCode == 0) {
+        return E_SUCCESS;
+    }
+
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, errorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), pOutMessage, (DWORD)messageSizeInBytes, NULL);
+    return E_ERROR;
+#else
+    const char* pError = dlerror();
+    if (pError == NULL) {
+        return E_SUCCESS;
+    }
+
+    c89str_strncpy_s(pOutMessage, messageSizeInBytes, pError, messageSizeInBytes);
+    return E_ERROR;
+#endif
+}
+
 
 
 
@@ -1081,8 +1219,8 @@ E_API void e_qsort_s(void* pBase, size_t count, size_t stride, int (*compareProc
         e_swap(pLeft, pPivot, stride);
     }
 
-    qsort_s(pBase, (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
-    qsort_s(pLeft + stride, (count - 1) - (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
+    e_qsort_s(pBase, (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
+    e_qsort_s(pLeft + stride, (count - 1) - (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
 }
 
 E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
@@ -2846,11 +2984,22 @@ static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterato
 
     return NULL;
 }
-
-
 #endif
 
 /* TODO: POSIX implementation. */
+#if defined(E_POSIX)
+static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+}
+
+static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
+{
+}
+
+static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+{
+}
+#endif
 
 
 static e_fs_vtable e_gDefaultFSVTable =
@@ -7031,7 +7180,7 @@ typedef struct
     #if defined(E_DESKTOP_UNIX)
         struct
         {
-            XDisplay* pDisplay;
+            Display* pDisplay;
         } x11;
     #endif
     #if defined(E_EMSCRIPTEN)
@@ -7224,7 +7373,7 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
     #if defined(E_DESKTOP_UNIX)
     {
         /* TODO: Implement me. */
-        return E_RROR;
+        return E_ERROR;
     }
     #endif
 

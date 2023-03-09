@@ -206,6 +206,12 @@ typedef enum
 } e_graphics_backend;
 
 
+/* dlopen, etc. with e_handle as the library handle. */
+E_API e_handle e_dlopen(const char* pFilePath);
+E_API void     e_dlclose(e_handle hLibrary);
+E_API void*    e_dlsym(e_handle hLibrary, const char* pSymbol);
+E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes);
+
 
 /* Allocation callbacks must be thread-safe. */
 typedef struct e_allocation_callbacks
