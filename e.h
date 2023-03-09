@@ -240,7 +240,14 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
 
 
 /* ==== BEG e_net.h ==== */
+#if defined(_WIN32)
+    typedef e_uintptr e_socket_handle;
+#else
+    typedef int       e_socket_handle;
+#endif
 
+E_API e_result e_net_init(void);
+E_API void e_net_uninit(void);
 /* ==== END e_net.h ==== */
 
 

@@ -1517,9 +1517,8 @@ we've redeclared everything on the Windows side, that part is already done. On t
 we need only set up a few typedefs and defines.
 */
 #if defined(E_WINDOWS)
-    typedef E_SOCKET            e_socket_handle;
+    /* Everything has already been declared above. */
 #else
-    typedef int                 e_socket_handle;
     #define e_addrinfo          addrinfo
     #define e_sockaddr          sockaddr
     #define e_sockaddr_in       sockaddr_in
@@ -1546,8 +1545,31 @@ we need only set up a few typedefs and defines.
     #define e_getaddrinfo       getaddrinfo
     #define e_freeaddrinfo      freeaddrinfo
 
-    #define E_INVALID_SOCKET    -1
+    #define E_INVALID_SOCKET    (-1)
 #endif
+
+#define E_SOCKET_ERROR          (-1)
+#define E_AI_PASSIVE            0x00000001
+
+
+
+E_API e_result e_net_init(void)
+{
+#if defined(E_WINDOWS)
+    return e_winsock_init();
+#else
+    return E_SUCCESS;
+#endif
+}
+
+E_API void e_net_uninit(void)
+{
+#if defined(E_WINDOWS)
+    e_winsock_uninit();
+#else
+    /* Nothing to do. */
+#endif
+}
 /* ==== END e_net.c ==== */
 
 
@@ -7098,6 +7120,12 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     }
     #endif
 
+    /* Initialize our networking sub-system. This is only required for Windows, but we'll do it generically for all platforms. */
+    result = e_net_init();
+    if (result != E_SUCCESS) {
+        e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Networking sub-system failed to initialize. Networking may be unavailable.");
+    }
+
     *ppEngine = pEngine;
     return E_SUCCESS;
 }
@@ -7107,6 +7135,8 @@ E_API void e_engine_uninit(e_engine* pEngine, const e_allocation_callbacks* pAll
     if (pEngine == NULL) {
         return;
     }
+
+    e_net_uninit();
 
     #ifndef E_NO_OPENGL
     {
