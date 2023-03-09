@@ -343,6 +343,15 @@ typedef BOOL    (__stdcall * E_PFN_SetProcessDPIAware)     (void);
 typedef HRESULT (__stdcall * E_PFN_SetProcessDpiAwareness) (E_PROCESS_DPI_AWARENESS);
 typedef HRESULT (__stdcall * E_PFN_GetDpiForMonitor)       (HMONITOR hmonitor, E_MONITOR_DPI_TYPE dpiType, UINT *dpiX, UINT *dpiY);
 
+/* Need to do runtime linking of ChoosePixelFormat, SetPixelFormat and SwapBuffers. */
+HMODULE hGdi32DLL = NULL;
+typedef int  (__stdcall * E_PFN_ChoosePixelFormat)(HDC hdc, const PIXELFORMATDESCRIPTOR *ppfd);
+typedef BOOL (__stdcall * E_PFN_SetPixelFormat)   (HDC hdc, int format, const PIXELFORMATDESCRIPTOR *ppfd);
+typedef BOOL (__stdcall * E_PFN_SwapBuffers)      (HDC hdc);
+
+static E_PFN_ChoosePixelFormat  e_ChoosePixelFormat = NULL;
+static E_PFN_SetPixelFormat     e_SetPixelFormat    = NULL;
+static E_PFN_SwapBuffers        e_SwapBuffers       = NULL;
 
 static void e_make_dpi_aware_win32(void)
 {
@@ -395,6 +404,19 @@ static e_result e_platform_init(void)
     */
     e_make_dpi_aware_win32();
 
+
+    /* Need to do runtime linking of ChoosePixelFormat, SetPixelFormat and SwapBuffers. */
+    hGdi32DLL = LoadLibraryW(L"gdi32.dll");
+    if (hGdi32DLL == NULL) {
+        return E_ERROR;
+    }
+
+    e_ChoosePixelFormat = (E_PFN_ChoosePixelFormat)GetProcAddress(hGdi32DLL, "ChoosePixelFormat");
+    e_SetPixelFormat    = (E_PFN_SetPixelFormat)   GetProcAddress(hGdi32DLL, "SetPixelFormat");
+    e_SwapBuffers       = (E_PFN_SwapBuffers)      GetProcAddress(hGdi32DLL, "SwapBuffers");
+
+
+    /* Default window class. */
     ZeroMemory(&wc, sizeof(wc));
     wc.cbSize        = sizeof(wc);
     wc.cbWndExtra    = sizeof(void*);
@@ -412,6 +434,12 @@ static e_result e_platform_init(void)
 static e_result e_platform_uninit(void)
 {
     UnregisterClassW(E_PLATFORM_WINDOW_CLASS_NAME, GetModuleHandleW(NULL));
+
+    if (hGdi32DLL != NULL) {
+        FreeLibrary(hGdi32DLL);
+        hGdi32DLL = NULL;
+    }
+
     return E_SUCCESS;
 }
 
@@ -521,7 +549,7 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
         pfd.cStencilBits = 8;
         pfd.cDepthBits   = 24;
         pfd.cColorBits   = 32;
-        pixelFormat = ChoosePixelFormat(pWindow->hDC, &pfd);
+        pixelFormat = e_ChoosePixelFormat(pWindow->hDC, &pfd);
         if (pixelFormat == 0) {
             /*
             We could not find a pixel format. This will prevent us from using the window with OpenGL. Since we've
@@ -531,7 +559,7 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
             return E_ERROR;
         }
 
-        SetPixelFormat(pWindow->hDC, pixelFormat, &pfd);
+        e_SetPixelFormat(pWindow->hDC, pixelFormat, &pfd);
     }
 
     return E_SUCCESS;
@@ -7618,7 +7646,7 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
     E_UNUSED(pUserData);
 
 #if defined(E_WINDOWS)
-    SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
+    e_SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
 #endif
 #if defined(E_DESKTOP_UNIX)
 
@@ -7628,7 +7656,6 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
         EGLDisplay displayEGL = (EGLDisplay)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_EGL_DISPLAY);
         eglSwapBuffers(displayEGL, ((e_graphics_surface_opengl*)pSurface)->platform.egl.surface);
     }
-    
 #endif
 
     return E_SUCCESS;
