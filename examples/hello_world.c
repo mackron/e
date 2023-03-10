@@ -16,6 +16,7 @@ static e_result on_engine_step(void* pUserData, e_engine* pEngine, double dt)
 {
     E_ASSERT(pEngine != NULL);
     E_UNUSED(pUserData);
+    E_UNUSED(pEngine);
 
     /* We just step our clients from the engine step callback. */
     e_client_step(g_pClient, dt);
