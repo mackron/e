@@ -343,7 +343,7 @@ typedef BOOL    (__stdcall * E_PFN_SetProcessDPIAware)     (void);
 typedef HRESULT (__stdcall * E_PFN_SetProcessDpiAwareness) (E_PROCESS_DPI_AWARENESS);
 typedef HRESULT (__stdcall * E_PFN_GetDpiForMonitor)       (HMONITOR hmonitor, E_MONITOR_DPI_TYPE dpiType, UINT *dpiX, UINT *dpiY);
 
-/* Need to do runtime linking of ChoosePixelFormat, SetPixelFormat and SwapBuffers. */
+/* Need to do runtime linking of Gdi32.dll. */
 HMODULE hGdi32DLL = NULL;
 typedef int  (__stdcall * E_PFN_ChoosePixelFormat)(HDC hdc, const PIXELFORMATDESCRIPTOR *ppfd);
 typedef BOOL (__stdcall * E_PFN_SetPixelFormat)   (HDC hdc, int format, const PIXELFORMATDESCRIPTOR *ppfd);
@@ -3253,8 +3253,11 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     }
 
     /* The file info will be located in fileData. We'll need to copy over the relevant details. */
-    pIterator->iterator.info.directory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-    pIterator->iterator.info.size = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+    E_ZERO_OBJECT(&pIterator->iterator.info);
+    pIterator->iterator.info.directory        = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    pIterator->iterator.info.size             = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+    pIterator->iterator.info.lastModifiedTime = ((e_uint64)findData.ftLastWriteTime.dwHighDateTime  << 32) | findData.ftLastWriteTime.dwLowDateTime;
+    pIterator->iterator.info.lastAccessTime   = ((e_uint64)findData.ftLastAccessTime.dwHighDateTime << 32) | findData.ftLastAccessTime.dwLowDateTime;
 
     /* Now just write out hFind item to the iterator so we have a hold of it for later and we're finally done. */
     pIterator->hFind = hFind;
@@ -3296,8 +3299,11 @@ static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterato
         }
 
         /* The file info will be located in fileData. We'll need to copy over the relevant details. */
-        pNewIteratorDefault->iterator.info.directory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        pNewIteratorDefault->iterator.info.size = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+        E_ZERO_OBJECT(&pNewIteratorDefault->iterator.info);
+        pNewIteratorDefault->iterator.info.directory        = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        pNewIteratorDefault->iterator.info.size             = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
+        pNewIteratorDefault->iterator.info.lastModifiedTime = ((e_uint64)findData.ftLastWriteTime.dwHighDateTime  << 32) | findData.ftLastWriteTime.dwLowDateTime;
+        pNewIteratorDefault->iterator.info.lastAccessTime   = ((e_uint64)findData.ftLastAccessTime.dwHighDateTime << 32) | findData.ftLastAccessTime.dwLowDateTime;
 
         return (e_fs_iterator*)pNewIteratorDefault;
     }
@@ -3309,18 +3315,178 @@ static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterato
 }
 #endif
 
-/* TODO: POSIX implementation. */
 #if defined(E_POSIX)
+#include <dirent.h>
+
+typedef struct
+{
+    e_fs_iterator iterator;
+    DIR* dir;
+    char* pFullFilePath;        /* Points to the end of the structure. */
+    size_t directoryPathLen;    /* The length of the directory section. */
+} e_fs_iterator_default;
+
 static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
 {
+    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+
+    E_ASSERT(pIteratorDefault != NULL);
+    E_UNUSED(pUserData);
+
+    closedir(pIteratorDefault->dir);
+    e_free(pIteratorDefault, pAllocationCallbacks);
 }
 
 static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
+    e_fs_iterator_default* pIteratorDefault;
+    struct dirent* info;
+    struct stat statInfo;
+    size_t fileNameLen;
+
+    E_ASSERT(pIteratorDefault != NULL);
+    E_UNUSED(pUserData);
+
+    /*
+    Our input string isn't necessarily null terminated so we'll need to make a copy. This isn't
+    the end of the world because we need to keep a copy of it anyway for when we need to stat
+    the file for information like it's size.
+
+    To do this we're going to allocate memory for our iterator which will include space for the
+    directory path. Then we copy the directory path into the allocated memory and point the
+    pFullFilePath member of the iterator to it. Then we call opendir(). Once that's done we
+    can go to the first file and reallocate the iterator to make room for the file name portion,
+    including the separating slash. Then we copy the file name portion over to the buffer.
+    */
+
+    /* The first step is to calculate the length of the path if we need to. */
+    if (directoryPathLen == (size_t)-1) {
+        directoryPathLen = c89str_strlen(pDirectoryPath);
+    }
+
+    /*
+    Now that we know the length of the directory we can allocate space for the iterator. The
+    directory path will be placed at the end of the structure.
+    */
+    pIteratorDefault = (e_fs_iterator_default*)e_malloc(sizeof(*pIteratorDefault) + directoryPathLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
+    if (pIteratorDefault == NULL) {
+        return NULL;
+    }
+
+    /* Point pFullFilePath to the end of structure to where the path is located. */
+    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
+    pIteratorDefault->directoryPathLen = directoryPathLen;
+
+    /* We can now copy over the directory path. This will null terminate the path which will allow us to call opendir(). */
+    c89str_strncpy_s(pIteratorDefault->pFullFilePath, directoryPathLen + 1, pDirectoryPath, directoryPathLen);
+
+    /* We can now open the directory. */
+    pIteratorDefault->dir = opendir(pIteratorDefault->pFullFilePath);
+    if (pIteratorDefault->dir == NULL) {
+        e_free(pIteratorDefault, pAllocationCallbacks);
+        return NULL;
+    }
+
+
+    /* We now need to get information about the first file. */
+    info = readdir(pIteratorDefault->dir);
+    if (info == NULL) {
+        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        return NULL;
+    }
+
+    fileNameLen = c89str_strlen(info->d_name);
+
+    /*
+    Now that we have the file name we need to append it to the full file path in the iterator. To do
+    this we need to reallocate the iterator to account for the length of the file name, including the
+    separating slash.
+    */
+    {
+        e_fs_iterator_default* pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIteratorDefault, sizeof(*pIteratorDefault) + directoryPathLen + 1 + fileNameLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
+        if (pNewIteratorDefault == NULL) {
+            e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+            return NULL;
+        }
+
+        pIteratorDefault = pNewIteratorDefault;
+    }
+
+    /* Memory has been allocated. Copy over the separating slash and file name. */
+    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
+    pIteratorDefault->pFullFilePath[directoryPathLen] = '/';
+    c89str_strcpy(pIteratorDefault->pFullFilePath + directoryPathLen + 1, info->d_name);
+
+    /* The pFileName member of the base iterator needs to be set to the file name. */
+    pIteratorDefault->iterator.pName   = pIteratorDefault->pFullFilePath + directoryPathLen + 1;
+    pIteratorDefault->iterator.nameLen = fileNameLen;
+
+    /* We can now get the file information. */
+    if (stat(pIteratorDefault->pFullFilePath, &statInfo) != 0) {
+        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        return NULL;
+    }
+
+    E_ZERO_OBJECT(&pIteratorDefault->iterator.info);
+    pIteratorDefault->iterator.info.size             = statInfo.st_size;
+    pIteratorDefault->iterator.info.lastModifiedTime = statInfo.st_mtime;
+    pIteratorDefault->iterator.info.lastAccessTime   = statInfo.st_atime;
+    pIteratorDefault->iterator.info.directory        = S_ISDIR(statInfo.st_mode) != 0;
+
+    return (e_fs_iterator*)pIteratorDefault;
 }
 
 static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
 {
+    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+    struct dirent* info;
+    struct stat statInfo;
+    size_t fileNameLen;
+
+    E_ASSERT(pIteratorDefault != NULL);
+    E_UNUSED(pUserData);
+
+    /* We need to get information about the next file. */
+    info = readdir(pIteratorDefault->dir);
+    if (info == NULL) {
+        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        return NULL;    /* The end of the directory. */
+    }
+
+    fileNameLen = c89str_strlen(info->d_name);
+
+    /* We need to reallocate the iterator to account for the new file name. */
+    {
+        e_fs_iterator_default* pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIteratorDefault, sizeof(*pIteratorDefault) + pIteratorDefault->directoryPathLen + 1 + fileNameLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
+        if (pNewIteratorDefault == NULL) {
+            e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+            return NULL;
+        }
+
+        pIteratorDefault = pNewIteratorDefault;
+    }
+
+    /* Memory has been allocated. Copy over the file name. */
+    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
+    c89str_strcpy(pIteratorDefault->pFullFilePath + pIteratorDefault->directoryPathLen + 1, info->d_name);
+
+    /* The pFileName member of the base iterator needs to be set to the file name. */
+    pIteratorDefault->iterator.pName   = pIteratorDefault->pFullFilePath + pIteratorDefault->directoryPathLen + 1;
+    pIteratorDefault->iterator.nameLen = fileNameLen;
+
+    /* We can now get the file information. */
+    if (stat(pIteratorDefault->pFullFilePath, &statInfo) != 0) {
+        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        return NULL;
+    }
+
+    E_ZERO_OBJECT(&pIteratorDefault->iterator.info);
+    pIteratorDefault->iterator.info.size             = statInfo.st_size;
+    pIteratorDefault->iterator.info.lastModifiedTime = statInfo.st_mtime;
+    pIteratorDefault->iterator.info.lastAccessTime   = statInfo.st_atime;
+    pIteratorDefault->iterator.info.directory        = S_ISDIR(statInfo.st_mode) != 0;
+
+    return (e_fs_iterator*)pIteratorDefault;
 }
 #endif
 
@@ -5939,7 +6105,7 @@ static void e_zip_iterator_init(e_zip* pZip, e_zip_cd_node* pChild, e_zip_iterat
     pIterator->iterator.nameLen = pChild->nameLen;
 
     /* Info. */
-    pIterator->iterator.info.size = 0;
+    E_ZERO_OBJECT(&pIterator->iterator.info);
 
     if (pChild->childCount > 0) {
         /* The node has children. Must be a directory. */

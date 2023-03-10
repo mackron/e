@@ -485,6 +485,8 @@ typedef enum
 struct e_file_info
 {
     e_uint64 size;
+    e_uint64 lastModifiedTime;
+    e_uint64 lastAccessTime;
     e_bool32 directory;
 };
 
