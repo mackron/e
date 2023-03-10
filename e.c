@@ -66,6 +66,7 @@
     /* Don't use vkbind with Emscripten. We'll use the GLES3 headers directly with Emscripten. Including vkbind.h will result in redefinition errors. */
     #ifndef E_EMSCRIPTEN
         #define GLBIND_IMPLEMENTATION
+        #define GLBIND_NO_XLIB_HEADERS
         #include "external/glbind/glbind.h"
     #endif
 #endif
@@ -698,8 +699,10 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
             }
         }
         
-        /* What do we do with the result code? */
-        iterationCallback(pUserData);
+        /* Call the iteration callback. */
+        if (iterationCallback(pUserData) != E_SUCCESS) {
+            break;
+        }
     }
 
     *pExitCode = exitCode;
@@ -722,20 +725,277 @@ static e_result e_platform_exit_main_loop(int exitCode)
 #include <X11/extensions/Xinerama.h>
 #include <X11/extensions/XInput2.h>
 
-static e_result e_platform_init(void)
+
+/* We need to declare our own versions of the Xlib data structure that we're using here so we can avoid including Xlib.h. They should be named the same, but with the "e_" prefix. */
+typedef struct e_XDisplay *e_Display;
+typedef struct e_XScreen *e_Screen;
+typedef struct e_XVisual *e_Visual;
+
+typedef void* e_XPointer;
+
+typedef unsigned long e_VisualID;
+typedef unsigned long e_XID;
+typedef unsigned long e_Atom;
+typedef int e_Bool;
+
+typedef e_XID e_Window;
+typedef e_XID e_Colormap;
+
+typedef struct e_XVisualInfo
 {
-    return E_SUCCESS;
-}
+    Visual* visual;
+    VisualID visualid;
+    int screen;
+    int depth;
+    int class;
+    unsigned long red_mask;
+    unsigned long green_mask;
+    unsigned long blue_mask;
+    int colormap_size;
+    int bits_per_rgb;
+} e_XVisualInfo;
+
+typedef struct e_XSetWindowAttributes
+{
+    Visual* background_pixmap;
+    unsigned long background_pixel;
+    Visual* border_pixmap;
+    unsigned long border_pixel;
+    int bit_gravity;
+    int win_gravity;
+    int backing_store;
+    unsigned long backing_planes;
+    unsigned long backing_pixel;
+    Visual* save_under;
+    long event_mask;
+    long do_not_propagate_mask;
+    Visual* override_redirect;
+    Visual* colormap;
+    Visual* cursor;
+} e_XSetWindowAttributes;
+
+typedef struct e_XWindowAttributes
+{
+    int x, y;
+    int width, height;
+    int border_width;
+    int depth;
+    Visual* visual;
+    Window root;
+    int class;
+    int bit_gravity;
+    int win_gravity;
+    int backing_store;
+    unsigned long backing_planes;
+    unsigned long backing_pixel;
+    Bool save_under;
+    Colormap colormap;
+    Bool map_installed;
+    int map_state;
+    long all_event_masks;
+    long your_event_mask;
+    long do_not_propagate_mask;
+    Bool override_redirect;
+    Screen* screen;
+} e_XWindowAttributes;
+
+typedef struct e_XEvent
+{
+    int type;
+    unsigned long serial;
+    Bool send_event;
+    e_Display* display;
+    Window window;
+} e_XEvent;
+
+
+/* OpenGL */
+#if !defined(E_NO_OPENGL)
+typedef XVisualInfo* (* e_pfn_glXChooseVisual)(e_Display* pDisplay, int screen, int* pAttribList);
+
+static e_handle e_gOpenGLSO = NULL;
+static e_pfn_glXChooseVisual e_glXChooseVisual;
+#endif
+
+/* Xlib */
+typedef e_Display* (* e_pfn_XOpenDisplay    )(const char* pDisplayName);
+typedef int        (* e_pfn_XCloseDisplay   )(e_Display* pDisplay);
+typedef int        (* e_pfn_XMatchVisualInfo)(e_Display* pDisplay, int screen, int depth, int class, XVisualInfo* pVisualInfo);
+typedef Colormap (* e_pfn_XCreateColormap )(e_Display* pDisplay, Window w, Visual* pVisual, int alloc);
+typedef int        (* e_pfn_XFreeColormap   )(e_Display* pDisplay, Colormap colormap);
+typedef Window   (* e_pfn_XCreateWindow   )(e_Display* pDisplay, Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int class, Visual* pVisual, unsigned long valuemask, XSetWindowAttributes* pAttributes);
+typedef int        (* e_pfn_XDestroyWindow  )(e_Display* pDisplay, Window w);
+typedef int        (* e_pfn_XMapWindow      )(e_Display* pDisplay, Window w);
+typedef int        (* e_pfn_XStoreName      )(e_Display* pDisplay, Window w, const char* pWindowName);
+typedef int        (* e_pfn_XResizeWindow   )(e_Display* pDisplay, Window w, unsigned int width, unsigned int height);
+typedef int        (* e_pfn_XGetWindowAttributes)(e_Display* pDisplay, Window w, XWindowAttributes* pWindowAttributes);
+typedef int        (* e_pfn_XSaveContext    )(e_Display* pDisplay, XID rid, XContext context, const e_XPointer pPointer);
+typedef int        (* e_pfn_XDeleteContext  )(e_Display* pDisplay, XID rid, XContext context);
+typedef int        (* e_pfn_XFindContext    )(e_Display* pDisplay, XID rid, XContext context, e_XPointer* ppPointer);
+typedef int        (* e_pfn_XSetWMProtocols )(e_Display* pDisplay, Window w, Atom* pProtocols, int count);
+typedef Atom     (* e_pfn_XInternAtom     )(e_Display* pDisplay, const char* pAtomName, e_bool32 onlyIfExists);
+typedef int        (* e_pfn_XPending        )(e_Display* pDisplay);
+typedef int        (* e_pfn_XNextEvent      )(e_Display* pDisplay, XEvent* pEvent);
+typedef int        (* e_pfn_XSendEvent      )(e_Display* pDisplay, Window w, e_bool32 propagate, long eventMask, XEvent* pEvent);
+typedef int        (* e_pfn_XFree           )(void* pData);
+
+static e_handle e_gXlibSO = NULL;
+static e_pfn_XOpenDisplay     e_XOpenDisplay;
+static e_pfn_XCloseDisplay    e_XCloseDisplay;
+static e_pfn_XMatchVisualInfo e_XMatchVisualInfo;
+static e_pfn_XCreateColormap  e_XCreateColormap;
+static e_pfn_XFreeColormap    e_XFreeColormap;
+static e_pfn_XCreateWindow    e_XCreateWindow;
+static e_pfn_XDestroyWindow   e_XDestroyWindow;
+static e_pfn_XMapWindow       e_XMapWindow;
+static e_pfn_XStoreName       e_XStoreName;
+static e_pfn_XResizeWindow    e_XResizeWindow;
+static e_pfn_XGetWindowAttributes e_XGetWindowAttributes;
+static e_pfn_XSaveContext     e_XSaveContext;
+static e_pfn_XDeleteContext   e_XDeleteContext;
+static e_pfn_XFindContext     e_XFindContext;
+static e_pfn_XSetWMProtocols  e_XSetWMProtocols;
+static e_pfn_XInternAtom      e_XInternAtom;
+static e_pfn_XPending         e_XPending;
+static e_pfn_XNextEvent       e_XNextEvent;
+static e_pfn_XSendEvent       e_XSendEvent;
+static e_pfn_XFree            e_XFree;
+
+
+/* We're going to use a global Display object because it just makes everything so much simpler. */
+static e_Display* e_gDisplay = NULL;
+static Atom e_gWMProtocolsAtom    = 0;
+static Atom e_gWMDeleteWindowAtom = 0;
+static Atom e_gWMQuitAtom         = 0;
 
 static e_result e_platform_uninit(void)
 {
+    /* Xlib */
+    if (e_gDisplay != NULL) {
+        e_XCloseDisplay(e_gDisplay);
+    }
+
+    if (e_gXlibSO != NULL) {
+        e_dlclose(e_gXlibSO);
+        e_gXlibSO = NULL;
+    }
+
+    /* OpenGL */
+#if !defined(E_NO_OPENGL)
+    if (e_gOpenGLSO != NULL) {
+        e_dlclose(e_gOpenGLSO);
+        e_gOpenGLSO = NULL;
+    }
+#endif
+
     return E_SUCCESS;
 }
+
+static e_result e_platform_init(void)
+{
+    /* OpenGL */
+    #if !defined(E_NO_OPENGL)
+    {
+        const char* pOpenGLSONames[] = {
+            "libGL.so.1",
+            "libGL.so"
+        };
+
+        /* Try loading our OpenGL library using our priority list above. */
+        for (size_t i = 0; i < E_COUNTOF(pOpenGLSONames); ++i) {
+            e_gOpenGLSO = e_dlopen(pOpenGLSONames[i]);
+            if (e_gOpenGLSO != NULL) {
+                break;
+            }
+        }
+
+        if (e_gOpenGLSO == NULL) {
+            e_platform_uninit();
+            return E_ERROR; /* Failed to load the OpenGL library. */
+        }
+
+        e_glXChooseVisual = (e_pfn_glXChooseVisual)e_dlsym(e_gOpenGLSO, "glXChooseVisual");
+    }
+    #endif
+
+    /* TODO: Need to support different backends here. May want to support Wayland. Might need a compile time macro for this. */
+
+    /* Xlib */
+    {
+        const char* pXlibSONames[] = {
+            "libX11.so.6",
+            "libX11.so"
+        };
+    
+        /* Try loading our Xlib library using our priority list above. */
+        for (size_t i = 0; i < E_COUNTOF(pXlibSONames); ++i) {
+            e_gXlibSO = e_dlopen(pXlibSONames[i]);
+            if (e_gXlibSO != NULL) {
+                break;
+            }
+        }
+    
+        if (e_gXlibSO == NULL) {
+            e_platform_uninit();
+            return E_ERROR; /* Failed to load the Xlib library. */
+        }
+    
+        e_XOpenDisplay     = (e_pfn_XOpenDisplay    )e_dlsym(e_gXlibSO, "XOpenDisplay");
+        e_XCloseDisplay    = (e_pfn_XCloseDisplay   )e_dlsym(e_gXlibSO, "XCloseDisplay");
+        e_XMatchVisualInfo = (e_pfn_XMatchVisualInfo)e_dlsym(e_gXlibSO, "XMatchVisualInfo");
+        e_XCreateColormap  = (e_pfn_XCreateColormap )e_dlsym(e_gXlibSO, "XCreateColormap");
+        e_XFreeColormap    = (e_pfn_XFreeColormap   )e_dlsym(e_gXlibSO, "XFreeColormap");
+        e_XCreateWindow    = (e_pfn_XCreateWindow   )e_dlsym(e_gXlibSO, "XCreateWindow");
+        e_XDestroyWindow   = (e_pfn_XDestroyWindow  )e_dlsym(e_gXlibSO, "XDestroyWindow");
+        e_XMapWindow       = (e_pfn_XMapWindow      )e_dlsym(e_gXlibSO, "XMapWindow");
+        e_XStoreName       = (e_pfn_XStoreName      )e_dlsym(e_gXlibSO, "XStoreName");
+        e_XResizeWindow    = (e_pfn_XResizeWindow   )e_dlsym(e_gXlibSO, "XResizeWindow");
+        e_XSaveContext     = (e_pfn_XSaveContext    )e_dlsym(e_gXlibSO, "XSaveContext");
+        e_XDeleteContext   = (e_pfn_XDeleteContext  )e_dlsym(e_gXlibSO, "XDeleteContext");
+        e_XFindContext     = (e_pfn_XFindContext    )e_dlsym(e_gXlibSO, "XFindContext");
+        e_XSetWMProtocols  = (e_pfn_XSetWMProtocols )e_dlsym(e_gXlibSO, "XSetWMProtocols");
+        e_XInternAtom      = (e_pfn_XInternAtom     )e_dlsym(e_gXlibSO, "XInternAtom");
+        e_XPending         = (e_pfn_XPending        )e_dlsym(e_gXlibSO, "XPending");
+        e_XNextEvent       = (e_pfn_XNextEvent      )e_dlsym(e_gXlibSO, "XNextEvent");
+        e_XSendEvent       = (e_pfn_XSendEvent      )e_dlsym(e_gXlibSO, "XSendEvent");
+        e_XFree            = (e_pfn_XFree           )e_dlsym(e_gXlibSO, "XFree");
+
+        /* Create our display object. */
+        e_gDisplay = e_XOpenDisplay(NULL);
+        if (e_gDisplay == NULL) {
+            e_platform_uninit();
+            return E_ERROR; /* Failed to open the display. */
+        }
+
+        /* Create our atoms. */
+        e_gWMProtocolsAtom    = e_XInternAtom(e_gDisplay, "WM_PROTOCOLS",     False);
+        e_gWMDeleteWindowAtom = e_XInternAtom(e_gDisplay, "WM_DELETE_WINDOW", False);
+        e_gWMQuitAtom         = e_XInternAtom(e_gDisplay, "WM_QUIT",          False);
+    }
+
+    return E_SUCCESS;
+}
+
+static void* e_platform_get_object(e_platform_object_type type)
+{
+    switch (type)
+    {
+        case E_PLATFORM_OBJECT_XLIB_DISPLAY: return e_gDisplay;
+        break;
+    }
+
+    return NULL;
+}
+
+
 
 
 struct e_platform_window
 {
-    int dummy;
+    e_window* pOwnerWindow;
+    Window window;
+    Colormap colormap;
+    XVisualInfo* pGLVisualInfo; /* Will be NULL if OpenGL is not being used. */
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -745,10 +1005,86 @@ static size_t e_platform_window_sizeof(void)
 
 static e_result e_platform_window_init_preallocated(const e_window_config* pConfig, e_window* pOwnerWindow, const e_allocation_callbacks* pAllocationCallbacks, e_platform_window* pWindow)
 {
+    XSetWindowAttributes attr;
+    XVisualInfo defaultVisualInfo;  /* Used when OpenGL is not being used. */
+    XVisualInfo* pVisualInfo = &defaultVisualInfo;
+
     E_ASSERT(pWindow != NULL);
     E_UNUSED(pAllocationCallbacks);
 
-    /* TODO */
+    /* The owner window is the cross platform e_window object that encompasses the platform-specific window (what we're creating now). */
+    pWindow->pOwnerWindow = pOwnerWindow;
+
+    /* The first thing we need is a display. */
+    e_gDisplay = e_XOpenDisplay(NULL);
+    if (e_gDisplay == NULL) {
+        return E_ERROR; /* Failed to open the display. */
+    }
+
+    if ((pConfig->flags & E_WINDOW_FLAG_OPENGL) == 0) {
+        /* OpenGL is not being used. We need to use the default visual. */
+        if (e_XMatchVisualInfo(e_gDisplay, DefaultScreen(e_gDisplay), DefaultDepth(e_gDisplay, DefaultScreen(e_gDisplay)), TrueColor, &defaultVisualInfo) == 0) {
+            return E_ERROR; /* Failed to find a compatible visual. */
+        }
+
+        pVisualInfo = &defaultVisualInfo;
+        pWindow->pGLVisualInfo = NULL;
+    } else {
+        /* OpenGL is being requested. The visual must be compatible. */
+    #if !defined(E_NO_OPENGL)
+        static int attribs[] = {
+            GLX_RGBA,
+            GLX_RED_SIZE,      8,
+            GLX_GREEN_SIZE,    8,
+            GLX_BLUE_SIZE,     8,
+            GLX_ALPHA_SIZE,    8,
+            GLX_DEPTH_SIZE,    24,
+            GLX_STENCIL_SIZE,  8,
+            GLX_DOUBLEBUFFER,
+            None, None
+        };
+
+        pVisualInfo = e_glXChooseVisual(e_gDisplay, DefaultScreen(e_gDisplay), attribs);
+        if (pVisualInfo == NULL) {
+            return E_ERROR; /* Failed to find a compatible visual. */
+        }
+
+        pWindow->pGLVisualInfo = pVisualInfo;
+    #else
+        return E_ERROR; /* OpenGL is disabled. */
+    #endif
+    }
+
+    /* Now that we have the visual we can create the colormap. */
+    pWindow->colormap = e_XCreateColormap(e_gDisplay, RootWindow(e_gDisplay, pVisualInfo->screen), pVisualInfo->visual, AllocNone);
+    if (pWindow->colormap == 0) {
+        return E_ERROR; /* Failed to create the colormap. */
+    }
+
+    /* Now we can create the window. */
+    attr.colormap     = pWindow->colormap;
+    attr.border_pixel = 0;
+    attr.event_mask   = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | StructureNotifyMask;
+
+    pWindow->window = e_XCreateWindow(e_gDisplay, RootWindow(e_gDisplay, pVisualInfo->screen), 0, 0, pConfig->sizeX, pConfig->sizeY, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWBorderPixel | CWColormap | CWEventMask, &attr);
+    if (pWindow->window == 0) {
+        e_XFreeColormap(e_gDisplay, pWindow->colormap);
+        return E_ERROR; /* Failed to create the window. */
+    }
+
+    /* We need to set the WM_DELETE_WINDOW message. */
+    e_XSetWMProtocols(e_gDisplay, pWindow->window, &e_gWMDeleteWindowAtom, 1);
+
+    /* We need to set the window title. */
+    e_XStoreName(e_gDisplay, pWindow->window, pConfig->pTitle);
+
+    /* We need to assign our e_window* to the window. */
+    e_XSaveContext(e_gDisplay, pWindow->window, 0, (e_XPointer)pWindow);
+
+    /* Show the window unless the caller has explicitly requested that it be hidden. */
+    if ((pConfig->flags & E_WINDOW_FLAG_HIDDEN) == 0) {
+        e_XMapWindow(e_gDisplay, pWindow->window);
+    }
 
     return E_SUCCESS;
 }
@@ -758,7 +1094,8 @@ static e_result e_platform_window_uninit(e_platform_window* pWindow, const e_all
     E_ASSERT(pWindow != NULL);
     E_UNUSED(pAllocationCallbacks);
 
-    /* TODO */
+    e_XDestroyWindow(e_gDisplay, pWindow->window);
+    e_XFreeColormap(e_gDisplay, pWindow->colormap);
 
     return E_SUCCESS;
 }
@@ -768,7 +1105,13 @@ static void* e_platform_window_get_object(const e_platform_window* pWindow, e_pl
     (void)pWindow;
     (void)type;
 
-    /* TODO */
+    switch (type)
+    {
+        case E_PLATFORM_OBJECT_XLIB_DISPLAY:     return e_gDisplay;
+        case E_PLATFORM_OBJECT_XLIB_WINDOW:      return (void*)(e_uintptr)pWindow->window;
+        case E_PLATFORM_OBJECT_XLIB_VISUAL_INFO: return pWindow->pGLVisualInfo;
+        default: break;
+    }
 
     return NULL;
 }
@@ -777,24 +1120,95 @@ static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned 
 {
     E_ASSERT(pWindow != NULL);
 
-    /* TODO */
+    e_XResizeWindow(e_gDisplay, pWindow->window, sizeX, sizeY);
 
     return E_SUCCESS;
 }
 
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData)
 {
+    e_bool32 blocking = E_FALSE;
+
     E_ASSERT(pExitCode != NULL);
     E_ASSERT(iterationCallback != NULL);
 
-    /* TODO */
+    /* Like Win32, we need to come up with some kind of mechanism for choosing when to use a blocking loop versus non-blocking. */
+    blocking = E_FALSE;
+
+    for (;;) {
+        e_window_event e;
+        XEvent x11Event;
+        e_bool32 hasEvent = E_FALSE;
+        e_bool32 receivedQuitMessage = E_FALSE;
+
+        /* Check for events. */
+        if (blocking) {
+            e_XNextEvent(e_gDisplay, &x11Event);
+            hasEvent = E_TRUE;
+        } else {
+            /* Use e_XPending() to determine whether or not we have a message to handle. */
+            if (e_XPending(e_gDisplay) > 0) {
+                e_XNextEvent(e_gDisplay, &x11Event);
+                hasEvent = E_TRUE;
+            }
+        }
+
+        if (hasEvent) {
+            e_platform_window* pPlatformWindow = NULL;
+            e_window* pWindow = NULL;
+
+            /* We need to get the `e_window` pointer from the Xlib Window object using e_XFindContext. */
+            e_XFindContext(e_gDisplay, x11Event.xany.window, 0, (e_XPointer*)&pPlatformWindow);
+            if (pPlatformWindow != NULL) {
+                pWindow = pPlatformWindow->pOwnerWindow;
+            }
+
+            switch (x11Event.type)
+            {
+                /* Handle window close. */
+                case ClientMessage:
+                {
+                    if (x11Event.xclient.message_type == e_gWMProtocolsAtom) {
+                        if (x11Event.xclient.data.l[0] == e_gWMDeleteWindowAtom) {
+                            e = e_window_event_init(E_WINDOW_EVENT_CLOSE);
+                            e_window_handle_event(pWindow, &e);
+                        }
+                    } else if (x11Event.xclient.message_type == e_gWMQuitAtom) {
+                        *pExitCode = x11Event.xclient.data.l[0];
+                        receivedQuitMessage = E_TRUE;
+                    }
+                } break;
+            }
+
+            if (receivedQuitMessage) {
+                break;
+            }
+        }
+
+        /* Call the iteration callback. */
+        if (iterationCallback(pUserData) != E_SUCCESS) {
+            break;
+        }
+    }
 
     return E_SUCCESS;
 }
 
 static e_result e_platform_exit_main_loop(int exitCode)
 {
-    /* TODO */
+    /* Post our custom quit message to the main loop. */
+    XClientMessageEvent x11Event;
+
+    E_ZERO_OBJECT(&x11Event);
+    x11Event.type         = ClientMessage;
+    x11Event.window       = RootWindow(e_gDisplay, DefaultScreen(e_gDisplay));
+    x11Event.message_type = e_gWMQuitAtom;
+    x11Event.format       = 32;
+    x11Event.data.l[0]    = exitCode;
+
+    if (e_XSendEvent(e_gDisplay, x11Event.window, E_FALSE, SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*)&x11Event) == 0) {
+        return E_ERROR;
+    }
 
     return E_SUCCESS;
 }
@@ -3344,7 +3758,7 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     struct stat statInfo;
     size_t fileNameLen;
 
-    E_ASSERT(pIteratorDefault != NULL);
+    E_ASSERT(pDirectoryPath != NULL);
     E_UNUSED(pUserData);
 
     /*
@@ -7677,7 +8091,7 @@ typedef struct
     #if defined(E_DESKTOP_UNIX)
         struct
         {
-            Display* pDisplay;
+            GLXContext hRC;
         } x11;
     #endif
     #if defined(E_EMSCRIPTEN)
@@ -7793,7 +8207,7 @@ static e_result e_graphics_opengl_set_surface(void* pUserData, e_graphics* pGrap
     e_engine_gl(pSurface->pGraphics->pEngine)->wglMakeCurrent((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC), pSurfaceOpenGL->platform.win32.hRC);
 #endif
 #if defined(E_DESKTOP_UNIX)
-
+    e_engine_gl(pSurface->pGraphics->pEngine)->glXMakeCurrent((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), (GLXDrawable)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_WINDOW), pSurfaceOpenGL->platform.x11.hRC);
 #endif
 #if defined(E_EMSCRIPTEN)
     {
@@ -7815,7 +8229,7 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
     e_SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
 #endif
 #if defined(E_DESKTOP_UNIX)
-
+    e_engine_gl(pSurface->pGraphics->pEngine)->glXSwapBuffers((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), (Window)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_WINDOW));
 #endif
 #if defined(E_EMSCRIPTEN)
     {
@@ -7868,8 +8282,22 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
 
     #if defined(E_DESKTOP_UNIX)
     {
-        /* TODO: Implement me. */
-        return E_ERROR;
+        glbind_Display* pDisplay;
+        glbind_XVisualInfo* pVisualInfo;
+
+        GLBapi* pGL = e_engine_gl(pSurface->pGraphics->pEngine);
+        E_ASSERT(pGL != NULL);
+
+        pDisplay    = (glbind_Display*    )e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY);
+        pVisualInfo = (glbind_XVisualInfo*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_VISUAL_INFO);
+
+        pSurfaceOpenGL->platform.x11.hRC = pGL->glXCreateContext(pDisplay, pVisualInfo, NULL, GL_TRUE);
+        if (pSurfaceOpenGL->platform.x11.hRC == NULL) {
+            e_log_postf(e_graphics_get_log(pSurface->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create GLXContext.");
+            return E_ERROR;
+        }
+
+        return E_SUCCESS;
     }
     #endif
 
@@ -7940,7 +8368,9 @@ static void e_graphics_surface_opengl_uninit(void* pUserData, e_graphics_surface
 
     #if defined(E_DESKTOP_UNIX)
     {
-        /* TODO: Implement me. */
+        if (pSurfaceOpenGL->platform.x11.hRC != NULL) {
+            e_engine_gl(pSurface->pGraphics->pEngine)->glXDestroyContext((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), pSurfaceOpenGL->platform.x11.hRC);
+        }
     }
     #endif
 
