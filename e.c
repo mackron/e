@@ -261,12 +261,12 @@ static e_result e_result_from_errno(int error)
 
 
 
-static int e_vsnprintf(char* buf, size_t count, const char* fmt, va_list args)
+E_API int e_vsnprintf(char* buf, size_t count, const char* fmt, va_list args)
 {
     return c89str_vsnprintf(buf, count, fmt, args);
 }
 
-static int e_snprintf(char* buf, size_t count, const char* fmt, ...)
+E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 {
     int result;
     va_list args;
@@ -724,33 +724,124 @@ static e_result e_platform_exit_main_loop(int exitCode)
 
 
 #if defined(E_POSIX)
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-#include <X11/extensions/Xrandr.h>
-#include <X11/extensions/Xinerama.h>
-#include <X11/extensions/XInput2.h>
+/*
+We need to declare our own equivalents of the public Xlib data structures that we're using here so
+we can avoid including Xlib.h. They should be named the same, but with the "e_" prefix to avoid
+any potential collisions.
+*/
+#define e_None                      0
+#define e_AllocNone                 0
 
+#define e_CWBorderPixel             (1 << 3)
+#define e_CWColormap                (1 << 13)
+#define e_CWEventMask               (1 << 15)
 
-/* We need to declare our own versions of the Xlib data structure that we're using here so we can avoid including Xlib.h. They should be named the same, but with the "e_" prefix. */
-typedef struct e_XDisplay *e_Display;
-typedef struct e_XScreen *e_Screen;
-typedef struct e_XVisual *e_Visual;
+#define e_InputOutput               1
 
-typedef void* e_XPointer;
+/* SubstructureRedirectMask | SubstructureNotifyMask */
+#define e_NoEventMask               0
+#define e_KeyPressMask              (1 << 0)
+#define e_KeyReleaseMask            (1 << 1)
+#define e_ButtonPressMask           (1 << 2)
+#define e_ButtonReleaseMask         (1 << 3)
+#define e_EnterWindowMask           (1 << 4)
+#define e_LeaveWindowMask           (1 << 5)
+#define e_PointerMotionMask         (1 << 6)
+#define e_PointerMotionHintMask     (1 << 7)
+#define e_Button1MotionMask         (1 << 8)
+#define e_Button2MotionMask         (1 << 9)
+#define e_Button3MotionMask         (1 << 10)
+#define e_Button4MotionMask         (1 << 11)
+#define e_Button5MotionMask         (1 << 12)
+#define e_ButtonMotionMask          (1 << 13)
+#define e_KeymapStateMask           (1 << 14)
+#define e_ExposureMask              (1 << 15)
+#define e_VisibilityChangeMask      (1 << 16)
+#define e_StructureNotifyMask       (1 << 17)
+#define e_ResizeRedirectMask        (1 << 18)
+#define e_SubstructureNotifyMask    (1 << 19)
+#define e_SubstructureRedirectMask  (1 << 20)
+#define e_FocusChangeMask           (1 << 21)
+#define e_PropertyChangeMask        (1 << 22)
+#define e_ColormapChangeMask        (1 << 23)
+#define e_OwnerGrabButtonMask       (1 << 24)
 
-typedef unsigned long e_VisualID;
-typedef unsigned long e_XID;
-typedef unsigned long e_Atom;
-typedef int e_Bool;
+#define e_KeyPress                  2
+#define e_KeyRelease                3
+#define e_ButtonPress               4
+#define e_ButtonRelease             5
+#define e_MotionNotify              6
+#define e_EnterNotify               7
+#define e_LeaveNotify               8
+#define e_FocusIn                   9
+#define e_FocusOut                  10
+#define e_CreateNotify              16
+#define e_DestroyNotify             17
+#define e_UnmapNotify               18
+#define e_MapNotify                 19
+#define e_ConfigureNotify           22
+#define e_PropertyNotify            28
+#define e_ClientMessage             33
+#define e_GenericEvent              35
 
-typedef e_XID e_Window;
-typedef e_XID e_Colormap;
+#define e_ShiftMask                 (1 << 0)
+#define e_LockMask                  (1 << 1)
+#define e_ControlMask               (1 << 2)
+#define e_Mod1Mask                  (1 << 3)
+#define e_Mod2Mask                  (1 << 4)
+#define e_Mod3Mask                  (1 << 5)
+#define e_Mod4Mask                  (1 << 6)
+#define e_Mod5Mask                  (1 << 7)
+
+#define e_ShiftMapIndex             0
+#define e_LockMapIndex              1
+#define e_ControlMapIndex           2
+#define e_Mod1MapIndex              3
+#define e_Mod2MapIndex              4
+#define e_Mod3MapIndex              5
+#define e_Mod4MapIndex              6
+#define e_Mod5MapIndex              7
+
+#define e_Button1Mask               (1 << 8)
+#define e_Button2Mask               (1 << 9)
+#define e_Button3Mask               (1 << 10)
+#define e_Button4Mask               (1 << 11)
+#define e_Button5Mask               (1 << 12)
+#define e_AnyModifier               (1 << 15)
+
+#define e_Button1                   1
+#define e_Button2                   2
+#define e_Button3                   3
+#define e_Button4                   4
+#define e_Button5                   5
+
+#define e_TrueColor                 4
+#define e_DirectColor               5
+
+typedef struct e_XDisplay           e_Display;
+typedef struct e_XScreen            e_Screen;
+typedef struct e_XVisual            e_Visual;
+
+typedef void*                       e_XPointer;
+
+typedef unsigned long               e_VisualID;
+typedef unsigned long               e_XID;
+typedef unsigned long               e_Atom;
+typedef unsigned long               e_Time;
+typedef unsigned char               e_KeyCode;
+typedef int                         e_Bool;
+
+typedef e_XID                       e_Window;
+typedef e_XID                       e_Colormap;
+typedef e_XID                       e_Pixmap;
+typedef e_XID                       e_Cursor;
+typedef e_XID                       e_Font;
+typedef e_XID                       e_XContext;
 
 typedef struct e_XVisualInfo
 {
-    Visual* visual;
-    VisualID visualid;
+    e_Visual* visual;
+    e_VisualID visualid;
     int screen;
     int depth;
     int class;
@@ -763,116 +854,292 @@ typedef struct e_XVisualInfo
 
 typedef struct e_XSetWindowAttributes
 {
-    Visual* background_pixmap;
+    e_Pixmap background_pixmap;
     unsigned long background_pixel;
-    Visual* border_pixmap;
+    e_Pixmap border_pixmap;
     unsigned long border_pixel;
     int bit_gravity;
     int win_gravity;
     int backing_store;
     unsigned long backing_planes;
     unsigned long backing_pixel;
-    Visual* save_under;
+    e_Bool save_under;
     long event_mask;
     long do_not_propagate_mask;
-    Visual* override_redirect;
-    Visual* colormap;
-    Visual* cursor;
+    e_Bool override_redirect;
+    e_Colormap colormap;
+    e_Cursor cursor;
 } e_XSetWindowAttributes;
 
 typedef struct e_XWindowAttributes
 {
-    int x, y;
-    int width, height;
+    int x;
+    int y;
+    int width;
+    int height;
     int border_width;
     int depth;
-    Visual* visual;
-    Window root;
-    int class;
+    e_Visual* visual;
+    e_Window root;
+    int c_class;
     int bit_gravity;
     int win_gravity;
     int backing_store;
     unsigned long backing_planes;
     unsigned long backing_pixel;
-    Bool save_under;
-    Colormap colormap;
-    Bool map_installed;
+    e_Bool save_under;
+    e_Colormap colormap;
+    e_Bool map_installed;
     int map_state;
     long all_event_masks;
     long your_event_mask;
     long do_not_propagate_mask;
-    Bool override_redirect;
-    Screen* screen;
+    e_Bool override_redirect;
+    e_Screen* screen;
 } e_XWindowAttributes;
 
-typedef struct e_XEvent
+/* We need to declare our own version of XEvent. We only declare the sub-structures of the events we actually use. */
+typedef union e_XEvent
 {
     int type;
-    unsigned long serial;
-    Bool send_event;
-    e_Display* display;
-    Window window;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+    } xany;
+
+    struct
+    {
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        e_Window root;
+        e_Window subwindow;
+        e_Time time;
+        int x;
+        int y;
+        int x_root;
+        int y_root;
+        unsigned int state;
+        unsigned int keycode;
+        e_Bool same_screen;
+    } xkey;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+	    e_Window root;
+	    e_Window subwindow;
+	    e_Time time;
+	    int x;
+        int y;
+	    int x_root;
+        int y_root;
+	    unsigned int state;
+	    unsigned int button;
+	    e_Bool same_screen;
+    } xbutton;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+	    e_Window root;
+	    e_Window subwindow;
+	    e_Time time;
+	    int x;
+        int y;
+	    int x_root;
+        int y_root;
+	    unsigned int state;
+	    char is_hint;
+	    e_Bool same_screen;
+    } xmotion;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+	    int mode;
+	    int detail;
+    } xfocus;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window parent;
+	    e_Window window;
+	    int x;
+        int y;
+	    int width;
+        int height;
+	    int border_width;
+	    e_Bool override_redirect;
+    } xcreatewindow;
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window event;
+	    e_Window window;
+    } xdestroywindow;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window event;
+	    e_Window window;
+	    e_Bool from_configure;
+    } xunmap;
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window event;
+	    e_Window window;
+	    e_Bool override_redirect;
+    } xmap;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window event;
+	    e_Window window;
+	    int x;
+        int y;
+	    int width;
+        int height;
+	    int border_width;
+	    e_Window above;
+	    e_Bool override_redirect;
+    } xconfigure;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+	    e_Atom atom;
+	    e_Time time;
+	    int state;
+    } xproperty;
+
+    struct
+    {
+	    int type;
+	    unsigned long serial;
+	    e_Bool send_event;
+	    e_Display* display;
+	    e_Window window;
+	    e_Atom message_type;
+	    int format;
+	    union
+        {
+		    char  b[20];
+		    short s[10];
+		    long  l[5];
+		} data;
+    } xclient;
+
+    long pad[24];
 } e_XEvent;
 
 
 /* OpenGL */
 #if !defined(E_NO_OPENGL)
-typedef XVisualInfo* (* e_pfn_glXChooseVisual)(e_Display* pDisplay, int screen, int* pAttribList);
+typedef e_XVisualInfo* (* e_pfn_glXChooseVisual)(e_Display* pDisplay, int screen, int* pAttribList);
 
 static e_handle e_gOpenGLSO = NULL;
 static e_pfn_glXChooseVisual e_glXChooseVisual;
 #endif
 
 /* Xlib */
-typedef e_Display* (* e_pfn_XOpenDisplay    )(const char* pDisplayName);
-typedef int        (* e_pfn_XCloseDisplay   )(e_Display* pDisplay);
-typedef int        (* e_pfn_XMatchVisualInfo)(e_Display* pDisplay, int screen, int depth, int class, XVisualInfo* pVisualInfo);
-typedef Colormap (* e_pfn_XCreateColormap )(e_Display* pDisplay, Window w, Visual* pVisual, int alloc);
-typedef int        (* e_pfn_XFreeColormap   )(e_Display* pDisplay, Colormap colormap);
-typedef Window   (* e_pfn_XCreateWindow   )(e_Display* pDisplay, Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int class, Visual* pVisual, unsigned long valuemask, XSetWindowAttributes* pAttributes);
-typedef int        (* e_pfn_XDestroyWindow  )(e_Display* pDisplay, Window w);
-typedef int        (* e_pfn_XMapWindow      )(e_Display* pDisplay, Window w);
-typedef int        (* e_pfn_XStoreName      )(e_Display* pDisplay, Window w, const char* pWindowName);
-typedef int        (* e_pfn_XResizeWindow   )(e_Display* pDisplay, Window w, unsigned int width, unsigned int height);
-typedef int        (* e_pfn_XGetWindowAttributes)(e_Display* pDisplay, Window w, XWindowAttributes* pWindowAttributes);
-typedef int        (* e_pfn_XSaveContext    )(e_Display* pDisplay, XID rid, XContext context, const e_XPointer pPointer);
-typedef int        (* e_pfn_XDeleteContext  )(e_Display* pDisplay, XID rid, XContext context);
-typedef int        (* e_pfn_XFindContext    )(e_Display* pDisplay, XID rid, XContext context, e_XPointer* ppPointer);
-typedef int        (* e_pfn_XSetWMProtocols )(e_Display* pDisplay, Window w, Atom* pProtocols, int count);
-typedef Atom     (* e_pfn_XInternAtom     )(e_Display* pDisplay, const char* pAtomName, e_bool32 onlyIfExists);
-typedef int        (* e_pfn_XPending        )(e_Display* pDisplay);
-typedef int        (* e_pfn_XNextEvent      )(e_Display* pDisplay, XEvent* pEvent);
-typedef int        (* e_pfn_XSendEvent      )(e_Display* pDisplay, Window w, e_bool32 propagate, long eventMask, XEvent* pEvent);
-typedef int        (* e_pfn_XFree           )(void* pData);
+typedef e_Display* (* e_pfn_XOpenDisplay        )(const char* pDisplayName);
+typedef int        (* e_pfn_XCloseDisplay       )(e_Display* pDisplay);
+typedef int        (* e_pfn_XMatchVisualInfo    )(e_Display* pDisplay, int screen, int depth, int class, e_XVisualInfo* pVisualInfo);
+typedef e_Colormap (* e_pfn_XCreateColormap     )(e_Display* pDisplay, e_Window w, e_Visual* pVisual, int alloc);
+typedef int        (* e_pfn_XFreeColormap       )(e_Display* pDisplay, e_Colormap colormap);
+typedef e_Window   (* e_pfn_XCreateWindow       )(e_Display* pDisplay, e_Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int class, e_Visual* pVisual, unsigned long valuemask, e_XSetWindowAttributes* pAttributes);
+typedef int        (* e_pfn_XDestroyWindow      )(e_Display* pDisplay, e_Window w);
+typedef int        (* e_pfn_XMapWindow          )(e_Display* pDisplay, e_Window w);
+typedef int        (* e_pfn_XStoreName          )(e_Display* pDisplay, e_Window w, const char* pWindowName);
+typedef int        (* e_pfn_XResizeWindow       )(e_Display* pDisplay, e_Window w, unsigned int width, unsigned int height);
+typedef int        (* e_pfn_XGetWindowAttributes)(e_Display* pDisplay, e_Window w, e_XWindowAttributes* pWindowAttributes);
+typedef int        (* e_pfn_XSaveContext        )(e_Display* pDisplay, e_XID rid, e_XContext context, const e_XPointer pPointer);
+typedef int        (* e_pfn_XDeleteContext      )(e_Display* pDisplay, e_XID rid, e_XContext context);
+typedef int        (* e_pfn_XFindContext        )(e_Display* pDisplay, e_XID rid, e_XContext context, e_XPointer* ppPointer);
+typedef int        (* e_pfn_XSetWMProtocols     )(e_Display* pDisplay, e_Window w, e_Atom* pProtocols, int count);
+typedef e_Atom     (* e_pfn_XInternAtom         )(e_Display* pDisplay, const char* pAtomName, e_bool32 onlyIfExists);
+typedef int        (* e_pfn_XPending            )(e_Display* pDisplay);
+typedef int        (* e_pfn_XNextEvent          )(e_Display* pDisplay, e_XEvent* pEvent);
+typedef int        (* e_pfn_XSendEvent          )(e_Display* pDisplay, e_Window w, e_bool32 propagate, long eventMask, e_XEvent* pEvent);
+typedef e_Window   (* e_pfn_XRootWindow         )(e_Display* pDisplay, int screenNumber);
+typedef int        (* e_pfn_XDefaultScreen      )(e_Display* pDisplay);
+typedef int        (* e_pfn_XDefaultDepth       )(e_Display* pDisplay, int screenNumber);
+typedef int        (* e_pfn_XFree               )(void* pData);
 
 static e_handle e_gXlibSO = NULL;
-static e_pfn_XOpenDisplay     e_XOpenDisplay;
-static e_pfn_XCloseDisplay    e_XCloseDisplay;
-static e_pfn_XMatchVisualInfo e_XMatchVisualInfo;
-static e_pfn_XCreateColormap  e_XCreateColormap;
-static e_pfn_XFreeColormap    e_XFreeColormap;
-static e_pfn_XCreateWindow    e_XCreateWindow;
-static e_pfn_XDestroyWindow   e_XDestroyWindow;
-static e_pfn_XMapWindow       e_XMapWindow;
-static e_pfn_XStoreName       e_XStoreName;
-static e_pfn_XResizeWindow    e_XResizeWindow;
+static e_pfn_XOpenDisplay         e_XOpenDisplay;
+static e_pfn_XCloseDisplay        e_XCloseDisplay;
+static e_pfn_XMatchVisualInfo     e_XMatchVisualInfo;
+static e_pfn_XCreateColormap      e_XCreateColormap;
+static e_pfn_XFreeColormap        e_XFreeColormap;
+static e_pfn_XCreateWindow        e_XCreateWindow;
+static e_pfn_XDestroyWindow       e_XDestroyWindow;
+static e_pfn_XMapWindow           e_XMapWindow;
+static e_pfn_XStoreName           e_XStoreName;
+static e_pfn_XResizeWindow        e_XResizeWindow;
 static e_pfn_XGetWindowAttributes e_XGetWindowAttributes;
-static e_pfn_XSaveContext     e_XSaveContext;
-static e_pfn_XDeleteContext   e_XDeleteContext;
-static e_pfn_XFindContext     e_XFindContext;
-static e_pfn_XSetWMProtocols  e_XSetWMProtocols;
-static e_pfn_XInternAtom      e_XInternAtom;
-static e_pfn_XPending         e_XPending;
-static e_pfn_XNextEvent       e_XNextEvent;
-static e_pfn_XSendEvent       e_XSendEvent;
-static e_pfn_XFree            e_XFree;
+static e_pfn_XSaveContext         e_XSaveContext;
+static e_pfn_XDeleteContext       e_XDeleteContext;
+static e_pfn_XFindContext         e_XFindContext;
+static e_pfn_XSetWMProtocols      e_XSetWMProtocols;
+static e_pfn_XInternAtom          e_XInternAtom;
+static e_pfn_XPending             e_XPending;
+static e_pfn_XNextEvent           e_XNextEvent;
+static e_pfn_XSendEvent           e_XSendEvent;
+static e_pfn_XRootWindow          e_XRootWindow;
+static e_pfn_XDefaultScreen       e_XDefaultScreen;
+static e_pfn_XDefaultDepth        e_XDefaultDepth;
+static e_pfn_XFree                e_XFree;
 
 
 /* We're going to use a global Display object because it just makes everything so much simpler. */
 static e_Display* e_gDisplay = NULL;
-static Atom e_gWMProtocolsAtom    = 0;
-static Atom e_gWMDeleteWindowAtom = 0;
-static Atom e_gWMQuitAtom         = 0;
+static e_Atom e_gWMProtocolsAtom    = 0;
+static e_Atom e_gWMDeleteWindowAtom = 0;
+static e_Atom e_gWMQuitAtom         = 0;
 
 static e_result e_platform_uninit(void)
 {
@@ -946,25 +1213,29 @@ static e_result e_platform_init(void)
             return E_ERROR; /* Failed to load the Xlib library. */
         }
     
-        e_XOpenDisplay     = (e_pfn_XOpenDisplay    )e_dlsym(e_gXlibSO, "XOpenDisplay");
-        e_XCloseDisplay    = (e_pfn_XCloseDisplay   )e_dlsym(e_gXlibSO, "XCloseDisplay");
-        e_XMatchVisualInfo = (e_pfn_XMatchVisualInfo)e_dlsym(e_gXlibSO, "XMatchVisualInfo");
-        e_XCreateColormap  = (e_pfn_XCreateColormap )e_dlsym(e_gXlibSO, "XCreateColormap");
-        e_XFreeColormap    = (e_pfn_XFreeColormap   )e_dlsym(e_gXlibSO, "XFreeColormap");
-        e_XCreateWindow    = (e_pfn_XCreateWindow   )e_dlsym(e_gXlibSO, "XCreateWindow");
-        e_XDestroyWindow   = (e_pfn_XDestroyWindow  )e_dlsym(e_gXlibSO, "XDestroyWindow");
-        e_XMapWindow       = (e_pfn_XMapWindow      )e_dlsym(e_gXlibSO, "XMapWindow");
-        e_XStoreName       = (e_pfn_XStoreName      )e_dlsym(e_gXlibSO, "XStoreName");
-        e_XResizeWindow    = (e_pfn_XResizeWindow   )e_dlsym(e_gXlibSO, "XResizeWindow");
-        e_XSaveContext     = (e_pfn_XSaveContext    )e_dlsym(e_gXlibSO, "XSaveContext");
-        e_XDeleteContext   = (e_pfn_XDeleteContext  )e_dlsym(e_gXlibSO, "XDeleteContext");
-        e_XFindContext     = (e_pfn_XFindContext    )e_dlsym(e_gXlibSO, "XFindContext");
-        e_XSetWMProtocols  = (e_pfn_XSetWMProtocols )e_dlsym(e_gXlibSO, "XSetWMProtocols");
-        e_XInternAtom      = (e_pfn_XInternAtom     )e_dlsym(e_gXlibSO, "XInternAtom");
-        e_XPending         = (e_pfn_XPending        )e_dlsym(e_gXlibSO, "XPending");
-        e_XNextEvent       = (e_pfn_XNextEvent      )e_dlsym(e_gXlibSO, "XNextEvent");
-        e_XSendEvent       = (e_pfn_XSendEvent      )e_dlsym(e_gXlibSO, "XSendEvent");
-        e_XFree            = (e_pfn_XFree           )e_dlsym(e_gXlibSO, "XFree");
+        e_XOpenDisplay         = (e_pfn_XOpenDisplay        )e_dlsym(e_gXlibSO, "XOpenDisplay");
+        e_XCloseDisplay        = (e_pfn_XCloseDisplay       )e_dlsym(e_gXlibSO, "XCloseDisplay");
+        e_XMatchVisualInfo     = (e_pfn_XMatchVisualInfo    )e_dlsym(e_gXlibSO, "XMatchVisualInfo");
+        e_XCreateColormap      = (e_pfn_XCreateColormap     )e_dlsym(e_gXlibSO, "XCreateColormap");
+        e_XFreeColormap        = (e_pfn_XFreeColormap       )e_dlsym(e_gXlibSO, "XFreeColormap");
+        e_XCreateWindow        = (e_pfn_XCreateWindow       )e_dlsym(e_gXlibSO, "XCreateWindow");
+        e_XDestroyWindow       = (e_pfn_XDestroyWindow      )e_dlsym(e_gXlibSO, "XDestroyWindow");
+        e_XMapWindow           = (e_pfn_XMapWindow          )e_dlsym(e_gXlibSO, "XMapWindow");
+        e_XStoreName           = (e_pfn_XStoreName          )e_dlsym(e_gXlibSO, "XStoreName");
+        e_XResizeWindow        = (e_pfn_XResizeWindow       )e_dlsym(e_gXlibSO, "XResizeWindow");
+        e_XGetWindowAttributes = (e_pfn_XGetWindowAttributes)e_dlsym(e_gXlibSO, "XGetWindowAttributes");
+        e_XSaveContext         = (e_pfn_XSaveContext        )e_dlsym(e_gXlibSO, "XSaveContext");
+        e_XDeleteContext       = (e_pfn_XDeleteContext      )e_dlsym(e_gXlibSO, "XDeleteContext");
+        e_XFindContext         = (e_pfn_XFindContext        )e_dlsym(e_gXlibSO, "XFindContext");
+        e_XSetWMProtocols      = (e_pfn_XSetWMProtocols     )e_dlsym(e_gXlibSO, "XSetWMProtocols");
+        e_XInternAtom          = (e_pfn_XInternAtom         )e_dlsym(e_gXlibSO, "XInternAtom");
+        e_XPending             = (e_pfn_XPending            )e_dlsym(e_gXlibSO, "XPending");
+        e_XNextEvent           = (e_pfn_XNextEvent          )e_dlsym(e_gXlibSO, "XNextEvent");
+        e_XSendEvent           = (e_pfn_XSendEvent          )e_dlsym(e_gXlibSO, "XSendEvent");
+        e_XRootWindow          = (e_pfn_XRootWindow         )e_dlsym(e_gXlibSO, "XRootWindow");
+        e_XDefaultScreen       = (e_pfn_XDefaultScreen      )e_dlsym(e_gXlibSO, "XDefaultScreen");
+        e_XDefaultDepth        = (e_pfn_XDefaultDepth       )e_dlsym(e_gXlibSO, "XDefaultDepth");
+        e_XFree                = (e_pfn_XFree               )e_dlsym(e_gXlibSO, "XFree");
 
         /* Create our display object. */
         e_gDisplay = e_XOpenDisplay(NULL);
@@ -974,9 +1245,9 @@ static e_result e_platform_init(void)
         }
 
         /* Create our atoms. */
-        e_gWMProtocolsAtom    = e_XInternAtom(e_gDisplay, "WM_PROTOCOLS",     False);
-        e_gWMDeleteWindowAtom = e_XInternAtom(e_gDisplay, "WM_DELETE_WINDOW", False);
-        e_gWMQuitAtom         = e_XInternAtom(e_gDisplay, "WM_QUIT",          False);
+        e_gWMProtocolsAtom    = e_XInternAtom(e_gDisplay, "WM_PROTOCOLS",     E_FALSE);
+        e_gWMDeleteWindowAtom = e_XInternAtom(e_gDisplay, "WM_DELETE_WINDOW", E_FALSE);
+        e_gWMQuitAtom         = e_XInternAtom(e_gDisplay, "WM_QUIT",          E_FALSE);
     }
 
     return E_SUCCESS;
@@ -987,7 +1258,7 @@ static void* e_platform_get_object(e_platform_object_type type)
     switch (type)
     {
         case E_PLATFORM_OBJECT_XLIB_DISPLAY: return e_gDisplay;
-        break;
+        default: break;
     }
 
     return NULL;
@@ -999,9 +1270,9 @@ static void* e_platform_get_object(e_platform_object_type type)
 struct e_platform_window
 {
     e_window* pOwnerWindow;
-    Window window;
-    Colormap colormap;
-    XVisualInfo* pGLVisualInfo; /* Will be NULL if OpenGL is not being used. */
+    e_Window window;
+    e_Colormap colormap;
+    e_XVisualInfo* pGLVisualInfo; /* Will be NULL if OpenGL is not being used. */
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -1011,9 +1282,9 @@ static size_t e_platform_window_sizeof(void)
 
 static e_result e_platform_window_init_preallocated(const e_window_config* pConfig, e_window* pOwnerWindow, const e_allocation_callbacks* pAllocationCallbacks, e_platform_window* pWindow)
 {
-    XSetWindowAttributes attr;
-    XVisualInfo defaultVisualInfo;  /* Used when OpenGL is not being used. */
-    XVisualInfo* pVisualInfo = &defaultVisualInfo;
+    e_XSetWindowAttributes attr;
+    e_XVisualInfo defaultVisualInfo;  /* Used when OpenGL is not being used. */
+    e_XVisualInfo* pVisualInfo = &defaultVisualInfo;
 
     E_ASSERT(pWindow != NULL);
     E_UNUSED(pAllocationCallbacks);
@@ -1029,7 +1300,7 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
 
     if ((pConfig->flags & E_WINDOW_FLAG_OPENGL) == 0) {
         /* OpenGL is not being used. We need to use the default visual. */
-        if (e_XMatchVisualInfo(e_gDisplay, DefaultScreen(e_gDisplay), DefaultDepth(e_gDisplay, DefaultScreen(e_gDisplay)), TrueColor, &defaultVisualInfo) == 0) {
+        if (e_XMatchVisualInfo(e_gDisplay, e_XDefaultScreen(e_gDisplay), e_XDefaultDepth(e_gDisplay, e_XDefaultScreen(e_gDisplay)), e_TrueColor, &defaultVisualInfo) == 0) {
             return E_ERROR; /* Failed to find a compatible visual. */
         }
 
@@ -1047,10 +1318,10 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
             GLX_DEPTH_SIZE,    24,
             GLX_STENCIL_SIZE,  8,
             GLX_DOUBLEBUFFER,
-            None, None
+            e_None, e_None
         };
 
-        pVisualInfo = e_glXChooseVisual(e_gDisplay, DefaultScreen(e_gDisplay), attribs);
+        pVisualInfo = e_glXChooseVisual(e_gDisplay, e_XDefaultScreen(e_gDisplay), attribs);
         if (pVisualInfo == NULL) {
             return E_ERROR; /* Failed to find a compatible visual. */
         }
@@ -1062,7 +1333,7 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
     }
 
     /* Now that we have the visual we can create the colormap. */
-    pWindow->colormap = e_XCreateColormap(e_gDisplay, RootWindow(e_gDisplay, pVisualInfo->screen), pVisualInfo->visual, AllocNone);
+    pWindow->colormap = e_XCreateColormap(e_gDisplay, e_XRootWindow(e_gDisplay, pVisualInfo->screen), pVisualInfo->visual, e_AllocNone);
     if (pWindow->colormap == 0) {
         return E_ERROR; /* Failed to create the colormap. */
     }
@@ -1070,9 +1341,9 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
     /* Now we can create the window. */
     attr.colormap     = pWindow->colormap;
     attr.border_pixel = 0;
-    attr.event_mask   = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | StructureNotifyMask;
+    attr.event_mask   = e_ExposureMask | e_KeyPressMask | e_KeyReleaseMask | e_ButtonPressMask | e_ButtonReleaseMask | e_PointerMotionMask | e_StructureNotifyMask;
 
-    pWindow->window = e_XCreateWindow(e_gDisplay, RootWindow(e_gDisplay, pVisualInfo->screen), 0, 0, pConfig->sizeX, pConfig->sizeY, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWBorderPixel | CWColormap | CWEventMask, &attr);
+    pWindow->window = e_XCreateWindow(e_gDisplay, e_XRootWindow(e_gDisplay, pVisualInfo->screen), 0, 0, pConfig->sizeX, pConfig->sizeY, 0, pVisualInfo->depth, e_InputOutput, pVisualInfo->visual, e_CWBorderPixel | e_CWColormap | e_CWEventMask, &attr);
     if (pWindow->window == 0) {
         e_XFreeColormap(e_gDisplay, pWindow->colormap);
         return E_ERROR; /* Failed to create the window. */
@@ -1143,7 +1414,7 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
 
     for (;;) {
         e_window_event e;
-        XEvent x11Event;
+        e_XEvent x11Event;
         e_bool32 hasEvent = E_FALSE;
         e_bool32 receivedQuitMessage = E_FALSE;
 
@@ -1172,10 +1443,10 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
             switch (x11Event.type)
             {
                 /* Handle window close. */
-                case ClientMessage:
+                case e_ClientMessage:
                 {
                     if (x11Event.xclient.message_type == e_gWMProtocolsAtom) {
-                        if (x11Event.xclient.data.l[0] == e_gWMDeleteWindowAtom) {
+                        if (x11Event.xclient.data.l[0] == (long)e_gWMDeleteWindowAtom) {
                             e = e_window_event_init(E_WINDOW_EVENT_CLOSE);
                             e_window_handle_event(pWindow, &e);
                         }
@@ -1203,16 +1474,16 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
 static e_result e_platform_exit_main_loop(int exitCode)
 {
     /* Post our custom quit message to the main loop. */
-    XClientMessageEvent x11Event;
+    e_XEvent x11Event;
 
     E_ZERO_OBJECT(&x11Event);
-    x11Event.type         = ClientMessage;
-    x11Event.window       = RootWindow(e_gDisplay, DefaultScreen(e_gDisplay));
-    x11Event.message_type = e_gWMQuitAtom;
-    x11Event.format       = 32;
-    x11Event.data.l[0]    = exitCode;
+    x11Event.xclient.type         = e_ClientMessage;
+    x11Event.xclient.window       = e_XRootWindow(e_gDisplay, e_XDefaultScreen(e_gDisplay));
+    x11Event.xclient.message_type = e_gWMQuitAtom;
+    x11Event.xclient.format       = 32;
+    x11Event.xclient.data.l[0]    = exitCode;
 
-    if (e_XSendEvent(e_gDisplay, x11Event.window, E_FALSE, SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*)&x11Event) == 0) {
+    if (e_XSendEvent(e_gDisplay, x11Event.xclient.window, E_FALSE, e_SubstructureRedirectMask | e_SubstructureNotifyMask, (e_XEvent*)&x11Event) == 0) {
         return E_ERROR;
     }
 
@@ -1438,14 +1709,6 @@ static void e_free_default(void* p, void* pUserData)
     E_UNUSED(pUserData);
     E_FREE(p);
 }
-
-static e_allocation_callbacks gDefaultAllocationCallbacks = 
-{
-    NULL,
-    e_malloc_default,
-    e_realloc_default,
-    e_free_default
-};
 
 
 static e_allocation_callbacks e_allocation_callbacks_init_default()
@@ -3766,6 +4029,7 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
 
     E_ASSERT(pDirectoryPath != NULL);
     E_UNUSED(pUserData);
+    E_UNUSED(pFS);
 
     /*
     Our input string isn't necessarily null terminated so we'll need to make a copy. This isn't
@@ -4208,13 +4472,12 @@ static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, e_open_
                     e_archive* pArchive;
 
                     /* To load from the archive we actually need to construct a string. */
-                    /* TODO: Try allocating this into a stack allocated buffer first, and if it's too small, which will be very rare, fall back to a heap allocation. */
                     char  pArchiveFilePathStack[1024];
                     char* pArchiveFilePathHeap = NULL;
                     char* pArchiveFilePath;
 
                     /* Try using the stack buffer first. */
-                    if (c89str_snprintf(pArchiveFilePathStack, sizeof(pArchiveFilePathStack), "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName) < sizeof(pArchiveFilePathStack)) {
+                    if (c89str_snprintf(pArchiveFilePathStack, sizeof(pArchiveFilePathStack), "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName) < (int)sizeof(pArchiveFilePathStack)) {
                         /* It does not fit in the stack buffer. Fall back to a heap allocation. */
                         pArchiveFilePath = pArchiveFilePathStack;
                     } else {
@@ -6660,18 +6923,20 @@ static void e_archive_free_iterator_zip(void* pUserData, e_fs_iterator* pIterato
 static e_archive_vtable e_gArchiveVTableZip =
 {
     /* e_fs */
-    e_archive_file_alloc_size_zip,
-    e_archive_open_zip,
-    e_archive_close_zip,
-    e_archive_read_zip,
-    e_archive_write_zip,
-    e_archive_seek_zip,
-    e_archive_tell_zip,
-    e_archive_flush_zip,
-    e_archive_info_zip,
-    e_archive_first_zip,
-    e_archive_next_zip,
-    e_archive_free_iterator_zip,
+    {
+        e_archive_file_alloc_size_zip,
+        e_archive_open_zip,
+        e_archive_close_zip,
+        e_archive_read_zip,
+        e_archive_write_zip,
+        e_archive_seek_zip,
+        e_archive_tell_zip,
+        e_archive_flush_zip,
+        e_archive_info_zip,
+        e_archive_first_zip,
+        e_archive_next_zip,
+        e_archive_free_iterator_zip
+    },
 
     /* e_archive */
     e_archive_alloc_size_zip,
@@ -8235,7 +8500,7 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
     e_SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
 #endif
 #if defined(E_DESKTOP_UNIX)
-    e_engine_gl(pSurface->pGraphics->pEngine)->glXSwapBuffers((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), (Window)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_WINDOW));
+    e_engine_gl(pSurface->pGraphics->pEngine)->glXSwapBuffers((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), (glbind_Window)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_WINDOW));
 #endif
 #if defined(E_EMSCRIPTEN)
     {
@@ -9330,7 +9595,7 @@ static e_result e_graphics_surface_vulkan_init(void* pUserData, e_graphics_surfa
                 swapchainInfo.oldSwapchain          = VK_NULL_HANDLE;                       /* You would set this if you're creating a new swapchain to replace an old one, such as when resizing a window. */
 
                 resultVK = pSurfaceVulkan->vk.vkCreateSwapchainKHR(pSurfaceVulkan->deviceVK, &swapchainInfo, NULL, &pSurfaceVulkan->swapchainVK);
-                if (result != VK_SUCCESS) {
+                if (resultVK != VK_SUCCESS) {
                     e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create swapchain. vkCreateSwapchainKHR() returned %d.", resultVK);
                     e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
                     result = e_result_from_vk(resultVK);

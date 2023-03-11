@@ -937,7 +937,7 @@ E_INLINE e_vec4f e_vec4f_normalize(e_vec4f a)                   { return e_vec4f
 E_INLINE e_vec4f e_vec4f_mul_mat4f(e_vec4f v, e_mat4f m)        { return e_vec4f_4f(e_vec4f_dot(m.c[0], v), e_vec4f_dot(m.c[1], v), e_vec4f_dot(m.c[2], v), e_vec4f_dot(m.c[3], v)); }
 
 
-E_INLINE e_mat4f e_mat4f_init(e_vec4f c0, e_vec4f c1, e_vec4f c2, e_vec4f c3) { e_mat4f result = {c0, c1, c2, c3}; return result; }
+E_INLINE e_mat4f e_mat4f_init(e_vec4f c0, e_vec4f c1, e_vec4f c2, e_vec4f c3) { e_mat4f result; result.c[0] = c0; result.c[1] = c1; result.c[2] = c2; result.c[3] = c3; return result; }
 E_INLINE e_mat4f e_mat4f_identity()                             { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), e_vec4f_4f(0, 0, 0, 1)); }
 E_INLINE e_mat4f e_mat4f_vulkan_clip_correction()               { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, -1, 0, 0), e_vec4f_4f(0, 0, 0.5f, 0), e_vec4f_4f(0, 0, 0.5f, 1)); }
 E_INLINE e_mat4f e_mat4f_translate(e_vec4f translation)         { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), translation); }
