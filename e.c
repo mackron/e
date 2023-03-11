@@ -63,7 +63,7 @@
 
 /* Temporary external dependencies. Eventually these will all be amalgamated. */
 #ifndef E_NO_OPENGL
-    /* Don't use vkbind with Emscripten. We'll use the GLES3 headers directly with Emscripten. Including vkbind.h will result in redefinition errors. */
+    /* Don't use glbind with Emscripten. We'll use the GLES3 headers directly with Emscripten. Including glbind.h will result in redefinition errors. */
     #ifndef E_EMSCRIPTEN
         #define GLBIND_IMPLEMENTATION
         #define GLBIND_NO_XLIB_HEADERS
@@ -76,8 +76,14 @@
     #define VK_USE_PLATFORM_WIN32_KHR
     #endif
 
-    #define VKBIND_NO_GLOBAL_API
+    /* TODO: We need to somehow make this configurable. Not all POSIX systems will necessarily be using X. */
+    #if defined(E_POSIX)
+    #define VK_USE_PLATFORM_XLIB_KHR
+    #endif
+
     #define VKBIND_IMPLEMENTATION
+    #define VKBIND_NO_XLIB_HEADERS    
+    #define VKBIND_NO_GLOBAL_API
     #include "external/vkbind/vkbind.h"
 #endif
 
