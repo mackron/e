@@ -313,7 +313,7 @@ static e_result e_platform_init(void);
 static e_result e_platform_uninit(void);
 static void* e_platform_get_object(e_platform_object_type type);
 
-static size_t   e_platform_window_sizeof(void);
+static size_t e_platform_window_sizeof(void);
 static e_result e_platform_window_init_preallocated(const e_window_config* pConfig, e_window* pOwnerWindow, const e_allocation_callbacks* pAllocationCallbacks, e_platform_window* pWindow);
 static e_result e_platform_window_uninit(e_platform_window* pWindow, const e_allocation_callbacks* pAllocationCallbacks);
 static void* e_platform_window_get_object(const e_platform_window* pWindow, e_platform_object_type type);    /* Return null when an internal object is not supported. */
@@ -640,6 +640,22 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
                 return 0;
             };
+
+            case WM_SIZE:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_SIZE);
+                e.data.size.x = LOWORD(lParam);
+                e.data.size.y = HIWORD(lParam);
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+            case WM_MOVE:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_MOVE);
+                e.data.move.x = LOWORD(lParam);
+                e.data.move.y = HIWORD(lParam);
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
 
             default: break;
         }
@@ -1273,6 +1289,8 @@ struct e_platform_window
     e_Window window;
     e_Colormap colormap;
     e_XVisualInfo* pGLVisualInfo; /* Will be NULL if OpenGL is not being used. */
+    int sizeX;  /* The size will be updated in response to the ConfigureNotify event. */
+    int sizeY;
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -1361,6 +1379,15 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
     /* Show the window unless the caller has explicitly requested that it be hidden. */
     if ((pConfig->flags & E_WINDOW_FLAG_HIDDEN) == 0) {
         e_XMapWindow(e_gDisplay, pWindow->window);
+    }
+
+    /* We need to retrieve the initial size of the window so we can intelligently handle the resize event. */
+    {
+        e_XWindowAttributes windowAttribs;
+        e_XGetWindowAttributes(e_gDisplay, pWindow->window, &windowAttribs);
+
+        pWindow->sizeX = windowAttribs.width;
+        pWindow->sizeY = windowAttribs.height;
     }
 
     return E_SUCCESS;
@@ -1453,6 +1480,28 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
                     } else if (x11Event.xclient.message_type == e_gWMQuitAtom) {
                         *pExitCode = x11Event.xclient.data.l[0];
                         receivedQuitMessage = E_TRUE;
+                    }
+                } break;
+
+                case e_ConfigureNotify:
+                {
+                    /* The window has been resized. */
+                    if (pPlatformWindow != NULL) {
+                        /* Check the for resize. */
+                        {
+                            int eventSizeX = x11Event.xconfigure.width;
+                            int eventSizeY = x11Event.xconfigure.height;
+
+                            if (pPlatformWindow->sizeX != eventSizeX || pPlatformWindow->sizeY != eventSizeY) {
+                                pPlatformWindow->sizeX = eventSizeX;
+                                pPlatformWindow->sizeY = eventSizeY;
+
+                                e = e_window_event_init(E_WINDOW_EVENT_SIZE);
+                                e.data.size.x = eventSizeX;
+                                e.data.size.y = eventSizeY;
+                                e_window_handle_event(pWindow, &e);
+                            }
+                        }
                     }
                 } break;
             }
@@ -3575,7 +3624,7 @@ static e_result e_fs_alloc_size_default(void* pUserData, size_t* pSize)
     return E_SUCCESS;
 }
 
-static e_result e_fs_open_default(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
+static e_result e_fs_open_default(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
 {
     e_file_default* pFileDefault = (e_file_default*)pFile;
     e_result result;
@@ -4423,7 +4472,7 @@ static e_result e_fs_open_archive(e_fs* pFS, const char* pArchiveFilePath, size_
     return E_SUCCESS;
 }
 
-static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
 {
     /*
     This is the main function we use for opening from an archive. We need to iterate over each
@@ -4517,7 +4566,7 @@ static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, e_open_
     return E_DOES_NOT_EXIST;
 }
 
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
 {
     e_result result;
     size_t allocSize;
@@ -5095,7 +5144,7 @@ E_API e_stream* e_archive_stream(e_archive* pArchive)
     return pArchive->pStream;
 }
 
-E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
 {
     return e_fs_open((e_fs*)pArchive, pFilePath, openMode, pAllocationCallbacks, ppFile);
 }
@@ -5296,7 +5345,7 @@ static e_zip_cd_node* e_zip_cd_node_find_child(e_zip_cd_node* pParent, const cha
     str.str = pChildName;
     str.len = childNameLen;
 
-    return e_sorted_search(&str, pParent->pChildren, pParent->childCount, sizeof(*pParent->pChildren), e_binary_search_zip_cd_node_compare, NULL);
+    return (e_zip_cd_node*)e_sorted_search(&str, pParent->pChildren, pParent->childCount, sizeof(*pParent->pChildren), e_binary_search_zip_cd_node_compare, NULL);
 }
 
 
@@ -6207,7 +6256,7 @@ static e_result e_archive_file_alloc_size_zip(void* pUserData, size_t* pSize)
     return E_SUCCESS;
 }
 
-static e_result e_archive_open_zip(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
+static e_result e_archive_open_zip(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
 {
     e_zip* pZip = (e_zip*)pFS;
     e_zip_file* pZipFile = (e_zip_file*)pFile;
@@ -6840,7 +6889,7 @@ static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char
             e_zip_cd_node* pChildNode;
 
             pChildNode = e_zip_cd_node_find_child(pCurrentNode, directoryPathIterator.pFullPath + directoryPathIterator.segmentOffset, directoryPathIterator.segmentLength);
-            if (pChildNode == E_SUCCESS) {
+            if (pChildNode == NULL) {
                 return NULL;    /* Does not exist. */
             }
 
@@ -6964,7 +7013,7 @@ E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCa
     e_archive_uninit((e_archive*)pZip, pAllocationCallbacks);
 }
 
-E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
+E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
 {
     return e_archive_open((e_archive*)pZip, pFilePath, openMode, pAllocationCallbacks, ppFile);
 }
@@ -7804,15 +7853,16 @@ static e_result e_result_from_vk(VkResult result)
 
 
 
-E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable)
+E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData)
 {
     e_engine_config config;
 
     E_ZERO_OBJECT(&config);
-    config.argc    = argc;
-    config.argv    = argv;
-    config.flags   = flags;
-    config.pVTable = pVTable;
+    config.argc            = argc;
+    config.argv            = argv;
+    config.flags           = flags;
+    config.pVTable         = pVTable;
+    config.pVTableUserData = pVTableUserData;
 
     return config;
 }
@@ -8150,7 +8200,7 @@ E_API void* e_engine_get_vkapi(const e_engine* pEngine)
 
 
 /* ==== BEG e_window.c ==== */
-E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle, int posX, int posY, unsigned int sizeX, unsigned int sizeY, unsigned int flags, e_window_vtable* pVTable)
+E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle, int posX, int posY, unsigned int sizeX, unsigned int sizeY, unsigned int flags, e_window_vtable* pVTable, void* pVTableUserData)
 {
     e_window_config config;
 
@@ -8167,6 +8217,7 @@ E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle
     config.sizeY   = sizeY;
     config.flags   = flags;
     config.pVTable = pVTable;
+    config.pVTableUserData = pVTableUserData;
 
     return config;
 }
@@ -8333,6 +8384,8 @@ E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_obj
 
 
 /* ==== BEG e_graphics.c ==== */
+static const char* e_graphics_get_backend_name(e_graphics_backend backend); /* Implemented near the bottom of this section. */
+
 /*
 OpenGL backend.
 */
@@ -8343,14 +8396,14 @@ OpenGL backend.
 
 typedef struct
 {
-    e_graphics graphics;    /* Must be the first item so we can cast. */
+    e_graphics base;    /* Must be the first item so we can cast. */
 } e_graphics_opengl;
 
 typedef struct
 {
-    e_graphics_surface rt;
-    
-    /* We need to use a platform-specific rendering context. */
+    e_graphics_device base; /* Must be the first item so we can cast. */
+
+    /* Platform-specific rendering context. */
     union
     {
     #if defined(E_WINDOWS)
@@ -8369,11 +8422,22 @@ typedef struct
         struct
         {
             EGLContext context;
-            EGLSurface surface;
         } egl;
     #endif
     } platform;
+} e_graphics_device_opengl;
+
+typedef struct
+{
+    e_graphics_surface base;
 } e_graphics_surface_opengl;
+
+
+const char* e_graphics_opengl_get_name(void* pUserData)
+{
+    E_UNUSED(pUserData);
+    return e_graphics_get_backend_name(E_GRAPHICS_BACKEND_OPENGL);
+}
 
 
 typedef struct
@@ -8426,6 +8490,8 @@ static e_result e_graphics_opengl_init(void* pUserData, e_graphics* pGraphics, c
         return result;
     }
 
+    /* Note: glbind has already been initialized by e_engine_init(). */
+
     /* TODO: Implement me. */
     (void)pGraphicsOpenGL;
 
@@ -8474,6 +8540,9 @@ static e_result e_graphics_opengl_set_surface(void* pUserData, e_graphics* pGrap
     E_ASSERT(pGraphics != NULL);
     E_UNUSED(pUserData);
 
+    (void)pSurfaceOpenGL;
+
+#if 0
 #if defined(E_WINDOWS)
     e_engine_gl(pSurface->pGraphics->pEngine)->wglMakeCurrent((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC), pSurfaceOpenGL->platform.win32.hRC);
 #endif
@@ -8487,6 +8556,7 @@ static e_result e_graphics_opengl_set_surface(void* pUserData, e_graphics* pGrap
     }
     
 #endif
+#endif
 
     return E_SUCCESS;
 }
@@ -8496,6 +8566,9 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
     E_ASSERT(pGraphics != NULL);
     E_UNUSED(pUserData);
 
+    (void)pSurface;
+
+#if 0
 #if defined(E_WINDOWS)
     e_SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
 #endif
@@ -8508,42 +8581,47 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
         eglSwapBuffers(displayEGL, ((e_graphics_surface_opengl*)pSurface)->platform.egl.surface);
     }
 #endif
+#endif
 
     return E_SUCCESS;
 }
 
 
 
-static e_result e_graphics_surface_opengl_alloc_size(void* pUserData, const e_graphics_surface_config* pConfig, size_t* pSize)
+static e_result e_graphics_device_opengl_alloc_size(void* pUserData, const e_graphics_device_config* pConfig, size_t* pSize)
 {
     E_ASSERT(pConfig != NULL);
     E_ASSERT(pSize   != NULL);
     E_UNUSED(pUserData);
 
-    *pSize = sizeof(e_graphics_surface_opengl);
+    *pSize = sizeof(e_graphics_device_opengl);
 
     return E_SUCCESS;
 }
 
-static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks)
+static e_result e_graphics_device_opengl_init(void* pUserData, e_graphics_device* pDevice, const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks)
 {
-    e_graphics_surface_opengl* pSurfaceOpenGL = (e_graphics_surface_opengl*)pSurface;
+    e_graphics_device_opengl* pDeviceOpenGL = (e_graphics_device_opengl*)pDevice;
 
     E_ASSERT(pConfig != NULL);
-    E_ASSERT(pSurface     != NULL);
+    E_ASSERT(pDevice != NULL);
     E_UNUSED(pUserData);
 
     (void)pAllocationCallbacks;
 
-    /* There's different ways to create a surface depending on the platform. */
+    if (pConfig->deviceID != E_DEFAULT_GRAPHICS_DEVICE_ID) {
+        return E_INVALID_ARGS;  /* We're only supporting default devices in OpenGL. */
+    }
+
+    /* Different ways of initializing a rendering context depending on the platform. */
     #if defined(E_WINDOWS)
     {
-        GLBapi* pGL = e_engine_gl(pSurface->pGraphics->pEngine);
+        GLBapi* pGL = e_engine_gl(pDevice->pGraphics->pEngine);
         E_ASSERT(pGL != NULL);
 
-        pSurfaceOpenGL->platform.win32.hRC = pGL->wglCreateContext((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
-        if (pSurfaceOpenGL->platform.win32.hRC == NULL) {
-            e_log_postf(e_graphics_get_log(pSurface->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create HGLRC.");
+        pDeviceOpenGL->platform.win32.hRC = pGL->wglCreateContext(glbGetDC());
+        if (pDeviceOpenGL->platform.win32.hRC == NULL) {
+            e_log_postf(e_graphics_get_log(pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create HGLRC.");
             return E_ERROR;
         }
 
@@ -8553,18 +8631,12 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
 
     #if defined(E_DESKTOP_UNIX)
     {
-        glbind_Display* pDisplay;
-        glbind_XVisualInfo* pVisualInfo;
-
-        GLBapi* pGL = e_engine_gl(pSurface->pGraphics->pEngine);
+        GLBapi* pGL = e_engine_gl(pDevice->pGraphics->pEngine);
         E_ASSERT(pGL != NULL);
 
-        pDisplay    = (glbind_Display*    )e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY);
-        pVisualInfo = (glbind_XVisualInfo*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_VISUAL_INFO);
-
-        pSurfaceOpenGL->platform.x11.hRC = pGL->glXCreateContext(pDisplay, pVisualInfo, NULL, GL_TRUE);
-        if (pSurfaceOpenGL->platform.x11.hRC == NULL) {
-            e_log_postf(e_graphics_get_log(pSurface->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create GLXContext.");
+        pDeviceOpenGL->platform.x11.hRC = pGL->glXCreateContext(glbGetDisplay(), glbGetFBVisualInfo(), NULL, GL_TRUE);
+        if (pDeviceOpenGL->platform.x11.hRC == NULL) {
+            e_log_postf(e_graphics_get_log(pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create GLXContext.");
             return E_ERROR;
         }
 
@@ -8591,7 +8663,6 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
         };
         EGLDisplay displayEGL = (EGLDisplay)e_platform_get_object(E_PLATFORM_OBJECT_EGL_DISPLAY);
         EGLContext contextEGL;
-        EGLSurface surfaceEGL;
 
         if (!eglChooseConfig(displayEGL, pConfigAttributesEGL, &configEGL, 1, &configCount)) {
             e_log_postf(e_graphics_get_log(pSurface->pGraphics), E_LOG_LEVEL_ERROR, "Could not find EGL context.");
@@ -8604,14 +8675,94 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
             return E_ERROR;
         }
 
-        surfaceEGL = eglCreateWindowSurface(displayEGL, configEGL, 0, NULL);
+        pDeviceOpenGL->platform.egl.context = contextEGL;
+
+        return E_SUCCESS;
+    }
+    #endif
+}
+
+static void e_graphics_device_opengl_uninit(void* pUserData, e_graphics_device* pDevice, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_graphics_device_opengl* pDeviceOpenGL = (e_graphics_device_opengl*)pDevice;
+
+    E_ASSERT(pDevice != NULL);
+    E_UNUSED(pUserData);
+
+    (void)pAllocationCallbacks;
+
+    /* Check if it's a window render target. If so, it needs to be deleted using platform-specific code. */
+    #if defined(E_WINDOWS)
+    {
+        if (pDeviceOpenGL->platform.win32.hRC != NULL) {
+            e_engine_gl(pDevice->pGraphics->pEngine)->wglDeleteContext(pDeviceOpenGL->platform.win32.hRC);
+        }
+    }
+    #endif
+
+    #if defined(E_DESKTOP_UNIX)
+    {
+        if (pDeviceOpenGL->platform.x11.hRC != NULL) {
+            e_engine_gl(pDevice->pGraphics->pEngine)->glXDestroyContext(glbGetDisplay(), pDeviceOpenGL->platform.x11.hRC);
+        }
+    }
+    #endif
+
+    #if defined(E_EMSCRIPTEN)
+    {
+        eglDestroyContext((EGLDisplay)e_platform_get_object(E_PLATFORM_OBJECT_EGL_DISPLAY), pDeviceOpenGL->platform.egl.context);
+    }
+    #endif
+}
+
+
+
+static e_result e_graphics_surface_opengl_alloc_size(void* pUserData, const e_graphics_surface_config* pConfig, size_t* pSize)
+{
+    E_ASSERT(pConfig != NULL);
+    E_ASSERT(pSize   != NULL);
+    E_UNUSED(pUserData);
+
+    *pSize = sizeof(e_graphics_surface_opengl);
+
+    return E_SUCCESS;
+}
+
+static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_graphics_surface_opengl* pSurfaceOpenGL = (e_graphics_surface_opengl*)pSurface;
+
+    E_ASSERT(pConfig  != NULL);
+    E_ASSERT(pSurface != NULL);
+    E_UNUSED(pUserData);
+
+    (void)pAllocationCallbacks;
+
+    /* There's different ways to create a surface depending on the platform. */
+    #if defined(E_WINDOWS)
+    {
+        (void)pSurfaceOpenGL;
+        return E_SUCCESS;
+    }
+    #endif
+
+    #if defined(E_DESKTOP_UNIX)
+    {
+        (void)pSurfaceOpenGL;
+        return E_SUCCESS;
+    }
+    #endif
+
+    #if defined(E_EMSCRIPTEN)
+    {
+        EGLSurface surfaceEGL;
+
+        surfaceEGL = eglCreateWindowSurface((EGLDisplay)e_platform_get_object(E_PLATFORM_OBJECT_EGL_DISPLAY), configEGL, 0, NULL);
         if (surfaceEGL == NULL) {
-            eglDestroyContext(displayEGL, contextEGL);
             e_log_postf(e_graphics_get_log(pSurface->pGraphics), E_LOG_LEVEL_ERROR, "Failed to create EGL window surface.");
             return E_ERROR;
         }
 
-        pSurfaceOpenGL->platform.egl.context = contextEGL;
         pSurfaceOpenGL->platform.egl.surface = surfaceEGL;
 
         return E_SUCCESS;
@@ -8631,33 +8782,39 @@ static void e_graphics_surface_opengl_uninit(void* pUserData, e_graphics_surface
     /* Check if it's a window render target. If so, it needs to be deleted using platform-specific code. */
     #if defined(E_WINDOWS)
     {
-        if (pSurfaceOpenGL->platform.win32.hRC != NULL) {
-            e_engine_gl(pSurface->pGraphics->pEngine)->wglDeleteContext(pSurfaceOpenGL->platform.win32.hRC);
-        }
+        (void)pSurfaceOpenGL;
     }
     #endif
 
     #if defined(E_DESKTOP_UNIX)
     {
-        if (pSurfaceOpenGL->platform.x11.hRC != NULL) {
-            e_engine_gl(pSurface->pGraphics->pEngine)->glXDestroyContext((glbind_Display*)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_XLIB_DISPLAY), pSurfaceOpenGL->platform.x11.hRC);
-        }
+        (void)pSurfaceOpenGL;
     }
     #endif
 
     #if defined(E_EMSCRIPTEN)
     {
-        EGLDisplay displayEGL = (EGLDisplay)e_platform_get_object(E_PLATFORM_OBJECT_EGL_DISPLAY);
-        eglDestroySurface(displayEGL, pSurfaceOpenGL->platform.egl.surface);
-        eglDestroySurface(displayEGL, pSurfaceOpenGL->platform.egl.context);
+        eglDestroySurface((EGLDisplay)e_platform_get_object(E_PLATFORM_OBJECT_EGL_DISPLAY), pSurfaceOpenGL->platform.egl.surface);
     }
     #endif
+}
+
+static e_result e_graphics_surface_opengl_refresh(void* pUserData, e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    E_UNUSED(pUserData);
+    E_UNUSED(pSurface);
+    E_UNUSED(pAllocationCallbacks);
+
+    /* There's nothing to do for OpenGL. This is all handled automatically by the driver. */
+
+    return E_SUCCESS;
 }
 
 
 
 static e_graphics_vtable e_gGraphicsBackendVTable_OpenGL =
 {
+    e_graphics_opengl_get_name,
     e_graphics_opengl_alloc_size,
     e_graphics_opengl_init,
     e_graphics_opengl_uninit,
@@ -8665,9 +8822,14 @@ static e_graphics_vtable e_gGraphicsBackendVTable_OpenGL =
     e_graphics_opengl_set_surface,
     e_graphics_opengl_present_surface,
 
+    e_graphics_device_opengl_alloc_size,
+    e_graphics_device_opengl_init,
+    e_graphics_device_opengl_uninit,
+
     e_graphics_surface_opengl_alloc_size,
     e_graphics_surface_opengl_init,
-    e_graphics_surface_opengl_uninit
+    e_graphics_surface_opengl_uninit,
+    e_graphics_surface_opengl_refresh
 };
 #endif  /* E_NO_OPENGL */
 
@@ -8677,28 +8839,46 @@ Vulkan backend.
 */
 #if !defined(E_NO_VULKAN)
 typedef struct e_graphics_vulkan         e_graphics_vulkan;
+typedef struct e_graphics_device_vulkan  e_graphics_device_vulkan;
 typedef struct e_graphics_surface_vulkan e_graphics_surface_vulkan;
 
 struct e_graphics_vulkan
 {
-    e_graphics graphics;    /* Must be the first item so we can cast. */
+    e_graphics base;    /* Must be the first item so we can cast. */
     VkInstance instanceVK;
     VkDebugUtilsMessengerEXT debugMessengerVK;
     VkbAPI vk;              /* Instance-specific APIs. */
 };
 
+struct e_graphics_device_vulkan
+{
+    e_graphics_device base;     /* Must be the first item so we can cast. */
+    VkPhysicalDevice physicalDeviceVK;
+    VkDevice deviceVK;
+    VkQueue graphicsQueueVK;
+    VkQueue computeQueueVK;
+    VkQueue transferQueueVK;
+    uint32_t graphicsQueueFamilyIndex;
+    uint32_t computeQueueFamilyIndex;
+    uint32_t transferQueueFamilyIndex;
+    VkbAPI vk;  /* Device-specific APIs. */
+};
+
 struct e_graphics_surface_vulkan
 {
-    e_graphics_surface rt;
-    VkDevice deviceVK;
-    VkQueue graphicsQueueVK;    /* At the momemnt we're only using a single graphics queue. Might extend this to have a separate transfer and compute queues later. */
+    e_graphics_surface base;
     VkSurfaceKHR surfaceVK;
     VkSwapchainKHR swapchainVK;
     VkSemaphore swapchainSemaphoreVK;   /* For synchronizing swapchain image swaps. */
-    uint32_t graphicsQueueFamilyIndex;
     uint32_t currentSwapchainImageIndex;
-    VkbAPI vk;                          /* Device-specific APIs. */
 };
+
+
+const char* e_graphics_vulkan_get_name(void* pUserData)
+{
+    E_UNUSED(pUserData);
+    return e_graphics_get_backend_name(E_GRAPHICS_BACKEND_VULKAN);
+}
 
 
 typedef struct
@@ -9181,13 +9361,18 @@ static e_result e_graphics_vulkan_set_surface(void* pUserData, e_graphics* pGrap
 
 static e_result e_graphics_vulkan_present_surface(void* pUserData, e_graphics* pGraphics, e_graphics_surface* pSurface)
 {
+    /*
     e_graphics_surface_vulkan* pSurfaceVulkan = (e_graphics_surface_vulkan*)pSurface;
     VkResult resultVK;
     VkPresentInfoKHR presentInfo;
+    */
 
     E_ASSERT(pGraphics != NULL);
     E_UNUSED(pUserData);
 
+    (void)pSurface;
+
+#if 0
     presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.pNext              = NULL;
     presentInfo.waitSemaphoreCount = 1;
@@ -9215,11 +9400,269 @@ static e_result e_graphics_vulkan_present_surface(void* pUserData, e_graphics* p
     if (resultVK == VK_SUBOPTIMAL_KHR) {
         e_log_postf(e_graphics_get_log(pGraphics), E_LOG_LEVEL_WARNING, "Suboptimal swapchain image.");
     }
+#endif
+
 
     return E_SUCCESS;
 }
 
 
+
+static e_result e_graphics_device_vulkan_alloc_size(void* pUserData, const e_graphics_device_config* pConfig, size_t* pSize)
+{
+    E_ASSERT(pConfig != NULL);
+    E_ASSERT(pSize   != NULL);
+    E_UNUSED(pUserData);
+
+    *pSize = sizeof(e_graphics_device_vulkan);
+
+    return E_SUCCESS;
+}
+
+
+static e_result e_graphics_device_vulkan_init(void* pUserData, e_graphics_device* pDevice, const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_graphics_device_vulkan* pDeviceVulkan = (e_graphics_device_vulkan*)pDevice;
+    e_graphics_vulkan* pGraphicsVulkan = (e_graphics_vulkan*)pDevice->pGraphics;
+    VkResult resultVK;
+    VkAllocationCallbacks allocationCallbacksVK;
+
+    E_ASSERT(pConfig != NULL);
+    E_ASSERT(pDevice != NULL);
+    E_UNUSED(pUserData);
+
+    allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
+
+    /* Physical Device. */
+    {
+        uint32_t physicalDeviceCount;
+        VkPhysicalDevice* pPhysicalDevicesVK;
+
+        resultVK = pGraphicsVulkan->vk.vkEnumeratePhysicalDevices(pGraphicsVulkan->instanceVK, &physicalDeviceCount, NULL);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_get_log(pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to enumerate Vulkan physical devices. vkEnumeratePhysicalDevices() returned %d.", resultVK);
+            return e_result_from_vk(resultVK);
+        }
+
+        pPhysicalDevicesVK = (VkPhysicalDevice*)e_malloc(sizeof(*pPhysicalDevicesVK) * physicalDeviceCount, pAllocationCallbacks);
+        if (pPhysicalDevicesVK == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        resultVK = pGraphicsVulkan->vk.vkEnumeratePhysicalDevices(pGraphicsVulkan->instanceVK, &physicalDeviceCount, pPhysicalDevicesVK);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_get_log(pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to enumerate Vulkan physical devices. vkEnumeratePhysicalDevices() returned %d.", resultVK);
+            e_free(pPhysicalDevicesVK, pAllocationCallbacks);
+            return e_result_from_vk(resultVK);
+        }
+
+        /*
+        At this point we have a list of physical devices and now we need to pick one. We want to use the one with
+        the device ID that was specified in the config, or the default one if none was specified.
+        */
+        if (pConfig->deviceID == E_DEFAULT_GRAPHICS_DEVICE_ID) {
+            /* TODO: Pick the first device that supports graphics. Will need to inspect the queue families with vkGetPhysicalDeviceQueueFamilyProperties(). See get_devices() above.  */
+            pDeviceVulkan->physicalDeviceVK = pPhysicalDevicesVK[0];
+        } else {
+            uint32_t iPhysicalDevice;
+            for (iPhysicalDevice = 0; iPhysicalDevice < physicalDeviceCount; iPhysicalDevice += 1) {
+                VkPhysicalDeviceProperties properties;
+                pGraphicsVulkan->vk.vkGetPhysicalDeviceProperties(pPhysicalDevicesVK[iPhysicalDevice], &properties);
+
+                if (properties.deviceID == pConfig->deviceID) {
+                    pDeviceVulkan->physicalDeviceVK = pPhysicalDevicesVK[iPhysicalDevice];
+                    break;
+                }
+            }
+        }
+
+        e_free(pPhysicalDevicesVK, pAllocationCallbacks);
+    }
+
+    /* At this point we have a physical device. We can now create the VkDevice object. */
+    {
+        VkQueueFamilyProperties* pQueueFamilyProperties;
+        uint32_t queueFamilyCount;
+        uint32_t iQueueFamily;
+        float pQueuePriorities[1];
+        VkDeviceQueueCreateInfo pQueueInfos[3];
+        uint32_t queueCount = 0;  /* Must be initialized to 0. Will be a maximum of 3. */
+        VkPhysicalDeviceFeatures physicalDeviceFeatures;
+        const char* pEnabledDeviceExtensions[] = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        };
+        uint32_t enabledDeviceExtensionCount = E_COUNTOF(pEnabledDeviceExtensions);
+        VkDeviceCreateInfo deviceInfo;
+
+
+        /*
+        We need to specify the queues we want to create. We're going to use a simplified model where
+        we only have a single queue for each category: graphics, computer and transfer. Sometimes
+        these queues will be the same and sometimes they will be different.
+
+        All graphics queue families support transfer, but we'll try finding a dedicated transfer
+        queue so we can make use of it for async host-to-device transfers.
+        */
+        pGraphicsVulkan->vk.vkGetPhysicalDeviceQueueFamilyProperties(pDeviceVulkan->physicalDeviceVK, &queueFamilyCount, NULL);
+
+        pQueueFamilyProperties = (VkQueueFamilyProperties*)e_malloc(sizeof(*pQueueFamilyProperties) * queueFamilyCount, pAllocationCallbacks);
+        if (pQueueFamilyProperties == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        pGraphicsVulkan->vk.vkGetPhysicalDeviceQueueFamilyProperties(pDeviceVulkan->physicalDeviceVK, &queueFamilyCount, pQueueFamilyProperties);
+
+        /* Initialize our queue indices to -1 so we can identifier whether or not we've found one. */
+        pDeviceVulkan->graphicsQueueFamilyIndex = (size_t)-1;
+        pDeviceVulkan->computeQueueFamilyIndex  = (size_t)-1;
+        pDeviceVulkan->transferQueueFamilyIndex = (size_t)-1;
+    
+        /*
+        First we need to find a graphics queue. We'll use the first one we find. We'll do the same
+        for compute. We're going to prefer queues that support both graphics and compute, but if
+        that's not possible we'll use separate queues.
+        */
+        for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
+            if ((pQueueFamilyProperties[iQueueFamily].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) {
+                pDeviceVulkan->graphicsQueueFamilyIndex = iQueueFamily;
+                pDeviceVulkan->computeQueueFamilyIndex  = iQueueFamily;
+                break;
+            }
+        }
+
+        /* If we didn't find a queue family that supports both graphics and compute, we'll try to find separate queue families. */
+        if (pDeviceVulkan->graphicsQueueFamilyIndex == (size_t)-1) {
+            for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
+                if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+                    pDeviceVulkan->graphicsQueueFamilyIndex = iQueueFamily;
+                    break;
+                }
+            }
+        }
+
+        if (pDeviceVulkan->graphicsQueueFamilyIndex == (size_t)-1) {
+            for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
+                if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0) {
+                    pDeviceVulkan->computeQueueFamilyIndex = iQueueFamily;
+                    break;
+                }
+            }
+        }
+
+        /* We'll try to find a dedicated transfer queue. If we can't find one, we just use the graphics queue. */
+        for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
+            if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_TRANSFER_BIT) != 0 && (pQueueFamilyProperties[iQueueFamily].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0) {
+                pDeviceVulkan->transferQueueFamilyIndex = iQueueFamily;
+                break;
+            }
+        }
+
+        if (pDeviceVulkan->transferQueueFamilyIndex == (size_t)-1) {
+            pDeviceVulkan->transferQueueFamilyIndex = pDeviceVulkan->graphicsQueueFamilyIndex;  /* Couldn't find a dedicated transfer queue. Use the graphics queue. */
+        }
+
+
+        e_free(pQueueFamilyProperties, pAllocationCallbacks);
+        pQueueFamilyProperties = NULL;
+
+        /* We must have at least a graphics and transfer queue. */
+        if (pDeviceVulkan->graphicsQueueFamilyIndex == (uint32_t)-1) {
+            e_log_postf(e_graphics_device_get_log(pDevice), E_LOG_LEVEL_WARNING, "Could not find a queue family supporting graphics.");
+            return E_ERROR;
+        }
+        
+        /* All graphics queues support transfer, so at this point we must also have a transfer queue index. If not, there's an error in the logic above. */
+        E_ASSERT(pDeviceVulkan->transferQueueFamilyIndex != (uint32_t)-1);
+
+
+
+
+        /*
+        We'll be creating one queue for each unique queue family index.
+        */
+        pQueuePriorities[0] = 1;
+
+        /* Start with the graphics queue. */
+        pQueueInfos[0].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        pQueueInfos[0].pNext            = NULL;
+        pQueueInfos[0].flags            = 0;
+        pQueueInfos[0].queueFamilyIndex = pDeviceVulkan->graphicsQueueFamilyIndex;
+        pQueueInfos[0].queueCount       = 1;
+        pQueueInfos[0].pQueuePriorities = pQueuePriorities;
+        queueCount += 1;
+
+        /* Compute, if it's different to the graphics queue. */
+        if (pDeviceVulkan->computeQueueFamilyIndex != pDeviceVulkan->graphicsQueueFamilyIndex) {
+            pQueueInfos[queueCount] = pQueueInfos[0];
+            pQueueInfos[queueCount].queueFamilyIndex = pDeviceVulkan->computeQueueFamilyIndex;
+            queueCount += 1;
+        }
+
+        /* Transfer, if it's different to the graphics queue. */
+        if (pDeviceVulkan->transferQueueFamilyIndex != pDeviceVulkan->graphicsQueueFamilyIndex) {
+            pQueueInfos[queueCount] = pQueueInfos[0];
+            pQueueInfos[queueCount].queueFamilyIndex = pDeviceVulkan->transferQueueFamilyIndex;
+            queueCount += 1;
+        }
+        
+
+
+        /*
+        When initializing a device we need to specify a feature set that we need. For now I'm just keeping
+        this simple and enabling anything that is supported by the hardware. It may, however, be better to
+        set this properly so that if the device doesn't support something we need it'll fail cleanly.
+        */
+        pGraphicsVulkan->vk.vkGetPhysicalDeviceFeatures(pDeviceVulkan->physicalDeviceVK, &physicalDeviceFeatures);
+
+        deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        deviceInfo.pNext                   = NULL;
+        deviceInfo.flags                   = 0;
+        deviceInfo.queueCreateInfoCount    = queueCount;
+        deviceInfo.pQueueCreateInfos       = pQueueInfos;
+        deviceInfo.enabledLayerCount       = 0;
+        deviceInfo.ppEnabledLayerNames     = NULL;
+        deviceInfo.enabledExtensionCount   = enabledDeviceExtensionCount;
+        deviceInfo.ppEnabledExtensionNames = pEnabledDeviceExtensions;
+        deviceInfo.pEnabledFeatures        = &physicalDeviceFeatures;  /* <-- Setting this to NULL is equivalent to disabling all features. */
+
+        resultVK = pGraphicsVulkan->vk.vkCreateDevice(pDeviceVulkan->physicalDeviceVK, &deviceInfo, &allocationCallbacksVK, &pDeviceVulkan->deviceVK);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_device_get_log(pDevice), E_LOG_LEVEL_ERROR, "Failed to create Vulkan device. vkCreateDevice() returned %d.", resultVK);
+            return e_result_from_vk(resultVK);  /* Failed to create the device object. */
+        }
+
+
+        /* We need device-specific function pointers for Vulkan. */
+        pDeviceVulkan->vk = pGraphicsVulkan->vk;
+        resultVK = vkbInitDeviceAPI(pDeviceVulkan->deviceVK, &pDeviceVulkan->vk);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_device_get_log(pDevice), E_LOG_LEVEL_ERROR, "Failed to retrieve device-specific Vulkan function pointers.");
+            return e_result_from_vk(resultVK);
+        }
+
+        /* Now that we have a device we can retrieve the queues for later use. */
+        pDeviceVulkan->vk.vkGetDeviceQueue(pDeviceVulkan->deviceVK, pDeviceVulkan->graphicsQueueFamilyIndex, 0, &pDeviceVulkan->graphicsQueueVK);
+        pDeviceVulkan->vk.vkGetDeviceQueue(pDeviceVulkan->deviceVK, pDeviceVulkan->computeQueueFamilyIndex,  0, &pDeviceVulkan->computeQueueVK);
+        pDeviceVulkan->vk.vkGetDeviceQueue(pDeviceVulkan->deviceVK, pDeviceVulkan->transferQueueFamilyIndex, 0, &pDeviceVulkan->transferQueueVK);
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_graphics_device_vulkan_uninit(void* pUserData, e_graphics_device* pDevice, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_graphics_device_vulkan* pDeviceVulkan = (e_graphics_device_vulkan*)pDevice;
+    VkAllocationCallbacks allocationCallbacksVK;
+
+    E_UNUSED(pUserData);
+
+    if (pDeviceVulkan->deviceVK != VK_NULL_HANDLE) {
+        allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
+
+        pDeviceVulkan->vk.vkDestroyDevice(pDeviceVulkan->deviceVK, &allocationCallbacksVK);
+        pDeviceVulkan->deviceVK = VK_NULL_HANDLE;
+    }
+}
 
 
 
@@ -9234,147 +9677,10 @@ static e_result e_graphics_surface_vulkan_alloc_size(void* pUserData, const e_gr
     return E_SUCCESS;
 }
 
-static e_result e_graphics_surface_vulkan_init_VkDevice(e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, VkPhysicalDevice physicalDeviceVK, VkSurfaceKHR surfaceVK)
-{
-    e_graphics_surface_vulkan* pSurfaceVulkan = (e_graphics_surface_vulkan*)pSurface;
-    e_graphics_vulkan* pGraphicsVulkan = (e_graphics_vulkan*)pSurface->pGraphics;
-    VkResult resultVK;
-    VkAllocationCallbacks allocationCallbacksVK;
-    VkQueueFamilyProperties* pQueueFamilyProperties;
-    uint32_t queueFamilyCount;
-    uint32_t iQueueFamily;
-    uint32_t selectedQueueFamilyIndex_Graphics = (uint32_t)-1;
-    VkBool32 isSurfaceAndDeviceCompatible;
-    VkSurfaceCapabilitiesKHR surfaceCaps;
-    VkDevice deviceVK;
-    VkQueue graphicsQueueVK;
-
-    E_ASSERT(pConfig != NULL);
-    E_ASSERT(pSurface != NULL);
-    E_ASSERT(physicalDeviceVK != NULL);
-    E_ASSERT(surfaceVK != 0);
-    E_UNUSED(pConfig);
-
-    allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
-
-    /* The first thing to do is find a queue index. We just care about the first one that supports graphics. */
-    pGraphicsVulkan->vk.vkGetPhysicalDeviceQueueFamilyProperties(physicalDeviceVK, &queueFamilyCount, NULL);
-
-    pQueueFamilyProperties = (VkQueueFamilyProperties*)e_malloc(sizeof(*pQueueFamilyProperties) * queueFamilyCount, pAllocationCallbacks);
-    if (pQueueFamilyProperties == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    pGraphicsVulkan->vk.vkGetPhysicalDeviceQueueFamilyProperties(physicalDeviceVK, &queueFamilyCount, pQueueFamilyProperties);
-    
-    for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
-        if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            selectedQueueFamilyIndex_Graphics = iQueueFamily;
-            break;
-        }
-    }
-
-    e_free(pQueueFamilyProperties, pAllocationCallbacks);
-    pQueueFamilyProperties = NULL;
-
-    if (selectedQueueFamilyIndex_Graphics == (uint32_t)-1) {
-        e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_WARNING, "Could not find a queue family supporting graphics.");
-        return E_ERROR;
-    }
-
-    /* Getting here means we've found an appropriate queue family. We can now check if the surface is compatible with the device. */
-    resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceSupportKHR(physicalDeviceVK, selectedQueueFamilyIndex_Graphics, surfaceVK, &isSurfaceAndDeviceCompatible);
-    if (resultVK != VK_SUCCESS) {
-        e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_WARNING, "Surface and device are not compatible.");
-        return e_result_from_vk(resultVK);
-    }
-
-    /*
-    Getting here means the surface and device are compatible. One last compatibility check is to
-    ensure the surface supports at least two images so we can do double buffering.
-    */
-    resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDeviceVK, surfaceVK, &surfaceCaps);
-    if (resultVK != VK_SUCCESS) {
-        e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_WARNING, "Failed to retrieve surface capabilities.");
-        return e_result_from_vk(resultVK);  /* Failed to retrieve surface caps. Abort. */
-    }
-
-
-    /*
-    If we've made it this far it means the surface and the device are compatible. We can now go
-    ahead and create the device.
-    */
-    {
-        float pQueuePriorities[1];
-        VkDeviceQueueCreateInfo pQueueInfos[1];
-        VkPhysicalDeviceFeatures physicalDeviceFeatures;
-        const char* pEnabledDeviceExtensions[] = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME
-        };
-        uint32_t enabledDeviceExtensionCount = E_COUNTOF(pEnabledDeviceExtensions);
-        VkDeviceCreateInfo deviceInfo;
-
-        /*
-        Vulkan wants us to specify our queues at initialization time. For now we're only using a single
-        graphics queue, but if we wanted to later on do some multithreaded queue construction, or some
-        kind of compute stuff, we might want to look at changing this.
-        */
-        pQueuePriorities[0] = 1;
-
-        pQueueInfos[0].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        pQueueInfos[0].pNext            = NULL;
-        pQueueInfos[0].flags            = 0;
-        pQueueInfos[0].queueFamilyIndex = selectedQueueFamilyIndex_Graphics;
-        pQueueInfos[0].queueCount       = 1;
-        pQueueInfos[0].pQueuePriorities = pQueuePriorities;
-
-
-        /*
-        When initializing a device we need to specify a feature set that we need. For now I'm just keeping
-        this simple and enabling anything that is supported by the hardware. It may, however, be better to
-        set this properly so that if the device doesn't support something we need it'll fail cleanly.
-        */
-        pGraphicsVulkan->vk.vkGetPhysicalDeviceFeatures(physicalDeviceVK, &physicalDeviceFeatures);
-
-        deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        deviceInfo.pNext                   = NULL;
-        deviceInfo.flags                   = 0;
-        deviceInfo.queueCreateInfoCount    = sizeof(pQueueInfos) / sizeof(pQueueInfos[0]);
-        deviceInfo.pQueueCreateInfos       = pQueueInfos;
-        deviceInfo.enabledLayerCount       = 0;
-        deviceInfo.ppEnabledLayerNames     = NULL;
-        deviceInfo.enabledExtensionCount   = enabledDeviceExtensionCount;
-        deviceInfo.ppEnabledExtensionNames = pEnabledDeviceExtensions;
-        deviceInfo.pEnabledFeatures        = &physicalDeviceFeatures;  /* <-- Setting this to NULL is equivalent to disabling all features. */
-
-        resultVK = pGraphicsVulkan->vk.vkCreateDevice(physicalDeviceVK, &deviceInfo, &allocationCallbacksVK, &deviceVK);
-        if (resultVK != VK_SUCCESS) {
-            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create Vulkan device. vkCreateDevice() returned %d.", resultVK);
-            return e_result_from_vk(resultVK);  /* Failed to create the device object. */
-        }
-
-        /* We need device-specific function pointers for Vulkan. */
-        pSurfaceVulkan->vk = pGraphicsVulkan->vk;
-        resultVK = vkbInitDeviceAPI(deviceVK, &pSurfaceVulkan->vk);
-        if (resultVK != VK_SUCCESS) {
-            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve device-specific Vulkan function pointers.");
-            return e_result_from_vk(resultVK);
-        }
-
-        /* Now that we have a device we can retrieve the queues from there for later use. */
-        pSurfaceVulkan->vk.vkGetDeviceQueue(deviceVK, selectedQueueFamilyIndex_Graphics, 0, &graphicsQueueVK);
-    }
-
-    pSurfaceVulkan->deviceVK = deviceVK;
-    pSurfaceVulkan->graphicsQueueVK = graphicsQueueVK;
-    pSurfaceVulkan->graphicsQueueFamilyIndex = selectedQueueFamilyIndex_Graphics;
-
-    return E_SUCCESS;
-}
-
 static e_result e_graphics_surface_vulkan_init(void* pUserData, e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks)
 {
     e_graphics_surface_vulkan* pSurfaceVulkan = (e_graphics_surface_vulkan*)pSurface;
+    e_graphics_device_vulkan* pDeviceVulkan = (e_graphics_device_vulkan*)pSurface->pDevice;
     e_graphics_vulkan* pGraphicsVulkan = (e_graphics_vulkan*)pSurface->pGraphics;
     e_result result = E_ERROR;
     VkResult resultVK;
@@ -9387,8 +9693,8 @@ static e_result e_graphics_surface_vulkan_init(void* pUserData, e_graphics_surfa
     allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
 
     /*
-    The surface is a heavy weight object. It includes a surface, swapchain and device. The first
-    thing to create is the surface, which is the platform-specific part.
+    The first step is to create the VkSurfaceKHR object which is the platform-specific part. We create
+    this from the window that was passed into the surface config.
     */
     #if defined(E_WINDOWS)
     {
@@ -9406,255 +9712,199 @@ static e_result e_graphics_surface_vulkan_init(void* pUserData, e_graphics_surfa
         }
     }
     #endif
+    /* TODO: Linux, macOS, etc. */
 
-
-    /*
-    At this point we should be done with the platform-specific stuff. Now that we have our surface
-    we can create the device. The device we pick depends on the device ID that we passed into the
-    surface config.
-
-    If the requested device ID is non-zero we need to try using the specified device. If this fails
-    we need to abort with an error. Otherwise, if the ID is zero, we need to determine which device
-    to use ourselves in which case we'll use the first device with a graphics queue which is compatible
-    with the surface we just created above. If we can't find a device we just abort.
-    */
+    /* Now that we have our surface we need to check that it's compatible with our device. */
     {
-        VkPhysicalDevice* pPhysicalDevices;
-        uint32_t physicalDeviceCount;
-        uint32_t selectedDeviceIndex = (uint32_t)-1;    /* Initialize to -1 so we can identify whether or not a device has been selected. */
-        uint32_t iPhysicalDevice;
-
-        resultVK = pGraphicsVulkan->vk.vkEnumeratePhysicalDevices(pGraphicsVulkan->instanceVK, &physicalDeviceCount, NULL);
+        VkBool32 isSupported;
+        VkSurfaceCapabilitiesKHR surfaceCaps;
+        resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pDeviceVulkan->physicalDeviceVK, pSurfaceVulkan->surfaceVK, &surfaceCaps);
         if (resultVK != VK_SUCCESS) {
-            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create retrieve physical device count. vkEnumeratePhysicalDevices() returned %d.", resultVK);
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve surface capabilities. vkGetPhysicalDeviceSurfaceCapabilitiesKHR() returned %d.", resultVK);
             result = e_result_from_vk(resultVK);
             goto error0;
         }
 
-        pPhysicalDevices = (VkPhysicalDevice*)e_malloc(sizeof(*pPhysicalDevices) * physicalDeviceCount, pAllocationCallbacks);
-        if (pPhysicalDevices == NULL) {
+        if (surfaceCaps.maxImageCount < 2) {
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "The surface and device combination do not support at least two images (required for double buffering).");
+            result = e_result_from_vk(resultVK);
+            goto error0;
+        }
+
+        /* The physical device needs to support outputting to our surface. To determine support, we need the physical device and queue family. */
+        resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceSupportKHR(pDeviceVulkan->physicalDeviceVK, pDeviceVulkan->graphicsQueueFamilyIndex, pSurfaceVulkan->surfaceVK, &isSupported);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve surface support. vkGetPhysicalDeviceSurfaceSupportKHR() returned %d.", resultVK);
+            result = e_result_from_vk(resultVK);
+            goto error0;
+        }
+
+        if (!isSupported) {
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "The surface and device combination do not support outputting to the surface.");
+            result = e_result_from_vk(resultVK);
+            goto error0;
+        }
+    }
+
+
+
+    /* Swapchain. */
+    {
+        /*
+        When creating the swapchain we need to specify the format of the images that make up
+        the swapchain. To do this we need to query the supported formats.
+        */
+        VkFormat pAllowedSurfaceFormats[] =
+        {
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_B8G8R8A8_UNORM
+        };
+
+        VkSurfaceFormatKHR* pSupportedSurfaceFormats;
+        uint32_t supportedSurfaceFormatCount;
+        uint32_t selectedSurfaceFormatIndex = (uint32_t)-1; /* Set to -1 so we can identify whether or not a format was picked. */
+        uint32_t iSupportedSurfaceFormat;
+
+        resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceFormatsKHR(pDeviceVulkan->physicalDeviceVK, pSurfaceVulkan->surfaceVK, &supportedSurfaceFormatCount, NULL);
+        if (resultVK != VK_SUCCESS) {
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve physical device surface format count. vkGetPhysicalDeviceSurfaceFormatsKHR() returned %d.", resultVK);
+            result = e_result_from_vk(resultVK);
+            goto error0;
+        }
+
+        pSupportedSurfaceFormats = (VkSurfaceFormatKHR*)e_malloc(sizeof(*pSupportedSurfaceFormats) * supportedSurfaceFormatCount, pAllocationCallbacks);
+        if (pSupportedSurfaceFormats == NULL) {
             result = E_OUT_OF_MEMORY;
             goto error0;
         }
 
-        resultVK = pGraphicsVulkan->vk.vkEnumeratePhysicalDevices(pGraphicsVulkan->instanceVK, &physicalDeviceCount, pPhysicalDevices);
+        resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceFormatsKHR(pDeviceVulkan->physicalDeviceVK, pSurfaceVulkan->surfaceVK, &supportedSurfaceFormatCount, pSupportedSurfaceFormats);
         if (resultVK != VK_SUCCESS) {
-            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to enumerate physical devices. vkEnumeratePhysicalDevices() returned %d.", resultVK);
-            e_free(pPhysicalDevices, pAllocationCallbacks);
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve physical device surface formats. vkGetPhysicalDeviceSurfaceFormatsKHR() returned %d.", resultVK);
+            e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
             result = e_result_from_vk(resultVK);
             goto error0;
         }
 
-        /* We have our physical device information so now it's time to pick an appropriate device. */
-        if (pConfig->deviceID != 0) {
-            /* Using a specific device. Match it against the ID. */
-            for (iPhysicalDevice = 0; iPhysicalDevice < physicalDeviceCount; iPhysicalDevice += 1) {
-                VkPhysicalDeviceProperties properties;
-                pGraphicsVulkan->vk.vkGetPhysicalDeviceProperties(pPhysicalDevices[iPhysicalDevice], &properties);
-
-                if (properties.deviceID == pConfig->deviceID) {
-                    selectedDeviceIndex = iPhysicalDevice;
+        /*
+        Now we need to pick our preferred format. I'm going to run with the assumption that the
+        formats are listed in the order that the Vulkan implementation prefers. We'll just go
+        ahead and pick the first supported format that is in our list of allowed formats.
+        */
+        for (iSupportedSurfaceFormat = 0; iSupportedSurfaceFormat < supportedSurfaceFormatCount; iSupportedSurfaceFormat += 1) {
+            uint32_t iAllowedSurfaceFormat;
+            for (iAllowedSurfaceFormat = 0; iAllowedSurfaceFormat < E_COUNTOF(pAllowedSurfaceFormats); iAllowedSurfaceFormat += 1) {
+                if (pSupportedSurfaceFormats[iSupportedSurfaceFormat].format == pAllowedSurfaceFormats[iAllowedSurfaceFormat]) {
+                    selectedSurfaceFormatIndex = iSupportedSurfaceFormat;
                     break;
                 }
             }
         }
 
-        if (selectedDeviceIndex != (uint32_t)-1) {
-            result = e_graphics_surface_vulkan_init_VkDevice(pSurface, pConfig, pAllocationCallbacks, pPhysicalDevices[selectedDeviceIndex], pSurfaceVulkan->surfaceVK);
-            if (result != E_SUCCESS) {
-                /* We failed to initialize the device. We should now reset the index so that we trigger the fallback. */
-                selectedDeviceIndex = (uint32_t)-1;
-            }
+        /* If we weren't able to find a supported format we'll need to abort. */
+        if (selectedSurfaceFormatIndex == (uint32_t)-1) {
+            e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Could not find an appropriate surface format.");
+            e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
+            result = E_ERROR;
+            goto error0;
         }
 
         /*
-        If at this point we still don't have a device ID we'll need to just try using the first one
-        that supports graphics and is compatible with our surface.
+        Getting here means we know what surface format to use. We can now create the swapchain.
+        When creating the swapchain, it'll ask us for the size of the images. Since this swapchain
+        is going to be associated with the surface we want it to be the same size. To get the
+        size we need to retrieve it from surface with vkGetPhysicalDeviceSurfaceCapabilitiesKHR().
         */
-        if (selectedDeviceIndex == (uint32_t)-1) {
-            if (pConfig->deviceID != 0) {
-                /* User has requested a specific device, but that device could not be found. Falling back to defaults. Log a warning to let them know about this. */
-                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_WARNING, "Specific device requested (id %d), but it could not be found. Falling back to defaults.", pConfig->deviceID);
+        /* TODO: Make this a function so we can easily recreate the swapchain when the window is resized. */
+        {
+            VkSwapchainCreateInfoKHR swapchainInfo;
+
+            VkSurfaceCapabilitiesKHR surfaceCaps;
+            resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pDeviceVulkan->physicalDeviceVK, pSurfaceVulkan->surfaceVK, &surfaceCaps);
+            if (resultVK != VK_SUCCESS) {
+                e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
+                result = e_result_from_vk(resultVK);
+                goto error0;
             }
 
-            for (iPhysicalDevice = 0; iPhysicalDevice < physicalDeviceCount; iPhysicalDevice += 1) {
-                VkPhysicalDeviceProperties properties;
-                pGraphicsVulkan->vk.vkGetPhysicalDeviceProperties(pPhysicalDevices[iPhysicalDevice], &properties);
+            swapchainInfo.sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+            swapchainInfo.pNext                 = NULL;
+            swapchainInfo.flags                 = 0;
+            swapchainInfo.surface               = pSurfaceVulkan->surfaceVK;
+            swapchainInfo.minImageCount         = 2;                                    /* Set this to 2 for double buffering. Triple buffering would be 3, etc. */
+            swapchainInfo.imageFormat           = pSupportedSurfaceFormats[selectedSurfaceFormatIndex].format;      /* The format we selected earlier. */
+            swapchainInfo.imageColorSpace       = pSupportedSurfaceFormats[selectedSurfaceFormatIndex].colorSpace;  /* The color space we selected earlier. */
+            swapchainInfo.imageExtent           = surfaceCaps.currentExtent;            /* The size of the images of the swapchain. Keep this the same size as the surface. */
+            swapchainInfo.imageArrayLayers      = 1;                                    /* I'm not sure in what situation you would ever want to set this to anything other than 1. */
+            swapchainInfo.imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            swapchainInfo.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
+            swapchainInfo.queueFamilyIndexCount = 0;                                    /* Only used when imageSharingMode is VK_SHARING_MODE_CONCURRENT. */
+            swapchainInfo.pQueueFamilyIndices   = NULL;                                 /* Only used when imageSharingMode is VK_SHARING_MODE_CONCURRENT. */
+            swapchainInfo.preTransform          = surfaceCaps.currentTransform;         /* Rotations (90 degree increments) and flips. Just use the current transform from the surface and move on. */
+            swapchainInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+            swapchainInfo.presentMode           = VK_PRESENT_MODE_FIFO_KHR;             /* This is what controls vsync. FIFO must always be supported, so use it by default. */
+            swapchainInfo.clipped               = VK_TRUE;                              /* Set this to true if you're only displaying to a window. */
+            swapchainInfo.oldSwapchain          = VK_NULL_HANDLE;                       /* You would set this if you're creating a new swapchain to replace an old one, such as when resizing a window. */
 
-                result = e_graphics_surface_vulkan_init_VkDevice(pSurface, pConfig, pAllocationCallbacks, pPhysicalDevices[iPhysicalDevice], pSurfaceVulkan->surfaceVK);
-                if (result == E_SUCCESS) {
-                    selectedDeviceIndex = iPhysicalDevice;
-                    break;
-                }
-            }
-
-            /* If at this point we *still* don't have a device we need to abort. */
-            if (selectedDeviceIndex == (uint32_t)-1) {
-                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Could not find appropriate Vulkan device for surface.");
-                result = E_ERROR;
+            resultVK = pDeviceVulkan->vk.vkCreateSwapchainKHR(pDeviceVulkan->deviceVK, &swapchainInfo, &allocationCallbacksVK, &pSurfaceVulkan->swapchainVK);
+            if (resultVK != VK_SUCCESS) {
+                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create swapchain. vkCreateSwapchainKHR() returned %d.", resultVK);
+                e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
+                result = e_result_from_vk(resultVK);
                 goto error0;
             }
         }
 
-        /* Swapchain. */
+        e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
+        pSupportedSurfaceFormats = NULL;
+
+        /*
+        When we swap images in the swapchain we need to synchronize them with a semaphore. We'll
+        go ahead and create that here.
+        */
         {
-            /*
-            When creating the swapchain we need to specify the format of the images that make up
-            the swapchain. To do this we need to query the supported formats.
-            */
-            VkFormat pAllowedSurfaceFormats[] =
-            {
-                VK_FORMAT_R8G8B8A8_UNORM,
-                VK_FORMAT_B8G8R8A8_UNORM
-            };
+            VkSemaphoreCreateInfo semaphoreInfo;
+            semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            semaphoreInfo.pNext = 0;
+            semaphoreInfo.flags = 0;
 
-            VkSurfaceFormatKHR* pSupportedSurfaceFormats;
-            uint32_t supportedSurfaceFormatCount;
-            uint32_t selectedSurfaceFormatIndex = (uint32_t)-1; /* Set to -1 so we can identify whether or not a format was picked. */
-            uint32_t iSupportedSurfaceFormat;
-
-            resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceFormatsKHR(pPhysicalDevices[selectedDeviceIndex], pSurfaceVulkan->surfaceVK, &supportedSurfaceFormatCount, NULL);
+            resultVK = pDeviceVulkan->vk.vkCreateSemaphore(pDeviceVulkan->deviceVK, &semaphoreInfo, &allocationCallbacksVK, &pSurfaceVulkan->swapchainSemaphoreVK);
             if (resultVK != VK_SUCCESS) {
-                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve physical device surface format count. vkGetPhysicalDeviceSurfaceFormatsKHR() returned %d.", resultVK);
+                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create swapchain semaphore. vkCreateSemaphore() returned %d.", resultVK);
                 result = e_result_from_vk(resultVK);
                 goto error1;
             }
+        }
 
-            pSupportedSurfaceFormats = (VkSurfaceFormatKHR*)e_malloc(sizeof(*pSupportedSurfaceFormats) * supportedSurfaceFormatCount, pAllocationCallbacks);
-            if (pSupportedSurfaceFormats == NULL) {
-                result = E_OUT_OF_MEMORY;
-                goto error1;
-            }
+        /*
+        Now that we've got the semaphore we can go ahead and acquire the first image. We need to
+        do this so we can get the index of the next image in the swapchain.
+        */
+        resultVK = pDeviceVulkan->vk.vkAcquireNextImageKHR(pDeviceVulkan->deviceVK, pSurfaceVulkan->swapchainVK, UINT64_MAX, pSurfaceVulkan->swapchainSemaphoreVK, VK_NULL_HANDLE, &pSurfaceVulkan->currentSwapchainImageIndex);
+        if (resultVK != VK_SUCCESS && resultVK != VK_SUBOPTIMAL_KHR) {
+            /* TODO: Post an error. */
+            result = e_result_from_vk(resultVK);
+            goto error2;
+        }
 
-            resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceFormatsKHR(pPhysicalDevices[selectedDeviceIndex], pSurfaceVulkan->surfaceVK, &supportedSurfaceFormatCount, pSupportedSurfaceFormats);
-            if (resultVK != VK_SUCCESS) {
-                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to retrieve physical device surface formats. vkGetPhysicalDeviceSurfaceFormatsKHR() returned %d.", resultVK);
-                e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
-                result = e_result_from_vk(resultVK);
-                goto error1;
-            }
-
-            /*
-            Now we need to pick our preferred format. I'm going to run with the assumption that the
-            formats are listed in the order that the Vulkan implementation prefers. We'll just go
-            ahead and pick the first supported format that is in our list of allowed formats.
-            */
-            for (iSupportedSurfaceFormat = 0; iSupportedSurfaceFormat < supportedSurfaceFormatCount; iSupportedSurfaceFormat += 1) {
-                uint32_t iAllowedSurfaceFormat;
-                for (iAllowedSurfaceFormat = 0; iAllowedSurfaceFormat < E_COUNTOF(pAllowedSurfaceFormats); iAllowedSurfaceFormat += 1) {
-                    if (pSupportedSurfaceFormats[iSupportedSurfaceFormat].format == pAllowedSurfaceFormats[iAllowedSurfaceFormat]) {
-                        selectedSurfaceFormatIndex = iSupportedSurfaceFormat;
-                        break;
-                    }
-                }
-            }
-
-            /* If we weren't able to find a supported format we'll need to abort. */
-            if (selectedSurfaceFormatIndex == (uint32_t)-1) {
-                e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Could not find an appropriate surface format.");
-                e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
-                result = E_ERROR;
-                goto error1;
-            }
-
-            /*
-            Getting here means we know what surface format to use. We can now create the swapchain.
-            When creating the swapchain, it'll ask us for the size of the images. Since this swapchain
-            is going to be associated with the surface we want it to be the same size. To get the
-            size we need to retrieve it from surface with vkGetPhysicalDeviceSurfaceCapabilitiesKHR().
-            */
-            /* TODO: Make this a function so we can easily recreate the swapchain when the window is resized. */
-            {
-                VkSwapchainCreateInfoKHR swapchainInfo;
-
-                VkSurfaceCapabilitiesKHR surfaceCaps;
-                resultVK = pGraphicsVulkan->vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pPhysicalDevices[selectedDeviceIndex], pSurfaceVulkan->surfaceVK, &surfaceCaps);
-                if (resultVK != VK_SUCCESS) {
-                    e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
-                    result = e_result_from_vk(resultVK);
-                    goto error1;
-                }
-
-                swapchainInfo.sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-                swapchainInfo.pNext                 = NULL;
-                swapchainInfo.flags                 = 0;
-                swapchainInfo.surface               = pSurfaceVulkan->surfaceVK;
-                swapchainInfo.minImageCount         = 2;                                    /* Set this to 2 for double buffering. Triple buffering would be 3, etc. */
-                swapchainInfo.imageFormat           = pSupportedSurfaceFormats[selectedSurfaceFormatIndex].format;      /* The format we selected earlier. */
-                swapchainInfo.imageColorSpace       = pSupportedSurfaceFormats[selectedSurfaceFormatIndex].colorSpace;  /* The color space we selected earlier. */
-                swapchainInfo.imageExtent           = surfaceCaps.currentExtent;            /* The size of the images of the swapchain. Keep this the same size as the surface. */
-                swapchainInfo.imageArrayLayers      = 1;                                    /* I'm not sure in what situation you would ever want to set this to anything other than 1. */
-                swapchainInfo.imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-                swapchainInfo.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
-                swapchainInfo.queueFamilyIndexCount = 0;                                    /* Only used when imageSharingMode is VK_SHARING_MODE_CONCURRENT. */
-                swapchainInfo.pQueueFamilyIndices   = NULL;                                 /* Only used when imageSharingMode is VK_SHARING_MODE_CONCURRENT. */
-                swapchainInfo.preTransform          = surfaceCaps.currentTransform;         /* Rotations (90 degree increments) and flips. Just use the current transform from the surface and move on. */
-                swapchainInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-                swapchainInfo.presentMode           = VK_PRESENT_MODE_FIFO_KHR;             /* This is what controls vsync. FIFO must always be supported, so use it by default. */
-                swapchainInfo.clipped               = VK_TRUE;                              /* Set this to true if you're only displaying to a window. */
-                swapchainInfo.oldSwapchain          = VK_NULL_HANDLE;                       /* You would set this if you're creating a new swapchain to replace an old one, such as when resizing a window. */
-
-                resultVK = pSurfaceVulkan->vk.vkCreateSwapchainKHR(pSurfaceVulkan->deviceVK, &swapchainInfo, NULL, &pSurfaceVulkan->swapchainVK);
-                if (resultVK != VK_SUCCESS) {
-                    e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create swapchain. vkCreateSwapchainKHR() returned %d.", resultVK);
-                    e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
-                    result = e_result_from_vk(resultVK);
-                    goto error1;
-                }
-            }
-
-            e_free(pSupportedSurfaceFormats, pAllocationCallbacks);
-            pSupportedSurfaceFormats = NULL;
-
-            /*
-            When we swap images in the swapchain we need to synchronize them with a semaphore. We'll
-            go ahead and create that here.
-            */
-            {
-                VkSemaphoreCreateInfo semaphoreInfo;
-                semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-                semaphoreInfo.pNext = 0;
-                semaphoreInfo.flags = 0;
-
-                resultVK = pSurfaceVulkan->vk.vkCreateSemaphore(pSurfaceVulkan->deviceVK, &semaphoreInfo, NULL, &pSurfaceVulkan->swapchainSemaphoreVK);
-                if (resultVK != VK_SUCCESS) {
-                    e_log_postf(e_graphics_surface_get_log(pSurface), E_LOG_LEVEL_ERROR, "Failed to create swapchain semaphore. vkCreateSemaphore() returned %d.", resultVK);
-                    result = e_result_from_vk(resultVK);
-                    goto error2;
-                }
-            }
-
-            /*
-            Now that we've got the semaphore we can go ahead and acquire the first image. We need to
-            do this so we can get the index of the next image in the swapchain.
-            */
-            resultVK = pSurfaceVulkan->vk.vkAcquireNextImageKHR(pSurfaceVulkan->deviceVK, pSurfaceVulkan->swapchainVK, UINT64_MAX, pSurfaceVulkan->swapchainSemaphoreVK, VK_NULL_HANDLE, &pSurfaceVulkan->currentSwapchainImageIndex);
-            if (resultVK != VK_SUCCESS && resultVK != VK_SUBOPTIMAL_KHR) {
-                /* TODO: Post an error. */
-                result = e_result_from_vk(resultVK);
-                goto error3;
-            }
-
-            if (resultVK == VK_SUBOPTIMAL_KHR) {
-                /* TODO: Post a warning. */
-            }
+        if (resultVK == VK_SUBOPTIMAL_KHR) {
+            /* TODO: Post a warning. */
         }
     }
 
     return E_SUCCESS;
 
-error3:
-    pSurfaceVulkan->vk.vkDestroySemaphore(pSurfaceVulkan->deviceVK, pSurfaceVulkan->swapchainSemaphoreVK, &allocationCallbacksVK);
 error2:
-    pSurfaceVulkan->vk.vkDestroySwapchainKHR(pSurfaceVulkan->deviceVK, pSurfaceVulkan->swapchainVK, &allocationCallbacksVK);
+    pDeviceVulkan->vk.vkDestroySemaphore(pDeviceVulkan->deviceVK, pSurfaceVulkan->swapchainSemaphoreVK, &allocationCallbacksVK);
 error1:
-    pGraphicsVulkan->vk.vkDestroyDevice(pSurfaceVulkan->deviceVK, &allocationCallbacksVK);
+    pDeviceVulkan->vk.vkDestroySwapchainKHR(pDeviceVulkan->deviceVK, pSurfaceVulkan->swapchainVK, &allocationCallbacksVK);
 error0:
     #if defined(E_WINDOWS)
     {
         pGraphicsVulkan->vk.vkDestroySurfaceKHR(pGraphicsVulkan->instanceVK, pSurfaceVulkan->surfaceVK, &allocationCallbacksVK);
     }
     #endif
+    /* TODO: Linus, macOS, etc. */
 
     return result;
 }
@@ -9670,12 +9920,29 @@ static void e_graphics_surface_vulkan_uninit(void* pUserData, e_graphics_surface
 
     allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
 
-    pGraphicsVulkan->vk.vkDestroyDevice(pSurfaceVulkan->deviceVK, &allocationCallbacksVK);
     pGraphicsVulkan->vk.vkDestroySurfaceKHR(pGraphicsVulkan->instanceVK, pSurfaceVulkan->surfaceVK, &allocationCallbacksVK);
 }
 
+static e_result e_graphics_surface_vulkan_refresh(void* pUserData, e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    e_graphics_surface_vulkan* pSurfaceVulkan = (e_graphics_surface_vulkan*)pSurface;
+    VkAllocationCallbacks allocationCallbacksVK;
+
+    E_ASSERT(pSurface != NULL);
+    E_UNUSED(pUserData);
+
+    allocationCallbacksVK = e_graphics_VkAllocationCallbacks_init(pAllocationCallbacks);
+
+    /* TODO: Here is where we should re-create the swapchain. Don't forget to pass in the previous swapchain here. */
+    (void)pSurfaceVulkan;
+
+    return E_SUCCESS;
+}
+
+
 static e_graphics_vtable e_gGraphicsBackendVTable_Vulkan =
 {
+    e_graphics_vulkan_get_name,
     e_graphics_vulkan_alloc_size,
     e_graphics_vulkan_init,
     e_graphics_vulkan_uninit,
@@ -9683,15 +9950,19 @@ static e_graphics_vtable e_gGraphicsBackendVTable_Vulkan =
     e_graphics_vulkan_set_surface,
     e_graphics_vulkan_present_surface,
 
+    e_graphics_device_vulkan_alloc_size,
+    e_graphics_device_vulkan_init,
+    e_graphics_device_vulkan_uninit,
+
     e_graphics_surface_vulkan_alloc_size,
     e_graphics_surface_vulkan_init,
-    e_graphics_surface_vulkan_uninit
+    e_graphics_surface_vulkan_uninit,
+    e_graphics_surface_vulkan_refresh
 };
 #endif
 
-
 /* Retrieves the VTable of the given stock graphics backend. */
-static e_graphics_vtable* e_graphics_get_backend_vtable(e_graphics_backend backend)
+static const e_graphics_vtable* e_graphics_get_backend_vtable(e_graphics_backend backend)
 {
     switch (backend)
     {
@@ -9716,6 +9987,28 @@ static e_graphics_vtable* e_graphics_get_backend_vtable(e_graphics_backend backe
     }
 
     return NULL;
+}
+
+static const char* e_graphics_get_backend_name_from_vtable(const e_graphics_vtable* pVTable, void* pVTableUserData)
+{
+    if (pVTable == NULL || pVTable->get_name == NULL) {
+        return "Unknown";
+    }
+
+    return pVTable->get_name(pVTableUserData);
+}
+
+static const char* e_graphics_get_backend_name(e_graphics_backend backend)
+{
+    switch (backend)
+    {
+        case E_GRAPHICS_BACKEND_OPENGL: return "OpenGL";
+        case E_GRAPHICS_BACKEND_VULKAN: return "Vulkan";
+        case E_GRAPHICS_BACKEND_CUSTOM: return "Custom";
+        case E_GRAPHICS_BACKEND_UNKNOWN:
+        default:
+            return "Unknown";
+    }
 }
 
 
@@ -9812,7 +10105,11 @@ static e_result e_graphics_init_by_backend(const e_graphics_config* pConfig, e_g
     }
 
     if (pVTable == NULL) {
-        return E_ERROR; /* Couldn't find an appropriate vtable. */
+        if (backend == E_GRAPHICS_BACKEND_CUSTOM) {
+            return E_INVALID_ARGS;      /* Custom backend specified, but no vtable provided. */
+        } else {
+            return E_BACKEND_DISABLED;  /* Couldn't find an appropriate vtable. Not being able to find a stock backend's vtable means it's been disabled at compile time. */
+        }
     }
 
     if (!e_engine_is_graphics_backend_supported(pConfig->pEngine, backend)) {
@@ -9854,7 +10151,10 @@ E_API e_result e_graphics_init(const e_graphics_config* pConfig, const e_allocat
             if (result == E_SUCCESS) {
                 break;  /* Found one. */
             } else {
-                e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_WARNING, "Failed to initialize graphics backend %d.", iGraphicsBackend);   /* TODO: Add e_graphics_backend_get_name() and log that instead. */
+                /* Don't post a warning if the backend has been disabled at compile time. In this case it should feel as though it doesn't even exist. */
+                if (result != E_BACKEND_DISABLED) {
+                    e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_WARNING, "Failed to initialize graphics backend %s.", e_graphics_get_backend_name((e_graphics_backend)iGraphicsBackend));
+                }
             }
         }
 
@@ -9866,7 +10166,7 @@ E_API e_result e_graphics_init(const e_graphics_config* pConfig, const e_allocat
     } else {
         result = e_graphics_init_by_backend(pConfig, pConfig->backend, pAllocationCallbacks, &pGraphics);
         if (result != E_SUCCESS) {
-            e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initailize graphics backend.");   /* TODO: Log the backend name. Use e_graphics_backend_get_name(). */
+            e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initailize graphics backend.");
             return result;
         }
     }
@@ -9974,13 +10274,149 @@ E_API e_result e_graphics_present_surface(e_graphics* pGraphics, e_graphics_surf
 
 
 
-E_API e_graphics_surface_config e_graphics_surface_config_init(e_graphics* pGraphics, e_window* pWindow)
+E_API e_graphics_device_config e_graphics_device_config_init(e_graphics* pGraphics)
+{
+    e_graphics_device_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.pGraphics = pGraphics;
+
+    return config;
+}
+
+
+E_API e_result e_graphics_device_alloc_size(const e_graphics_device_config* pConfig, size_t* pSize)
+{
+    e_result result;
+    size_t size;
+
+    if (pSize == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *pSize = 0;
+
+    if (pConfig == NULL || pConfig->pGraphics == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pGraphics->pVTable->device_alloc_size == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pConfig->pGraphics->pVTable->device_alloc_size(pConfig->pGraphics->pVTableUserData, pConfig, &size);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to retrieve the size of the allocation. */
+    }
+
+    *pSize = size;
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_device_init_preallocated(const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_device* pDevice)
+{
+    e_result result;
+
+    if (pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig == NULL || pConfig->pGraphics == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pDevice->pGraphics = pConfig->pGraphics;
+
+    if (pConfig->pGraphics->pVTable->device_init == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pConfig->pGraphics->pVTable->device_init(pConfig->pGraphics->pVTableUserData, pDevice, pConfig, pAllocationCallbacks);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_device_init(const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_device** ppDevice)
+{
+    e_result result;
+    e_graphics_device* pDevice;
+    size_t allocationSize;
+
+    if (ppDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppDevice = NULL;
+
+    result = e_graphics_device_alloc_size(pConfig, &allocationSize);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    E_ASSERT(allocationSize >= sizeof(e_graphics_device));
+
+    pDevice = (e_graphics_device*)e_calloc(allocationSize, pAllocationCallbacks);
+    if (pDevice == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    result = e_graphics_device_init_preallocated(pConfig, pAllocationCallbacks, pDevice);
+    if (result != E_SUCCESS) {
+        e_free(*ppDevice, pAllocationCallbacks);
+        return result;
+    }
+
+    pDevice->freeOnUninit = E_TRUE;
+
+    *ppDevice = pDevice;
+    return E_SUCCESS;
+}
+
+E_API void e_graphics_device_uninit(e_graphics_device* pDevice, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pDevice == NULL) {
+        return;
+    }
+
+    if (pDevice->pGraphics->pVTable->device_uninit != NULL) {
+        pDevice->pGraphics->pVTable->device_uninit(pDevice->pGraphics->pVTableUserData, pDevice, pAllocationCallbacks);
+    }
+
+    if (pDevice->freeOnUninit) {
+        e_free(pDevice, pAllocationCallbacks);
+    }
+}
+
+E_API e_graphics* e_graphics_device_get_graphics(const e_graphics_device* pDevice)
+{
+    if (pDevice == NULL) {
+        return NULL;
+    }
+
+    return pDevice->pGraphics;
+}
+
+E_API e_log* e_graphics_device_get_log(e_graphics_device* pDevice)
+{
+    if (pDevice == NULL) {
+        return NULL;
+    }
+
+    return e_graphics_get_log(e_graphics_device_get_graphics(pDevice));
+}
+
+
+
+E_API e_graphics_surface_config e_graphics_surface_config_init(e_graphics_device* pDevice, e_window* pWindow)
 {
     e_graphics_surface_config config;
 
     E_ZERO_OBJECT(&config);
-    config.pGraphics = pGraphics;
-    config.pWindow   = pWindow;
+    config.pDevice = pDevice;
+    config.pWindow = pWindow;
 
     return config;
 }
@@ -9997,15 +10433,15 @@ E_API e_result e_graphics_surface_alloc_size(const e_graphics_surface_config* pC
 
     *pSize = 0;
 
-    if (pConfig == NULL || pConfig->pGraphics == NULL) {
+    if (pConfig == NULL || pConfig->pDevice == NULL) {
         return E_INVALID_ARGS;
     }
 
-    if (pConfig->pGraphics->pVTable->surface_alloc_size == NULL) {
+    if (pConfig->pDevice->pGraphics->pVTable->surface_alloc_size == NULL) {
         return E_NOT_IMPLEMENTED;
     }
 
-    result = pConfig->pGraphics->pVTable->surface_alloc_size(pConfig->pGraphics->pVTableUserData, pConfig, &size);
+    result = pConfig->pDevice->pGraphics->pVTable->surface_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &size);
     if (result != E_SUCCESS) {
         return result;  /* Failed to retrieve the size of the allocation. */
     }
@@ -10018,11 +10454,12 @@ E_API e_result e_graphics_surface_init_preallocated(const e_graphics_surface_con
 {
     e_result result;
 
-    if (pSurface == NULL || pConfig == NULL || pConfig->pGraphics == NULL) {
+    if (pSurface == NULL || pConfig == NULL || pConfig->pDevice == NULL) {
         return E_INVALID_ARGS;
     }
 
-    pSurface->pGraphics = pConfig->pGraphics;
+    pSurface->pGraphics = pConfig->pDevice->pGraphics;
+    pSurface->pDevice   = pConfig->pDevice;
     pSurface->pWindow   = pConfig->pWindow;
 
     if (pSurface->pGraphics->pVTable->surface_init == NULL) {
@@ -10053,7 +10490,11 @@ E_API e_result e_graphics_surface_init(const e_graphics_surface_config* pConfig,
         return E_INVALID_ARGS;
     }
 
-    result = pConfig->pGraphics->pVTable->surface_alloc_size(pConfig->pGraphics->pVTableUserData, pConfig, &allocationSize);
+    if (pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pConfig->pDevice->pGraphics->pVTable->surface_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &allocationSize);
     if (result != E_SUCCESS) {
         return result;
     }
@@ -10067,7 +10508,7 @@ E_API e_result e_graphics_surface_init(const e_graphics_surface_config* pConfig,
 
     result = e_graphics_surface_init_preallocated(pConfig, pAllocationCallbacks, pSurface);
     if (result != E_SUCCESS) {
-        e_log_postf(e_graphics_get_log(pConfig->pGraphics), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface.");
+        e_log_postf(e_graphics_get_log(pConfig->pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface.");
         e_free(pSurface, pAllocationCallbacks);
         return result;
     }
@@ -10093,25 +10534,479 @@ E_API void e_graphics_surface_uninit(e_graphics_surface* pSurface, const e_alloc
     }
 }
 
-E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface)
+E_API e_result e_graphics_surface_refresh(e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pSurface == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pSurface->pGraphics->pVTable->surface_refresh == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    return pSurface->pGraphics->pVTable->surface_refresh(pSurface->pGraphics->pVTableUserData, pSurface, pAllocationCallbacks);
+}
+
+E_API e_graphics* e_graphics_surface_get_graphics(const e_graphics_surface* pSurface)
+{
+    return e_graphics_device_get_graphics(e_graphics_surface_get_device(pSurface));
+}
+
+E_API e_graphics_device* e_graphics_surface_get_device(const e_graphics_surface* pSurface)
 {
     if (pSurface == NULL) {
         return NULL;
     }
 
-    return e_graphics_get_log(pSurface->pGraphics);
+    return pSurface->pDevice;
 }
+
+E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface)
+{
+    return e_graphics_device_get_log(e_graphics_surface_get_device(pSurface));
+}
+
+
+
+static e_graphics_attachment_description e_graphics_attachment_description_init()
+{
+    e_graphics_attachment_description desc;
+
+    E_ZERO_OBJECT(&desc);
+    desc.flags          = 0;
+    desc.format         = E_FORMAT_UNKNOWN;
+    desc.samples        = 1;
+    desc.loadOp         = E_ATTACHMENT_LOAD_OP_DONT_CARE;
+    desc.storeOp        = E_ATTACHMENT_STORE_OP_DONT_CARE;
+    desc.stencilLoadOp  = E_ATTACHMENT_LOAD_OP_DONT_CARE;
+    desc.stencilStoreOp = E_ATTACHMENT_STORE_OP_DONT_CARE;
+    desc.initialLayout  = E_IMAGE_LAYOUT_UNDEFINED;
+    desc.finalLayout    = E_IMAGE_LAYOUT_UNDEFINED;
+
+    return desc;
+}
+
+E_API e_graphics_attachment_description e_graphics_attachment_description_init_color(e_format format, e_uint32 samples, e_attachment_load_op loadOp, e_attachment_store_op storeOp, e_image_layout initialLayout, e_image_layout finalLayout)
+{
+    e_graphics_attachment_description desc;
+
+    desc = e_graphics_attachment_description_init();
+    desc.format         = format;
+    desc.samples        = samples;
+    desc.loadOp         = loadOp;
+    desc.storeOp        = storeOp;
+    desc.initialLayout  = initialLayout;
+    desc.finalLayout    = finalLayout;
+
+    return desc;
+}
+
+E_API e_graphics_attachment_description e_graphics_attachment_description_init_depth_stencil(e_format format, e_uint32 samples, e_attachment_load_op depthLoadOp, e_attachment_store_op depthStoreOp, e_attachment_load_op stencilLoadOp, e_attachment_store_op stencilStoreOp, e_image_layout initialLayout, e_image_layout finalLayout)
+{
+    e_graphics_attachment_description desc;
+
+    desc = e_graphics_attachment_description_init();
+    desc.format         = format;
+    desc.samples        = samples;
+    desc.loadOp         = depthLoadOp;
+    desc.storeOp        = depthStoreOp;
+    desc.stencilLoadOp  = stencilLoadOp;
+    desc.stencilStoreOp = stencilStoreOp;
+    desc.initialLayout  = initialLayout;
+    desc.finalLayout    = finalLayout;
+
+    return desc;
+}
+
+
+E_API e_graphics_attachment_reference e_graphics_attachment_reference_init(e_uint32 attachmentIndex, e_image_layout layout)
+{
+    e_graphics_attachment_reference ref;
+
+    E_ZERO_OBJECT(&ref);
+    ref.attachmentIndex = attachmentIndex;
+    ref.layout          = layout;
+
+    return ref;
+}
+
+
+E_API e_graphics_render_pass_config e_graphics_render_pass_config_init(e_graphics_device* pDevice)
+{
+    e_graphics_render_pass_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.pDevice = pDevice;
+
+    return config;
+}
+
+
+E_API e_result e_graphics_render_pass_alloc_size(const e_graphics_render_pass_config* pConfig, size_t* pSize)
+{
+    e_result result;
+    size_t size;
+
+    if (pSize == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *pSize = 0;
+
+    if (pConfig == NULL || pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pDevice->pGraphics->pVTable->render_pass_alloc_size == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pConfig->pDevice->pGraphics->pVTable->render_pass_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &size);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to retrieve the size of the allocation. */
+    }
+
+    *pSize = size;
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_render_pass_init_preallocated(const e_graphics_render_pass_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_render_pass* pRenderPass)
+{
+    e_result result;
+
+    if (pRenderPass == NULL || pConfig == NULL || pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pRenderPass->pDevice = pConfig->pDevice;
+
+    if (pRenderPass->pDevice->pGraphics->pVTable->render_pass_init == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pRenderPass->pDevice->pGraphics->pVTable->render_pass_init(pRenderPass->pDevice->pGraphics->pVTableUserData, pRenderPass, pConfig, pAllocationCallbacks);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_render_pass_init(const e_graphics_render_pass_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_render_pass** ppRenderPass)
+{
+    e_result result;
+    e_graphics_render_pass* pRenderPass;
+    size_t allocationSize;
+
+    if (ppRenderPass == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppRenderPass = NULL;
+
+    if (pConfig == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pConfig->pDevice->pGraphics->pVTable->render_pass_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &allocationSize);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    E_ASSERT(allocationSize >= sizeof(e_graphics_render_pass));
+
+    pRenderPass = (e_graphics_render_pass*)e_calloc(allocationSize, pAllocationCallbacks);
+    if (pRenderPass == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    result = e_graphics_render_pass_init_preallocated(pConfig, pAllocationCallbacks, pRenderPass);
+    if (result != E_SUCCESS) {
+        e_log_postf(e_graphics_get_log(pConfig->pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface.");
+        e_free(pRenderPass, pAllocationCallbacks);
+        return result;
+    }
+
+    pRenderPass->freeOnUninit = E_TRUE;
+
+    *ppRenderPass = pRenderPass;
+    return E_SUCCESS;
+}
+
+E_API void e_graphics_render_pass_uninit(e_graphics_render_pass* pRenderPass, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pRenderPass == NULL) {
+        return;
+    }
+
+    if (pRenderPass->pDevice->pGraphics->pVTable->render_pass_uninit != NULL) {
+        pRenderPass->pDevice->pGraphics->pVTable->render_pass_uninit(pRenderPass->pDevice->pGraphics->pVTableUserData, pRenderPass, pAllocationCallbacks);
+    }
+
+    if (pRenderPass->freeOnUninit) {
+        e_free(pRenderPass, pAllocationCallbacks);
+    }
+}
+
+E_API e_graphics_device* e_graphics_render_pass_get_device(const e_graphics_render_pass* pRenderPass)
+{
+    if (pRenderPass == NULL) {
+        return NULL;
+    }
+
+    return pRenderPass->pDevice;
+}
+
+
+
+E_API e_graphics_pipeline_stage_config e_graphics_pipeline_stage_config_init(e_graphics_shader_stage stage, e_graphics_shader_format format, const void* pShaderCode, size_t shaderCodeSize, const char* pEntryPoint)
+{
+    e_graphics_pipeline_stage_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.stage          = stage;
+    config.format         = format;
+    config.pShaderCode    = pShaderCode;
+    config.shaderCodeSize = shaderCodeSize;
+    config.pEntryPoint    = pEntryPoint;
+
+    return config;
+}
+
+
+E_API e_graphics_vertex_input_binding_config e_graphics_vertex_input_binding_config_init_ex(e_uint32 binding, e_uint32 stride, e_vertex_input_class inputClass, e_uint32 instanceStepRate)
+{
+    e_graphics_vertex_input_binding_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.binding          = binding;
+    config.stride           = stride;
+    config.inputClass       = inputClass;
+    config.instanceStepRate = instanceStepRate;
+
+    return config;
+}
+
+E_API e_graphics_vertex_input_binding_config e_graphics_vertex_input_binding_config_init(e_uint32 binding, e_uint32 stride)
+{
+    return e_graphics_vertex_input_binding_config_init_ex(binding, stride, E_VERTEX_INPUT_CLASS_VERTEX, 0);
+}
+
+
+E_API e_graphics_vertex_input_config e_graphics_vertex_input_config_init(e_uint32 location, e_uint32 binding, e_format format, e_uint32 offset)
+{
+    e_graphics_vertex_input_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.location = location;
+    config.binding  = binding;
+    config.format   = format;
+    config.offset   = offset;
+
+    return config;
+}
+
+
+
+E_API e_graphics_pipeline_config e_graphics_pipeline_config_init(e_graphics_device* pDevice)
+{
+    e_graphics_pipeline_config config;
+
+    E_ZERO_OBJECT(&config);
+    config.pDevice = pDevice;
+
+    return config;
+}
+
+
+
+E_API e_result e_graphics_pipeline_alloc_size(const e_graphics_pipeline_config* pConfig, size_t* pSize)
+{
+    e_result result;
+    size_t size;
+
+    if (pSize == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *pSize = 0;
+
+    if (pConfig == NULL || pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pDevice->pGraphics->pVTable->pipeline_alloc_size == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pConfig->pDevice->pGraphics->pVTable->pipeline_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &size);
+    if (result != E_SUCCESS) {
+        return result;  /* Failed to retrieve the size of the allocation. */
+    }
+
+    *pSize = size;
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_pipeline_init_preallocated(const e_graphics_pipeline_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_pipeline* pPipeline)
+{
+    e_result result;
+
+    if (pPipeline == NULL || pConfig == NULL || pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pPipeline->pDevice = pConfig->pDevice;
+
+    if (pPipeline->pDevice->pGraphics->pVTable->pipeline_init == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    result = pPipeline->pDevice->pGraphics->pVTable->pipeline_init(pPipeline->pDevice->pGraphics->pVTableUserData, pPipeline, pConfig, pAllocationCallbacks);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_graphics_pipeline_init(const e_graphics_pipeline_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_pipeline** ppPipeline)
+{
+    e_result result;
+    e_graphics_pipeline* pPipeline;
+    size_t allocationSize;
+
+    if (ppPipeline == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppPipeline = NULL;
+
+    if (pConfig == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pDevice == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pConfig->pDevice->pGraphics->pVTable->pipeline_alloc_size(pConfig->pDevice->pGraphics->pVTableUserData, pConfig, &allocationSize);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    E_ASSERT(allocationSize >= sizeof(e_graphics_pipeline));
+
+    pPipeline = (e_graphics_pipeline*)e_calloc(allocationSize, pAllocationCallbacks);
+    if (pPipeline == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    result = e_graphics_pipeline_init_preallocated(pConfig, pAllocationCallbacks, pPipeline);
+    if (result != E_SUCCESS) {
+        e_log_postf(e_graphics_get_log(pConfig->pDevice->pGraphics), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface.");
+        e_free(pPipeline, pAllocationCallbacks);
+        return result;
+    }
+
+    pPipeline->freeOnUninit = E_TRUE;
+
+    *ppPipeline = pPipeline;
+    return E_SUCCESS;
+}
+
+E_API void e_graphics_pipeline_uninit(e_graphics_pipeline* pPipeline, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pPipeline == NULL) {
+        return;
+    }
+
+    if (pPipeline->pDevice->pGraphics->pVTable->pipeline_uninit != NULL) {
+        pPipeline->pDevice->pGraphics->pVTable->pipeline_uninit(pPipeline->pDevice->pGraphics->pVTableUserData, pPipeline, pAllocationCallbacks);
+    }
+
+    if (pPipeline->freeOnUninit) {
+        e_free(pPipeline, pAllocationCallbacks);
+    }
+}
+
+E_API e_graphics_device* e_graphics_pipeline_get_device(const e_graphics_pipeline* pPipeline)
+{
+    if (pPipeline == NULL) {
+        return NULL;
+    }
+
+    return pPipeline->pDevice;
+}
+
+
 /* ==== END e_graphics.c ==== */
 
 
 
 
 /* ==== BEG e_client.c ==== */
+static e_result e_client_handle_event(e_client* pClient, e_client_event* pEvent)
+{
+    E_ASSERT(pEvent  != NULL);
+    E_ASSERT(pClient != NULL);
+    E_ASSERT(pClient->pVTable != NULL);
+    E_ASSERT(pClient->pVTable->onEvent != NULL);
+
+    return pClient->pVTable->onEvent(pClient->pVTableUserData, pClient, pEvent);
+}
+
+static e_client_event e_client_event_init(e_client_event_type type)
+{
+    e_client_event e;
+
+    e.type = type;
+
+    return e;
+}
+
 static e_result e_client_window_event_callback(void* pUserData, e_window* pWindow, e_window_event* pEvent)
 {
-    (void)pUserData;
-    (void)pWindow;
-    (void)pEvent;
+    e_client* pClient = (e_client*)pUserData;
+    e_client_event e;
+
+    switch (pEvent->type)
+    {
+        case E_WINDOW_EVENT_CLOSE:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_WINDOW_CLOSE);
+            e.data.windowClose.pWindow = pWindow;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_PAINT:
+        {
+        } break;
+
+        case E_WINDOW_EVENT_SIZE:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_WINDOW_SIZE);
+            e.data.windowSize.pWindow = pWindow;
+            e.data.windowSize.x = pEvent->data.size.x;
+            e.data.windowSize.y = pEvent->data.size.y;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_MOVE:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_WINDOW_MOVE);
+            e.data.windowMove.pWindow = pWindow;
+            e.data.windowMove.x = pEvent->data.move.x;
+            e.data.windowMove.y = pEvent->data.move.y;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        break;
+    }
 
     return E_SUCCESS;
 }
@@ -10129,7 +11024,8 @@ E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pConfi
 
     E_ZERO_OBJECT(&config);
     config.pEngine = pEngine;
-    config.pConfigFileSection = pConfigFileSection;    
+    config.pConfigFileSection = pConfigFileSection;
+    config.graphicsDeviceID = E_DEFAULT_GRAPHICS_DEVICE_ID;
 
     return config;
 }
@@ -10200,6 +11096,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
     pClient->flags           = pConfig->flags;
     pClient->pWindow         = NULL;  /* Will be initialized below. */
     pClient->pConfigSection  = pConfig->pConfigFileSection;
+    pClient->allocationCallbacks = e_allocation_callbacks_init_copy(pAllocationCallbacks);
 
     /* If we don't have a window, we don't have any graphics either. */
     if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) != 0) {
@@ -10210,6 +11107,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
     if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) == 0) {
         unsigned int resolutionX;
         unsigned int resolutionY;
+        unsigned int windowFlags;
         const char* pTitle;
         char* pTitleFromConfig = NULL;
 
@@ -10244,8 +11142,12 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
             }
         }
 
+        windowFlags = 0;
+        if ((pConfig->pEngine->flags & E_ENGINE_FLAG_NO_OPENGL) == 0 || (pConfig->flags & E_CLIENT_FLAG_WINDOW_OPENGL) != 0) {
+            windowFlags |= E_WINDOW_FLAG_OPENGL;
+        }
 
-        windowConfig = e_window_config_init(pClient->pEngine, pTitle, 0, 0, resolutionX, resolutionY, E_WINDOW_FLAG_OPENGL, &e_gClientWindowVTable);
+        windowConfig = e_window_config_init(pClient->pEngine, pTitle, 0, 0, resolutionX, resolutionY, windowFlags, &e_gClientWindowVTable, pClient);
 
         result = e_window_init_preallocated(&windowConfig, pAllocationCallbacks, pClient->pWindow);
         if (result != E_SUCCESS) {
@@ -10260,10 +11162,13 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
 
     if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
         e_graphics_config graphicsConfig;
+        e_graphics_device_config deviceConfig;
         e_graphics_surface_config surfaceConfig;
 
         E_ASSERT(pClient->pWindow != NULL); /* We should never be getting here if we don't have a window. */
 
+
+        /* We need to initialize the graphics sub-system. */
         graphicsConfig = e_graphics_config_init(pConfig->pEngine);
         graphicsConfig.backend = pConfig->graphicsBackend;
 
@@ -10273,12 +11178,29 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
             return result;
         }
 
-        /* We need a surface to connect our window to the graphics system. */
-        surfaceConfig = e_graphics_surface_config_init(pClient->pGraphics, pClient->pWindow);
 
-        result = e_graphics_surface_init(&surfaceConfig, pAllocationCallbacks, &pClient->pWindowRT);
+        /*
+        Now that we have our graphics system initialized we can create our device. We use the device ID that
+        was passed into the config, which defaults to the default graphics device.
+        */
+        deviceConfig = e_graphics_device_config_init(pClient->pGraphics);
+        deviceConfig.deviceID = pConfig->graphicsDeviceID;
+
+        result = e_graphics_device_init(&deviceConfig, pAllocationCallbacks, &pClient->pGraphicsDevice);
+        if (result != E_SUCCESS) {
+            e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize graphics device for client.");
+            e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
+            return result;
+        }
+
+
+        /* We need a surface to connect our window to the graphics system. */
+        surfaceConfig = e_graphics_surface_config_init(pClient->pGraphicsDevice, pClient->pWindow);
+
+        result = e_graphics_surface_init(&surfaceConfig, pAllocationCallbacks, &pClient->pGraphicsSurface);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface for client.");
+            e_graphics_device_uninit(pClient->pGraphicsDevice, pAllocationCallbacks);
             e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
             return result;
         }
@@ -10358,6 +11280,52 @@ E_API e_log* e_client_get_log(e_client* pClient)
     return e_engine_get_log(pClient->pEngine);
 }
 
+E_API e_window* e_client_get_window(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return NULL;
+    }
+
+    return pClient->pWindow;
+}
+
+E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent)
+{
+    if (pClient == NULL || pEvent == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    switch (pEvent->type)
+    {
+        case E_CLIENT_EVENT_WINDOW_CLOSE:
+        {
+            /*
+            This WINDOW_CLOSE event will be fired when the user closes the window via the OS. By default
+            we'll just exit from the engine's loop which will cause the engine to shut down. This is
+            useful as a default action, but a real application might want to handle this themselves and
+            show a confirmation prompt or something.
+            */
+            e_engine_exit(pClient->pEngine, 0);
+        } break;
+
+        case E_CLIENT_EVENT_WINDOW_SIZE:
+        {
+            /*
+            When the window is resized we need to also resize the surface. If we don't do this, the surface's
+            swapchain can be put into an invalid state and graphics will break.
+
+            When resizing the surface we don't actually pass in the new size of the window. Instead, the
+            required size of the swapchain is calculated internally.
+            */
+            e_graphics_surface_refresh(pClient->pGraphicsSurface, &pClient->allocationCallbacks);
+        } break;
+
+        default: break;
+    }
+
+    return E_SUCCESS;
+}
+
 
 static e_result e_client_step_default(void* pUserData, e_client* pClient, double dt)
 {
@@ -10366,12 +11334,12 @@ static e_result e_client_step_default(void* pUserData, e_client* pClient, double
     (void)dt;
 
     /* Draw stuff. */
-    e_graphics_set_surface(pClient->pGraphics, pClient->pWindowRT);
+    e_graphics_set_surface(pClient->pGraphics, pClient->pGraphicsSurface);
     {
-        glClearColor(0.5f, 0.5f, 1.0f, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
+        //glClearColor(0.5f, 0.5f, 1.0f, 0);
+        //glClear(GL_COLOR_BUFFER_BIT);
     }
-    e_graphics_present_surface(pClient->pGraphics, pClient->pWindowRT);
+    e_graphics_present_surface(pClient->pGraphics, pClient->pGraphicsSurface);
 
     return E_SUCCESS;
 }

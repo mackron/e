@@ -13,11 +13,13 @@ static e_result test_game_engine_iteration(void* pUserData, e_engine* pEngine, d
     E_ASSERT(pEngine != NULL);
     E_UNUSED(pUserData);
 
-    e_client_step(pClient1, dt);
+    (void)dt;
+
+    //e_client_step(pClient1, dt);
 
 
     /* Do some drawing on the graphics engine. */
-    e_graphics_present_surface(pVulkanGraphics, pVulkanSurface);
+    /*e_graphics_present_surface(pVulkanGraphics, pVulkanSurface);*/
 
     return E_SUCCESS;
 }
@@ -89,7 +91,7 @@ int main(int argc, char** argv)
     }
 
 
-    engineConfig = e_engine_config_init(argc, argv, 0, &gTestEngineVTable);
+    engineConfig = e_engine_config_init(argc, argv, 0, &gTestEngineVTable, NULL);
     engineConfig.pLog = pLog;
     
     result = e_engine_init(&engineConfig, NULL, &pEngine);
@@ -100,6 +102,7 @@ int main(int argc, char** argv)
 
     /* We need a client for the game. */
     clientConfig = e_client_config_init(pEngine, "game");
+    clientConfig.graphicsBackend = E_GRAPHICS_BACKEND_VULKAN;
 
     result = e_client_init(&clientConfig, NULL, &pClient1);
     if (result != E_SUCCESS) {

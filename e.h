@@ -191,7 +191,8 @@ typedef enum
     E_MEMORY_ALREADY_MAPPED = -52,
 
     /* Engine-specific error codes. */
-    E_CHECKSUM_MISMATCH = -100
+    E_CHECKSUM_MISMATCH = -100,
+    E_BACKEND_DISABLED = -101
 } e_result;
 
 typedef enum
@@ -204,6 +205,17 @@ typedef enum
     /* For counting the number of stock graphics backends. */
     E_GRAPHICS_BACKEND_COUNT,
 } e_graphics_backend;
+
+typedef enum
+{
+    E_FORMAT_UNKNOWN,
+    E_FORMAT_R32_FLOAT,
+    E_FORMAT_R32G32_FLOAT,
+    E_FORMAT_R32G32B32_FLOAT,
+    E_FORMAT_R32G32B32A32_FLOAT,
+    E_FORMAT_R8G8B8A8_UNORM,
+    E_FORMAT_D24_UNORM_S8_UINT,
+} e_format;
 
 
 /* dlopen, etc. with e_handle as the library handle. */
@@ -361,7 +373,7 @@ Read mode is simpler:
 
     ```c
     e_memory_stream stream;
-    e_memory_stream_init(pData, dataSize, NULL, &stream);
+    e_memory_stream_init_readonly(pData, dataSize, &stream);
 
     // Read some data.
     e_memory_stream_read(&stream, &myBuffer, bytesToRead, NULL);
@@ -503,7 +515,7 @@ struct e_fs_iterator
 struct e_fs_vtable
 {
     e_result       (* file_alloc_size)(void* pUserData, size_t* pSize);
-    e_result       (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
+    e_result       (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
     void           (* close          )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
     e_result       (* read           )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
     e_result       (* write          )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
@@ -513,7 +525,7 @@ struct e_fs_vtable
     e_result       (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
     e_fs_iterator* (* first_file     )(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
     e_fs_iterator* (* next_file      )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Must return null when there are no more files. In this case, free_iterator must be called internally. */
-    void           (* free_iterator  )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Free the `e_fs_iterator` object here since `first` and `next` where the ones who allocated it. Also do any uninitialization routines. */
+    void           (* free_iterator  )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Free the `e_fs_iterator` object here since `first_file` and `next_file` were the ones who allocated it. Also do any uninitialization routines. */
 };
 
 struct e_fs_config
@@ -561,7 +573,7 @@ struct e_file
 E_API e_result e_fs_init_preallocated(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs* pFS);
 E_API e_result e_fs_init(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs** ppFS);
 E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
 E_API void e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_fs_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_fs_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
@@ -613,7 +625,7 @@ E_API e_result e_archive_init_from_file(const e_archive_vtable* pVTable, void* p
 E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs* e_archive_fs(e_archive* pArchive);
 E_API e_stream* e_archive_stream(e_archive* pArchive);
-E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
 E_API void e_archive_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_archive_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_archive_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
@@ -637,7 +649,7 @@ E_API e_archive_vtable* e_zip_vtable();
 E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
 E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
 E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, e_open_mode openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
+E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
 E_API void e_zip_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_zip_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_zip_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
@@ -747,7 +759,7 @@ struct e_engine_config
     void* pFSVTableUserData;
 };
 
-E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable);
+E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData);
 
 
 struct e_engine
@@ -793,7 +805,9 @@ typedef enum
 {
     E_WINDOW_EVENT_NONE,
     E_WINDOW_EVENT_CLOSE,
-    E_WINDOW_EVENT_PAINT
+    E_WINDOW_EVENT_PAINT,
+    E_WINDOW_EVENT_SIZE,
+    E_WINDOW_EVENT_MOVE
 } e_window_event_type;
 
 typedef struct e_platform_window e_platform_window; /* Platform-specific window object. This is defined in the implementation on a per-platform basis. */
@@ -812,6 +826,20 @@ struct e_window_event
         {
             int _unused;
         } close;
+        struct
+        {
+            int _unused;
+        } paint;
+        struct
+        {
+            int x;
+            int y;
+        } size;
+        struct
+        {
+            int x;
+            int y;
+        } move;
     } data;
 };
 
@@ -834,7 +862,7 @@ struct e_window_config
     void* pVTableUserData;
 };
 
-E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle, int posX, int posY, unsigned int sizeX, unsigned int sizeY, unsigned int flags, e_window_vtable* pVTable);
+E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle, int posX, int posY, unsigned int sizeX, unsigned int sizeY, unsigned int flags, e_window_vtable* pVTable, void* pVTableUserData);
 
 
 typedef enum
@@ -943,7 +971,7 @@ E_INLINE e_mat4f e_mat4f_vulkan_clip_correction()               { return e_mat4f
 E_INLINE e_mat4f e_mat4f_translate(e_vec4f translation)         { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), translation); }
 E_INLINE e_mat4f mat4_scale(e_vec4f scale)                      { return e_mat4f_init(e_vec4f_4f(scale.x, 0, 0, 0), e_vec4f_4f(0, scale.y, 0, 0), e_vec4f_4f(0, 0, scale.z, 0), e_vec4f_4f(0, 0, 0, scale.w)); }
 
-E_INLINE e_mat4f e_mat4f_rotate(float angleInRadians, e_vec4f axis) /* TODO: Change this to a vec3. Having it be vec4 feels unintuitive. */
+E_INLINE e_mat4f e_mat4f_rotate(float angleInRadians, e_vec3f axis)
 {
     float c = cosf(angleInRadians);
     float s = sinf(angleInRadians);
@@ -1027,29 +1055,318 @@ E_INLINE e_vec4f e_mat4f_mul_vec4(e_mat4f m, e_vec4f v)
 
 
 /* ==== BEG e_graphics.h ==== */
-typedef struct e_graphics_vtable         e_graphics_vtable;
-typedef struct e_graphics_config         e_graphics_config;
-typedef struct e_graphics                e_graphics;
+typedef enum
+{
+    E_GRAPHICS_SHADER_STAGE_VERTEX          = 0x00000001,
+    E_GRAPHICS_SHADER_STAGE_TESS_CONTROL    = 0x00000002,
+    E_GRAPHICS_SHADER_STAGE_TESS_EVALUATION = 0x00000004,
+    E_GRAPHICS_SHADER_STAGE_GEOMETRY        = 0x00000008,
+    E_GRAPHICS_SHADER_STAGE_FRAGMENT        = 0x00000010,
+    E_GRAPHICS_SHADER_STAGE_COMPUTE         = 0x00000020
+} e_graphics_shader_stage;
 
-typedef struct e_graphics_device_info    e_graphics_device_info;
+typedef enum
+{
+    E_VERTEX_INPUT_CLASS_VERTEX,
+    E_VERTEX_INPUT_CLASS_INSTANCE
+} e_vertex_input_class;
 
-typedef struct e_graphics_surface_config e_graphics_surface_config;
-typedef struct e_graphics_surface        e_graphics_surface;
+typedef enum
+{
+    E_PRIMITIVE_TOPOLOGY_POINT_LIST,
+    E_PRIMITIVE_TOPOLOGY_LINE_LIST,
+    E_PRIMITIVE_TOPOLOGY_LINE_STRIP,
+    E_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    E_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+    E_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN,
+    E_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY,
+    E_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY,
+    E_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY,
+    E_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY,
+    E_PRIMITIVE_TOPOLOGY_PATCH_LIST
+} e_primitive_topology;
+
+typedef enum
+{
+    E_POLYGON_MODE_FILL,
+    E_POLYGON_MODE_LINE,
+    E_POLYGON_MODE_POINT
+} e_polygon_mode;
+
+typedef enum
+{
+    E_CULL_MODE_NONE,
+    E_CULL_MODE_FRONT,
+    E_CULL_MODE_BACK,
+    E_CULL_MODE_FRONT_AND_BACK
+} e_cull_mode;
+
+typedef enum
+{
+    E_FRONT_FACE_CLOCKWISE,
+    E_FRONT_FACE_COUNTER_CLOCKWISE
+} e_front_face;
+
+typedef enum
+{
+    E_COMPARE_OP_NEVER,
+    E_COMPARE_OP_LESS,
+    E_COMPARE_OP_EQUAL,
+    E_COMPARE_OP_LESS_OR_EQUAL,
+    E_COMPARE_OP_GREATER,
+    E_COMPARE_OP_NOT_EQUAL,
+    E_COMPARE_OP_GREATER_OR_EQUAL,
+    E_COMPARE_OP_ALWAYS
+} e_compare_op;
+
+typedef enum
+{
+    E_STENCIL_OP_KEEP,
+    E_STENCIL_OP_ZERO,
+    E_STENCIL_OP_REPLACE,
+    E_STENCIL_OP_INCREMENT_AND_CLAMP,
+    E_STENCIL_OP_DECREMENT_AND_CLAMP,
+    E_STENCIL_OP_INVERT,
+    E_STENCIL_OP_INCREMENT_AND_WRAP,
+    E_STENCIL_OP_DECREMENT_AND_WRAP
+} e_stencil_op;
+
+typedef enum
+{
+    E_BLEND_FACTOR_ZERO,
+    E_BLEND_FACTOR_ONE,
+    E_BLEND_FACTOR_SRC_COLOR,
+    E_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
+    E_BLEND_FACTOR_DST_COLOR,
+    E_BLEND_FACTOR_ONE_MINUS_DST_COLOR,
+    E_BLEND_FACTOR_SRC_ALPHA,
+    E_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+    E_BLEND_FACTOR_DST_ALPHA,
+    E_BLEND_FACTOR_ONE_MINUS_DST_ALPHA,
+    E_BLEND_FACTOR_CONSTANT_COLOR,
+    E_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR,
+    E_BLEND_FACTOR_CONSTANT_ALPHA,
+    E_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA,
+    E_BLEND_FACTOR_SRC_ALPHA_SATURATE,
+    E_BLEND_FACTOR_SRC1_COLOR,
+    E_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR,
+    E_BLEND_FACTOR_SRC1_ALPHA,
+    E_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA
+} e_blend_factor;
+
+typedef enum
+{
+    E_BLEND_OP_ADD,
+    E_BLEND_OP_SUBTRACT,
+    E_BLEND_OP_REVERSE_SUBTRACT,
+    E_BLEND_OP_MIN,
+    E_BLEND_OP_MAX
+} e_blend_op;
+
+typedef enum
+{
+    E_LOGIC_OP_CLEAR,
+    E_LOGIC_OP_AND,
+    E_LOGIC_OP_AND_REVERSE,
+    E_LOGIC_OP_COPY,
+    E_LOGIC_OP_AND_INVERTED,
+    E_LOGIC_OP_NO_OP,
+    E_LOGIC_OP_XOR,
+    E_LOGIC_OP_OR,
+    E_LOGIC_OP_NOR,
+    E_LOGIC_OP_EQUIVALENT,
+    E_LOGIC_OP_INVERT,
+    E_LOGIC_OP_OR_REVERSE,
+    E_LOGIC_OP_COPY_INVERTED,
+    E_LOGIC_OP_OR_INVERTED,
+    E_LOGIC_OP_NAND,
+    E_LOGIC_OP_SET
+} e_logic_op;
+
+typedef enum
+{
+    E_DESCRIPTOR_TYPE_SAMPLER,
+    E_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    E_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+    E_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    E_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+    E_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+    E_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    E_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    E_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+    E_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+    E_DESCRIPTOR_TYPE_INPUT_ATTACHMENT
+} e_descriptor_type;
+
+typedef enum
+{
+    E_IMAGE_LAYOUT_UNDEFINED,
+    E_IMAGE_LAYOUT_GENERAL,
+    E_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    E_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    E_IMAGE_LAYOUT_PREINITIALIZED,
+    E_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+    E_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+    E_IMAGE_LAYOUT_PRESENT_SRC
+} e_image_layout;
+
+typedef enum
+{
+    E_ATTACHMENT_LOAD_OP_LOAD,
+    E_ATTACHMENT_LOAD_OP_CLEAR,
+    E_ATTACHMENT_LOAD_OP_DONT_CARE
+} e_attachment_load_op;
+
+typedef enum
+{
+    E_ATTACHMENT_STORE_OP_STORE,
+    E_ATTACHMENT_STORE_OP_DONT_CARE
+} e_attachment_store_op;
+
+typedef enum
+{
+    E_PIPELINE_STAGE_TOP_OF_PIPE = 0x00000001,
+    E_PIPELINE_STAGE_DRAW_INDIRECT = 0x00000002,
+    E_PIPELINE_STAGE_VERTEX_INPUT = 0x00000004,
+    E_PIPELINE_STAGE_VERTEX_SHADER = 0x00000008,
+    E_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER = 0x00000010,
+    E_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER = 0x00000020,
+    E_PIPELINE_STAGE_GEOMETRY_SHADER = 0x00000040,
+    E_PIPELINE_STAGE_FRAGMENT_SHADER = 0x00000080,
+    E_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS = 0x00000100,
+    E_PIPELINE_STAGE_LATE_FRAGMENT_TESTS = 0x00000200,
+    E_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT = 0x00000400,
+    E_PIPELINE_STAGE_COMPUTE_SHADER = 0x00000800,
+    E_PIPELINE_STAGE_TRANSFER = 0x00001000,
+    E_PIPELINE_STAGE_BOTTOM_OF_PIPE = 0x00002000,
+    E_PIPELINE_STAGE_HOST = 0x00004000,
+    E_PIPELINE_STAGE_ALL_GRAPHICS = 0x00008000,
+    E_PIPELINE_STAGE_ALL_COMMANDS = 0x00010000,
+} e_graphics_pipeline_stage;
+
+typedef enum
+{
+    E_ACCESS_INDIRECT_COMMAND_READ = 0x00000001,
+    E_ACCESS_INDEX_READ = 0x00000002,
+    E_ACCESS_VERTEX_ATTRIBUTE_READ = 0x00000004,
+    E_ACCESS_UNIFORM_READ = 0x00000008,
+    E_ACCESS_INPUT_ATTACHMENT_READ = 0x00000010,
+    E_ACCESS_SHADER_READ = 0x00000020,
+    E_ACCESS_SHADER_WRITE = 0x00000040,
+    E_ACCESS_COLOR_ATTACHMENT_READ = 0x00000080,
+    E_ACCESS_COLOR_ATTACHMENT_WRITE = 0x00000100,
+    E_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ = 0x00000200,
+    E_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE = 0x00000400,
+    E_ACCESS_TRANSFER_READ = 0x00000800,
+    E_ACCESS_TRANSFER_WRITE = 0x00001000,
+    E_ACCESS_HOST_READ = 0x00002000,
+    E_ACCESS_HOST_WRITE = 0x00004000,
+    E_ACCESS_MEMORY_READ = 0x00008000,
+    E_ACCESS_MEMORY_WRITE = 0x00010000
+} e_graphics_access_flag;
+
+typedef enum
+{
+    E_DEPENDENCY_BY_REGION = 0x00000001,
+    E_DEPENDENCY_VIEW_LOCAL = 0x00000002,
+    E_DEPENDENCY_DEVICE_GROUP = 0x00000004
+} e_graphics_dependency_flag;
+
+/* The position semantic must be index 0. Other semantics are optional, but common ones for fixed function pipelines are pre-defined here. */
+#define E_GRAPHICS_SHADER_SEMANTIC_POSITION 0
+#define E_GRAPHICS_SHADER_SEMANTIC_NORMAL   1
+#define E_GRAPHICS_SHADER_SEMANTIC_COLOR    2
+#define E_GRAPHICS_SHADER_SEMANTIC_TEXCOORD 3
+
+/* Color components for write masks. */
+#define E_GRAPHICS_COLOR_COMPONENT_R        0x1
+#define E_GRAPHICS_COLOR_COMPONENT_G        0x2
+#define E_GRAPHICS_COLOR_COMPONENT_B        0x4
+#define E_GRAPHICS_COLOR_COMPONENT_A        0x8
+#define E_GRAPHICS_COLOR_COMPONENT_ALL      (E_GRAPHICS_COLOR_COMPONENT_R | E_GRAPHICS_COLOR_COMPONENT_G | E_GRAPHICS_COLOR_COMPONENT_B | E_GRAPHICS_COLOR_COMPONENT_A)
+
+
+typedef struct e_graphics_vtable                        e_graphics_vtable;
+typedef struct e_graphics_config                        e_graphics_config;
+typedef struct e_graphics                               e_graphics;
+
+typedef struct e_graphics_device_config                 e_graphics_device_config;
+typedef struct e_graphics_device                        e_graphics_device;
+
+typedef struct e_graphics_surface_config                e_graphics_surface_config;
+typedef struct e_graphics_surface                       e_graphics_surface;
+
+typedef struct e_graphics_descriptor_set_layout_config  e_graphics_descriptor_set_layout_config;
+typedef struct e_graphics_descriptor_set_layout         e_graphics_descriptor_set_layout;
+typedef struct e_graphics_descriptor_set                e_graphics_descriptor_set;
+
+typedef struct e_graphics_descriptor_pool_config        e_graphics_descriptor_pool_config;
+typedef struct e_graphics_descriptor_pool               e_graphics_descriptor_pool;
+
+typedef struct e_graphics_render_pass_config            e_graphics_render_pass_config;
+typedef struct e_graphics_render_pass                   e_graphics_render_pass;
+
+typedef struct e_graphics_pipeline_config               e_graphics_pipeline_config;
+typedef struct e_graphics_pipeline                      e_graphics_pipeline;
+
+typedef struct e_graphics_device_info                   e_graphics_device_info;
+
+typedef unsigned int                                    e_graphics_device_id;
+#define E_DEFAULT_GRAPHICS_DEVICE_ID                    0
 
 struct e_graphics_vtable
 {
     /* e_graphics */
-    e_result (* alloc_size        )(void* pUserData, const e_graphics_config* pConfig, size_t* pSize);
-    e_result (* init              )(void* pUserData, e_graphics* pGraphics, const e_graphics_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
-    void     (* uninit            )(void* pUserData, e_graphics* pGraphics, const e_allocation_callbacks* pAllocationCallbacks);
-    e_result (* get_devices       )(void* pUserData, e_graphics* pGraphics, const e_allocation_callbacks* pAllocationCallbacks, size_t* pDeviceCount, e_graphics_device_info* pDeviceInfos);
-    e_result (* set_surface       )(void* pUserData, e_graphics* pGraphics, e_graphics_surface* pSurface);
-    e_result (* present_surface   )(void* pUserData, e_graphics* pGraphics, e_graphics_surface* pSurface);
+    const char* (* get_name                        )(void* pUserData);
+    e_result    (* alloc_size                      )(void* pUserData, const e_graphics_config* pConfig, size_t* pSize);
+    e_result    (* init                            )(void* pUserData, e_graphics* pGraphics, const e_graphics_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* uninit                          )(void* pUserData, e_graphics* pGraphics, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result    (* get_devices                     )(void* pUserData, e_graphics* pGraphics, const e_allocation_callbacks* pAllocationCallbacks, size_t* pDeviceCount, e_graphics_device_info* pDeviceInfos);
+    e_result    (* set_surface                     )(void* pUserData, e_graphics* pGraphics, e_graphics_surface* pSurface);
+    e_result    (* present_surface                 )(void* pUserData, e_graphics* pGraphics, e_graphics_surface* pSurface);
+
+    /* e_graphics_device */
+    e_result    (* device_alloc_size               )(void* pUserData, const e_graphics_device_config* pConfig, size_t* pSize);
+    e_result    (* device_init                     )(void* pUserData, e_graphics_device* pDevice, const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* device_uninit                   )(void* pUserData, e_graphics_device* pDevice, const e_allocation_callbacks* pAllocationCallbacks);
 
     /* e_graphics_surface */
-    e_result (* surface_alloc_size)(void* pUserData, const e_graphics_surface_config* pConfig, size_t* pSize);
-    e_result (* surface_init      )(void* pUserData, e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
-    void     (* surface_uninit    )(void* pUserData, e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result    (* surface_alloc_size              )(void* pUserData, const e_graphics_surface_config* pConfig, size_t* pSize);
+    e_result    (* surface_init                    )(void* pUserData, e_graphics_surface* pSurface, const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* surface_uninit                  )(void* pUserData, e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result    (* surface_refresh                 )(void* pUserData, e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Rebuild your swapchain here. This will be called in response to the surface being resized. */
+
+    /* e_graphics_render_pass */
+    e_result    (* render_pass_alloc_size          )(void* pUserData, const e_graphics_render_pass_config* pConfig, size_t* pSize);
+    e_result    (* render_pass_init                )(void* pUserData, e_graphics_render_pass* pRenderPass, const e_graphics_render_pass_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* render_pass_uninit              )(void* pUserData, e_graphics_render_pass* pRenderPass, const e_allocation_callbacks* pAllocationCallbacks);
+
+    /* e_graphics_descriptor_set_layout */
+    e_result    (* descriptor_set_layout_alloc_size)(void* pUserData, const e_graphics_descriptor_set_layout_config* pConfig, size_t* pSize);
+    e_result    (* descriptor_set_layout_init      )(void* pUserData, e_graphics_descriptor_set_layout* pDescriptorSetLayout, const e_graphics_descriptor_set_layout_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* descriptor_set_layout_uninit    )(void* pUserData, e_graphics_descriptor_set_layout* pDescriptorSetLayout, const e_allocation_callbacks* pAllocationCallbacks);
+
+    /* e_graphics_descriptor_pool */
+    e_result    (* descriptor_pool_alloc_size      )(void* pUserData, const e_graphics_descriptor_pool_config* pConfig, size_t* pSize);
+    e_result    (* descriptor_pool_init            )(void* pUserData, e_graphics_descriptor_pool* pDescriptorPool, const e_graphics_descriptor_pool_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* descriptor_pool_uninit          )(void* pUserData, e_graphics_descriptor_pool* pDescriptorPool, const e_allocation_callbacks* pAllocationCallbacks);
+    e_result    (* descriptor_pool_allocate        )(void* pUserData, e_graphics_descriptor_pool* pDescriptorPool, const e_graphics_descriptor_set_layout** pDescriptorSetLayouts, e_graphics_descriptor_set** ppDescriptorSets, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* descriptor_pool_free            )(void* pUserData, e_graphics_descriptor_pool* pDescriptorPool, const e_graphics_descriptor_set** pDescriptorSets, const e_allocation_callbacks* pAllocationCallbacks);
+
+    /* e_graphics_pipeline */                      
+    e_result    (* pipeline_alloc_size             )(void* pUserData, const e_graphics_pipeline_config* pConfig, size_t* pSize);
+    e_result    (* pipeline_init                   )(void* pUserData, e_graphics_pipeline* pPipeline, const e_graphics_pipeline_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks);
+    void        (* pipeline_uninit                 )(void* pUserData, e_graphics_pipeline* pPipeline, const e_allocation_callbacks* pAllocationCallbacks);
 };
 
 
@@ -1062,7 +1379,7 @@ typedef enum
 struct e_graphics_device_info
 {
     char name[256];         /* A fixed array so we can avoid memory management. */
-    unsigned int id;
+    e_graphics_device_id id;
     unsigned int families;  /* For determining if the device supports compute. */
 };
 
@@ -1098,19 +1415,42 @@ E_API e_result e_graphics_set_surface(e_graphics* pGraphics, e_graphics_surface*
 E_API e_result e_graphics_present_surface(e_graphics* pGraphics, e_graphics_surface* pSurface);
 
 
-struct e_graphics_surface_config
+struct e_graphics_device_config
 {
     e_graphics* pGraphics;
-    e_window* pWindow;
-    unsigned int deviceID;  /* Set this to 0 to use the default graphics device. */
+    e_graphics_device_id deviceID;  /* Set this to 0 to use the default graphics device. */
 };
 
-E_API e_graphics_surface_config e_graphics_surface_config_init(e_graphics* pGraphics, e_window* pWindow);
+E_API e_graphics_device_config e_graphics_device_config_init(e_graphics* pGraphics);
+
+
+struct e_graphics_device
+{
+    e_graphics* pGraphics;
+    e_bool32 freeOnUninit;
+};
+
+E_API e_result e_graphics_device_alloc_size(const e_graphics_device_config* pConfig, size_t* pSize);
+E_API e_result e_graphics_device_init_preallocated(const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_device* pDevice);
+E_API e_result e_graphics_device_init(const e_graphics_device_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_device** ppDevice);
+E_API void e_graphics_device_uninit(e_graphics_device* pDevice, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_graphics* e_graphics_device_get_graphics(const e_graphics_device* pDevice);
+E_API e_log* e_graphics_device_get_log(e_graphics_device* pDevice);
+
+
+struct e_graphics_surface_config
+{
+    e_graphics_device* pDevice;
+    e_window* pWindow;
+};
+
+E_API e_graphics_surface_config e_graphics_surface_config_init(e_graphics_device* pDevice, e_window* pWindow);
 
 
 struct e_graphics_surface
 {
     e_graphics* pGraphics;
+    e_graphics_device* pDevice;
     e_window* pWindow;
     e_bool32 freeOnUninit;
 };
@@ -1119,7 +1459,278 @@ E_API e_result e_graphics_surface_alloc_size(const e_graphics_surface_config* pC
 E_API e_result e_graphics_surface_init_preallocated(const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_surface* pSurface);
 E_API e_result e_graphics_surface_init(const e_graphics_surface_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_surface** ppSurface);
 E_API void e_graphics_surface_uninit(e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_graphics_surface_refresh(e_graphics_surface* pSurface, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_graphics* e_graphics_surface_get_graphics(const e_graphics_surface* pSurface);
+E_API e_graphics_device* e_graphics_surface_get_device(const e_graphics_surface* pSurface);
 E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface);
+
+
+
+typedef enum
+{
+    E_SUBPASS_DESCRIPTION_FLAG_NONE = 0x00000000
+} e_graphics_subpass_description_flags;
+
+typedef enum
+{
+    E_GRAPHICS_PIPELINE_BIND_POINT_GRAPHICS = 0,
+    E_GRAPHICS_PIPELINE_BIND_POINT_COMPUTE = 1
+} e_graphics_pipeline_bind_point;
+
+typedef enum
+{
+    E_GRAPHICS_ATTACHMENT_FLAG_NONE = 0x00000000,
+    E_GRAPHICS_ATTACHMENT_FLAG_MAY_ALIAS = 0x00000001
+} e_graphics_attachment_flags;
+
+
+typedef struct
+{
+    e_uint32 flags;
+    e_format format;
+    e_uint32 samples;
+    e_attachment_load_op loadOp;
+    e_attachment_store_op storeOp;
+    e_attachment_load_op stencilLoadOp;
+    e_attachment_store_op stencilStoreOp;
+    e_image_layout initialLayout;
+    e_image_layout finalLayout;
+} e_graphics_attachment_description;
+
+E_API e_graphics_attachment_description e_graphics_attachment_description_init_color(e_format format, e_uint32 samples, e_attachment_load_op loadOp, e_attachment_store_op storeOp, e_image_layout initialLayout, e_image_layout finalLayout);
+E_API e_graphics_attachment_description e_graphics_attachment_description_init_depth_stencil(e_format format, e_uint32 samples, e_attachment_load_op depthLoadOp, e_attachment_store_op depthStoreOp, e_attachment_load_op stencilLoadOp, e_attachment_store_op stencilStoreOp, e_image_layout initialLayout, e_image_layout finalLayout);
+
+
+typedef struct
+{
+    e_uint32 attachmentIndex;
+    e_image_layout layout;
+} e_graphics_attachment_reference;
+
+E_API e_graphics_attachment_reference e_graphics_attachment_reference_init(e_uint32 attachmentIndex, e_image_layout layout);
+
+
+typedef struct
+{
+    e_uint32 flags;
+    e_graphics_pipeline_bind_point pipelineBindPoint;
+    e_graphics_attachment_reference* pInputAttachments;
+    e_uint32 inputAttachmentCount;
+    e_graphics_attachment_reference* pColorAttachments;
+    e_uint32 colorAttachmentCount;
+    e_graphics_attachment_reference* pResolveAttachments;      /* Optional. If non-null, must have the same number of items as pColorAttachments. */
+    e_graphics_attachment_reference* pDepthStencilAttachment;
+    e_uint32* pPreserveAttachments;
+    e_uint32 preserveAttachmentCount;
+} e_graphics_subpass_config;
+
+typedef struct
+{
+    e_uint32 srcSubpass;
+    e_uint32 dstSubpass;
+    e_uint32 srcStageMask;
+    e_uint32 dstStageMask;
+    e_uint32 srcAccessMask;
+    e_uint32 dstAccessMask;
+    e_uint32 dependencyFlags;
+} e_graphics_subpass_dependency_config;
+
+struct e_graphics_render_pass_config
+{
+    e_graphics_device* pDevice;
+    e_graphics_attachment_description* pAttachments;
+    e_uint32 attachmentCount;
+    e_graphics_subpass_config* pSubpasses;
+    e_uint32 subpassCount;
+    e_graphics_subpass_dependency_config* pDependencies;
+    e_uint32 dependencyCount;
+};
+
+E_API e_graphics_render_pass_config e_graphics_render_pass_config_init(e_graphics_device* pDevice);
+
+
+struct e_graphics_render_pass
+{
+    e_graphics_device* pDevice;
+    e_bool32 freeOnUninit;
+};
+
+E_API e_result e_graphics_render_pass_alloc_size(const e_graphics_render_pass_config* pConfig, size_t* pSize);
+E_API e_result e_graphics_render_pass_init_preallocated(const e_graphics_render_pass_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_render_pass* pRenderPass);
+E_API e_result e_graphics_render_pass_init(const e_graphics_render_pass_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_render_pass** ppRenderPass);
+E_API void e_graphics_render_pass_uninit(e_graphics_render_pass* pRenderPass, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_graphics_device* e_graphics_render_pass_get_device(const e_graphics_render_pass* pRenderPass);
+
+
+
+
+struct e_graphics_descriptor_set_layout
+{
+    e_graphics_device* pDevice;
+    e_bool32 freeOnUninit;
+};
+
+
+typedef enum
+{
+    E_GRAPHICS_SHADER_FORMAT_NATIVE = 0,    /* Assumes the backend's native shader format. It's assumed that the caller will be providing valid shader code. */
+    E_GRAPHICS_SHADER_FORMAT_SPIRV  = 1,
+    E_GRAPHICS_SHADER_FORMAT_GLSL   = 2
+} e_graphics_shader_format;
+
+typedef struct
+{
+    e_graphics_shader_stage stage;
+    e_graphics_shader_format format;
+    const void* pShaderCode;
+    size_t shaderCodeSize;
+    const char* pEntryPoint;
+} e_graphics_pipeline_stage_config;
+
+E_API e_graphics_pipeline_stage_config e_graphics_pipeline_stage_config_init(e_graphics_shader_stage stage, e_graphics_shader_format format, const void* pShaderCode, size_t shaderCodeSize, const char* pEntryPoint);
+
+
+
+typedef struct
+{
+    e_uint32 binding;
+    e_uint32 stride;
+    e_vertex_input_class inputClass;
+    e_uint32 instanceStepRate;
+} e_graphics_vertex_input_binding_config;
+
+E_API e_graphics_vertex_input_binding_config e_graphics_vertex_input_binding_config_init_ex(e_uint32 binding, e_uint32 stride, e_vertex_input_class inputClass, e_uint32 instanceStepRate);
+E_API e_graphics_vertex_input_binding_config e_graphics_vertex_input_binding_config_init(e_uint32 binding, e_uint32 stride);
+
+
+typedef struct
+{
+    e_uint32 location;  /* Location of the attribute in the vertex shader. This is the equivalent to Direct3Ds semantics. The position must be location 0. Corresponds to "layout(location = n) ..." in GLSL. */
+    e_uint32 binding;   /* The binding slot of the vertex buffer. Equivalent to Direct3Ds "InputSlot". */
+    e_format format;
+    e_uint32 offset;
+} e_graphics_vertex_input_config;
+
+E_API e_graphics_vertex_input_config e_graphics_vertex_input_config_init(e_uint32 location, e_uint32 binding, e_format format, e_uint32 offset);
+
+
+typedef struct
+{
+    e_bool32 enableBlend;           /* Defaults to false. */
+    e_blend_factor srcColorFactor;  /* Defaults to E_BLEND_FACTOR_ONE. */
+    e_blend_factor dstColorFactor;  /* Defaults to E_BLEND_FACTOR_ZERO. */
+    e_blend_op colorOp;             /* Defaults to E_BLEND_OP_ADD. */
+    e_blend_factor srcAlphaFactor;  /* Defaults to E_BLEND_FACTOR_ONE. */
+    e_blend_factor dstAlphaFactor;  /* Defaults to E_BLEND_FACTOR_ZERO. */
+    e_blend_op alphaOp;             /* Defaults to E_BLEND_OP_ADD. */
+    e_uint32 colorWriteMask;        /* Defaults to E_COLOR_COMPONENT_ALL. */
+} e_graphics_color_blend_config;
+
+typedef struct
+{
+    e_uint32 binding;
+    e_descriptor_type descriptorType;
+    e_uint32 descriptorCount;
+    e_uint32 shaderStages;
+} e_graphics_descriptor_set_layout_binding_config;
+
+
+struct e_graphics_pipeline_config
+{
+    e_graphics_device* pDevice;
+    e_graphics_pipeline_stage_config* pStages;
+    e_uint32 stageCount;
+    e_graphics_vertex_input_binding_config* pVertexInputBindings;
+    e_uint32 vertexInputBindingCount;
+    e_graphics_vertex_input_config* pVertexInputs;
+    e_uint32 vertexInputCount;
+    struct
+    {
+        e_primitive_topology topology;      /* Defaults to E_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST */
+        e_bool32 enablePrimitiveRestart;    /* Defaults to false. */
+    } inputAssembly;
+    struct
+    {
+        e_uint32 patchControlPoints;        /* Defaults to 0. Must be set explicitly if you're using tessellation. */
+    } tesselation;
+    struct
+    {
+        e_bool32 enableDepthClamp;          /* Defaults to false. */
+        e_bool32 enableRasterizerDiscard;   /* Defaults to false. */
+        e_polygon_mode polygonMode;         /* Defaults to E_POLYGON_MODE_FILL */
+        e_cull_mode cullMode;               /* Defaults to E_CULL_MODE_BACK */
+        e_front_face frontFace;             /* Defaults to E_FRONT_FACE_COUNTER_CLOCKWISE */
+        e_bool32 enableDepthBias;           /* Defaults to false. */
+        float depthBiasConstantFactor;      /* Defaults to 0. */
+        float depthBiasClamp;               /* Defaults to 1. */
+        float depthBiasSlopeFactor;         /* Defaults to 0. */
+    } rasterization;
+    struct
+    {
+        e_uint32 rasterizationSamples;      /* The number of samples to use for rasterization. Must be a power of 2. Defaults to 1. */
+        e_bool32 enableSampleShading;       /* Enables multisample shading. Defaults to false. */
+        e_uint32 minSampleShading;          /* The minimum fraction of sample shading. Defaults to 1. Only used if enableSampleShading is set to true. */
+        e_bool32 enableAlphaToCoverage;     /* Defaults to false. */
+        e_bool32 enableAlphaToOne;          /* Defaults to false. */
+    } multisample;
+    struct
+    {
+        e_bool32 enableDepthTest;           /* Defaults to false. */
+        e_bool32 enableDepthWrite;          /* Defaults to false. */
+        e_compare_op depthCompareOp;        /* Defaults to E_COMPARE_OP_LESS_OR_EQUAL */
+        e_bool32 enableDepthBoundsTest;     /* Defaults to false. */
+        float minDepthBounds;               /* Defaults to 0. */
+        float maxDepthBounds;               /* Defaults to 1. */
+        e_bool32 enableStencilTest;         /* Defaults to false. */
+        struct
+        {
+            e_stencil_op failOp;            /* Defaults to E_STENCIL_OP_KEEP */
+            e_stencil_op passOp;            /* Defaults to E_STENCIL_OP_KEEP */
+            e_stencil_op depthFailOp;       /* Defaults to E_STENCIL_OP_KEEP */
+            e_compare_op compareOp;         /* Defaults to E_COMPARE_OP_ALWAYS */
+            e_uint32 compareMask;           /* Defaults to 0xFFFFFFFF */
+            e_uint32 writeMask;             /* Defaults to 0xFFFFFFFF */
+            e_uint32 reference;             /* Defaults to 0 */
+        } front;
+        struct
+        {
+            e_stencil_op failOp;            /* Defaults to E_STENCIL_OP_KEEP */
+            e_stencil_op passOp;            /* Defaults to E_STENCIL_OP_KEEP */
+            e_stencil_op depthFailOp;       /* Defaults to E_STENCIL_OP_KEEP */
+            e_compare_op compareOp;         /* Defaults to E_COMPARE_OP_ALWAYS */
+            e_uint32 compareMask;           /* Defaults to 0xFFFFFFFF */
+            e_uint32 writeMask;             /* Defaults to 0xFFFFFFFF */
+            e_uint32 reference;             /* Defaults to 0 */
+        } back;
+    } depthStencil;
+    struct
+    {
+        e_graphics_color_blend_config* pColorBlendConfigs;
+        e_uint32 colorBlendConfigCount;
+        e_bool32 enableLogicOp;             /* Defaults to false. */
+        e_logic_op logicOp;                 /* Defaults to E_LOGIC_OP_COPY. */
+        float blendConstants[4];            /* Defaults to { 0, 0, 0, 0 }. */
+    } colorBlend;
+    e_graphics_descriptor_set_layout* pDescriptorSetLayouts;
+    e_uint32 descriptorSetLayoutCount;
+    e_graphics_render_pass* pRenderPass;    /* Cannot be null. */
+    e_uint32 subpassIndex;                  /* Defaults to 0. */
+};
+
+E_API e_graphics_pipeline_config e_graphics_pipeline_config_init(e_graphics_device* pDevice);
+
+
+struct e_graphics_pipeline
+{
+    e_graphics_device* pDevice;
+    e_bool32 freeOnUninit;
+};
+
+E_API e_result e_graphics_pipeline_alloc_size(const e_graphics_pipeline_config* pConfig, size_t* pSize);
+E_API e_result e_graphics_pipeline_init_preallocated(const e_graphics_pipeline_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_pipeline* pPipeline);
+E_API e_result e_graphics_pipeline_init(const e_graphics_pipeline_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_graphics_pipeline** ppPipeline);
+E_API void e_graphics_pipeline_uninit(e_graphics_pipeline* pPipeline, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_graphics_device* e_graphics_pipeline_get_device(const e_graphics_pipeline* pPipeline);
 /* ==== END e_graphics.h ==== */
 
 
@@ -1128,9 +1739,10 @@ E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface);
 /* ==== BEG e_client.h ==== */
 typedef enum
 {
-    E_CLIENT_FLAG_NO_WINDOW   = 0x01,   /* Does not create a window. This also disables graphics. */
-    E_CLIENT_FLAG_NO_GRAPHICS = 0x02,   /* Disables the graphics sub-system. Useful if you want to implement your own graphics system rather than using the default. */
-    E_CLIENT_FLAG_NO_AUDIO    = 0x04    /* Disables the audio sub-system. */
+    E_CLIENT_FLAG_NO_WINDOW     = 0x01,   /* Does not create a window. This also disables graphics. */
+    E_CLIENT_FLAG_NO_GRAPHICS   = 0x02,   /* Disables the graphics sub-system. Useful if you want to implement your own graphics system rather than using the default. */
+    E_CLIENT_FLAG_NO_AUDIO      = 0x04,   /* Disables the audio sub-system. */
+    E_CLIENT_FLAG_WINDOW_OPENGL = 0x10    /* Enables OpenGL on the window. Only used when graphics are disabled by the engine or the client (E_CLIENT_NO_GRAPHICS). */
 } e_client_flags;
 
 typedef struct e_client_vtable e_client_vtable;
@@ -1138,9 +1750,53 @@ typedef struct e_client_config e_client_config;
 typedef struct e_client        e_client;
 
 
+typedef enum
+{
+    E_CLIENT_EVENT_WINDOW_CLOSE,
+    E_CLIENT_EVENT_WINDOW_SIZE,
+    E_CLIENT_EVENT_WINDOW_MOVE,
+    E_CLIENT_EVENT_CURSOR_MOVE,
+    E_CLIENT_EVENT_CURSOR_BUTTON_DOWN,
+    E_CLIENT_EVENT_CURSOR_BUTTON_UP,
+} e_client_event_type;
+
+typedef struct
+{
+    e_client_event_type type;
+    struct
+    {
+        struct
+        {
+            e_window* pWindow;
+        } windowClose;
+        struct
+        {
+            e_window* pWindow;
+            int x;
+            int y;
+        } windowSize, windowMove;
+        struct
+        {
+            e_window* pWindow;
+            int x;
+            int y;
+        } cursorMove;
+        struct
+        {
+            e_window* pWindow;
+            int x;
+            int y;
+            int button;
+            unsigned int flags;
+        } cursorButtonDown, cursorButtonUp;
+    } data;
+} e_client_event;
+
+
 struct e_client_vtable
 {
-    e_result (* onStep)(void* pUserData, e_client* pClient, double dt);
+    e_result (* onEvent)(void* pUserData, e_client* pClient, e_client_event* pEvent);
+    e_result (* onStep )(void* pUserData, e_client* pClient, double dt);
 };
 
 
@@ -1155,6 +1811,7 @@ struct e_client_config
     unsigned int resolutionX;   /* Only used if the resolution is not specified in a config file. */
     unsigned int resolutionY;
     unsigned int flags;
+    e_graphics_device_id graphicsDeviceID;
     e_graphics_backend graphicsBackend;
 };
 
@@ -1170,8 +1827,10 @@ struct e_client
     unsigned int flags;
     e_window* pWindow;
     e_graphics* pGraphics;
-    e_graphics_surface* pWindowRT;
+    e_graphics_device* pGraphicsDevice;
+    e_graphics_surface* pGraphicsSurface;
     const char* pConfigSection;
+    e_allocation_callbacks allocationCallbacks;
     e_bool32 freeOnUninit;
 };
 
@@ -1181,6 +1840,8 @@ E_API e_result e_client_init(const e_client_config* pConfig, const e_allocation_
 E_API void e_client_uninit(e_client* pClient, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_engine* e_client_get_engine(e_client* pClient);
 E_API e_log* e_client_get_log(e_client* pClient);
+E_API e_window* e_client_get_window(e_client* pClient);
+E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);
 E_API e_result e_client_step(e_client* pClient, double dt);
 /* ==== END e_client.h ==== */
 
