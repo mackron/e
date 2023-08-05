@@ -19,3 +19,6 @@
 [submodule "external/argv"]
 	path = external/argv
 	url = https://github.com/mackron/argv.git
+[submodule "external/stb"]
+	path = external/stb
+	url = https://github.com/mackron/stb.git

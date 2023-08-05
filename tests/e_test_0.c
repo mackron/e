@@ -15,7 +15,7 @@ static e_result test_game_engine_iteration(void* pUserData, e_engine* pEngine, d
 
     (void)dt;
 
-    //e_client_step(pClient1, dt);
+    e_client_step(pClient1, dt);
 
 
     /* Do some drawing on the graphics engine. */
@@ -45,12 +45,62 @@ static e_result test_game_window_event(void* pUserData, e_window* pWindow, e_win
         default: break;
     }
 
-    return E_SUCCESS;
+    return e_window_default_event_handler(pWindow, pEvent);
 }
 
 static e_window_vtable gTestWindowVTable =
 {
     test_game_window_event
+};
+
+
+
+static e_result test_client_event_handler(void* pUserData, e_client* pClient, e_client_event* pEvent)
+{
+    (void)pUserData;
+
+    switch (pEvent->type)
+    {
+        case E_CLIENT_EVENT_WINDOW_SIZE:
+        {
+            printf("EVENT: WINDOW_SIZE\n");
+        } break;
+
+        case E_CLIENT_EVENT_CURSOR_MOVE:
+        {
+            //printf("EVENT: CURSOR_MOVE: %d %d\n", pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+        } break;
+    }
+
+    return e_client_default_event_handler(pClient, pEvent);
+}
+
+static e_result test_client_step(void* pUserData, e_client* pClient, double dt)
+{
+    int cursorPosX;
+    int cursorPosY;
+
+    E_UNUSED(pUserData);
+    E_UNUSED(pClient);
+    E_UNUSED(dt);
+
+    e_client_get_absolute_cursor_position(pClient, &cursorPosX, &cursorPosY);
+
+    if (e_client_has_cursor_moved(pClient)) {
+        printf("Cursor has moved: %d %d\n", cursorPosX, cursorPosY);
+    }
+
+    e_client_step_input(pClient);
+
+    //printf("Cursor Position: %d %d\n", cursorPosX, cursorPosY);
+
+    return E_SUCCESS;
+}
+
+static e_client_vtable gTestClientVTable =
+{
+    test_client_event_handler,
+    test_client_step,
 };
 
 
@@ -103,6 +153,8 @@ int main(int argc, char** argv)
     /* We need a client for the game. */
     clientConfig = e_client_config_init(pEngine, "game");
     clientConfig.graphicsBackend = E_GRAPHICS_BACKEND_VULKAN;
+    clientConfig.pVTable         = &gTestClientVTable;
+    clientConfig.pVTableUserData = NULL;
 
     result = e_client_init(&clientConfig, NULL, &pClient1);
     if (result != E_SUCCESS) {
@@ -110,63 +162,6 @@ int main(int argc, char** argv)
         return -1;
     }
 
-#if 0
-
-    /* Testing for Vulkan graphics. */
-    #if 1
-    {
-        e_window_config windowConfig;
-
-        windowConfig = e_window_config_init(pEngine, "Vulkan", 0, 0, resX, resY, 0, &gTestWindowVTable);
-
-        result = e_window_init(&windowConfig, NULL, &pVulkanWindow);
-        if (result != E_SUCCESS) {
-            printf("Failed to create Vulkan window.");
-            return -1;
-        }
-
-
-
-        e_graphics_config graphicsConfig;
-
-        graphicsConfig = e_graphics_config_init(pEngine);
-        graphicsConfig.backend = E_GRAPHICS_BACKEND_VULKAN;
-
-        result = e_graphics_init(&graphicsConfig, NULL, &pVulkanGraphics);
-        if (result != E_SUCCESS) {
-            printf("Failed to initialize Vulkan graphics sub-system.");
-            return -1;
-        }
-
-
-
-        e_graphics_device_info deviceInfos[16];
-        size_t deviceInfoCount = E_COUNTOF(deviceInfos);
-
-        result = e_graphics_get_devices(pVulkanGraphics, NULL, &deviceInfoCount, deviceInfos);
-        if (result != E_SUCCESS) {
-            printf("Failed to retrieve graphics devices.");
-            return -1;
-        }
-
-        size_t iDevice;
-        for (iDevice = 0; iDevice < deviceInfoCount; iDevice += 1) {
-            printf("Graphics Device (id = %u): %s\n", deviceInfos[iDevice].id, deviceInfos[iDevice].name);
-        }
-
-
-
-        e_graphics_surface_config surfaceConfig = e_graphics_surface_config_init(pVulkanGraphics, pVulkanWindow);
-
-        result = e_graphics_surface_init(&surfaceConfig, NULL, &pVulkanSurface);
-        if (result != E_SUCCESS) {
-            printf("Failed to create Vulkan surface.");
-            return -1;
-        }
-    }
-    #endif
-
-#endif
 
     /*
     There's only a single main loop so we need to run via the engine. This will run a single event handling

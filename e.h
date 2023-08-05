@@ -213,6 +213,7 @@ typedef enum
     E_FORMAT_R32G32_FLOAT,
     E_FORMAT_R32G32B32_FLOAT,
     E_FORMAT_R32G32B32A32_FLOAT,
+    E_FORMAT_R8G8B8_UNORM,
     E_FORMAT_R8G8B8A8_UNORM,
     E_FORMAT_D24_UNORM_S8_UINT,
 } e_format;
@@ -726,6 +727,18 @@ E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pS
 
 
 
+/* === BEG e_image.h === */
+typedef struct e_image_loader_vtable e_image_loader_vtable;
+
+struct e_image_loader_vtable
+{
+    e_result (* load)(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
+};
+
+E_API e_result e_load_image(e_image_loader_vtable* pVTable, void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
+E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
+/* === END e_image.h === */
+
 
 
 /* ==== BEG e_engine.h ==== */
@@ -807,7 +820,11 @@ typedef enum
     E_WINDOW_EVENT_CLOSE,
     E_WINDOW_EVENT_PAINT,
     E_WINDOW_EVENT_SIZE,
-    E_WINDOW_EVENT_MOVE
+    E_WINDOW_EVENT_MOVE,
+    E_WINDOW_EVENT_CURSOR_MOVE,
+    E_WINDOW_EVENT_CURSOR_BUTTON_DOWN,
+    E_WINDOW_EVENT_CURSOR_BUTTON_UP,
+    E_WINDOW_EVENT_CURSOR_BUTTON_DOUBLE_CLICK
 } e_window_event_type;
 
 typedef struct e_platform_window e_platform_window; /* Platform-specific window object. This is defined in the implementation on a per-platform basis. */
@@ -840,6 +857,17 @@ struct e_window_event
             int x;
             int y;
         } move;
+        struct
+        {
+            int x;
+            int y;
+        } cursorMove;
+        struct
+        {
+            int button;
+            int x;
+            int y;
+        } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
     } data;
 };
 
@@ -909,6 +937,7 @@ E_API e_engine* e_window_get_engine(const e_window* pWindow);
 E_API void* e_window_get_user_data(const e_window* pWindow);
 E_API e_window_vtable* e_window_get_vtable(const e_window* pWindow);
 E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_object_type type);
+E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event* pEvent);
 /* ==== END e_window.h ==== */
 
 
@@ -1052,6 +1081,42 @@ E_INLINE e_vec4f e_mat4f_mul_vec4(e_mat4f m, e_vec4f v)
 
 
 
+/* === BEG e_input.h === */
+#ifndef E_MAX_CURSORS
+#define E_MAX_CURSORS 4
+#endif
+
+typedef struct e_input_config e_input_config;
+typedef struct e_input        e_input;
+
+struct e_input_config
+{
+    int _unused;
+};
+
+E_API e_input_config e_input_config_init(void);
+
+
+struct e_input
+{
+    int prevAbsoluteCursorPosX[E_MAX_CURSORS];
+    int prevAbsoluteCursorPosY[E_MAX_CURSORS];
+    int currentAbsoluteCursorPosX[E_MAX_CURSORS];
+    int currentAbsoluteCursorPosY[E_MAX_CURSORS];
+    e_bool32 freeOnUninit;
+};
+
+E_API e_result e_input_alloc_size(const e_input_config* pConfig, size_t* pSize);
+E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input* pInput);
+E_API e_result e_input_init(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input** ppInput);
+E_API void e_input_uninit(e_input* pInput, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_input_step(e_input* pInput);
+E_API e_result e_input_update_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY);
+E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int* pPosX, int* pPosY);
+E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex);
+/* === END e_input.h === */
+
+
 
 
 /* ==== BEG e_graphics.h ==== */
@@ -1191,6 +1256,76 @@ E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface);
 
 
 
+/* ==== BEG e_gui.h ==== */
+typedef struct e_gui_config e_gui_config;
+typedef struct e_gui e_gui; /* The main GUI object. All GUI objects are a e_gui object. */
+
+typedef enum
+{
+    E_GUI_EVENT_TYPE_NONE,
+    E_GUI_EVENT_TYPE_PAINT,
+    E_GUI_EVENT_TYPE_CURSOR_MOVE,
+    E_GUI_EVENT_TYPE_CURSOR_BUTTON_DOWN,
+    E_GUI_EVENT_TYPE_CURSOR_BUTTON_UP,
+    E_GUI_EVENT_TYPE_CURSOR_BUTTON_DOUBLE_CLICK
+} e_gui_event_type;
+
+#define E_GUI_EVENT_BASE_MEMBERS \
+    e_gui_event_type type
+
+typedef struct
+{
+    E_GUI_EVENT_BASE_MEMBERS;
+} e_gui_event_paint;
+
+typedef struct
+{
+    E_GUI_EVENT_BASE_MEMBERS;
+    int x;
+    int y;
+} e_gui_event_cursor_move;
+
+typedef struct
+{
+    E_GUI_EVENT_BASE_MEMBERS;
+    int x;
+    int y;
+    int button;
+} e_gui_event_cursor_button;
+
+typedef union
+{
+    E_GUI_EVENT_BASE_MEMBERS;
+    e_gui_event_paint paint;
+    e_gui_event_cursor_move cursorMove;
+    e_gui_event_cursor_button cursorButtonDown;
+    e_gui_event_cursor_button cursorButtonUp;
+    e_gui_event_cursor_button cursorButtonDoubleClick;
+} e_gui_event;
+
+
+typedef e_result (* e_gui_event_proc)(void* pUserData, e_gui* pGUI, const e_gui_event* pEvent);
+
+struct e_gui_config
+{
+    e_gui_event_proc onEvent;
+    void* pUserData;
+};
+
+E_API e_gui_config e_gui_config_init(e_gui_event_proc onEvent, void* pUserData);
+
+
+struct e_gui
+{
+    e_gui_event_proc onEvent;
+    void* pUserData;
+};
+
+E_API e_result e_gui_init(const e_gui_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_gui* pGUI);
+E_API void e_gui_uninit(e_gui* pGUI, const e_allocation_callbacks* pAllocationCallbacks);
+
+/* ==== END e_gui.h ==== */
+
 
 /* ==== BEG e_client.h ==== */
 typedef enum
@@ -1198,7 +1333,7 @@ typedef enum
     E_CLIENT_FLAG_NO_WINDOW     = 0x01,   /* Does not create a window. This also disables graphics. */
     E_CLIENT_FLAG_NO_GRAPHICS   = 0x02,   /* Disables the graphics sub-system. Useful if you want to implement your own graphics system rather than using the default. */
     E_CLIENT_FLAG_NO_AUDIO      = 0x04,   /* Disables the audio sub-system. */
-    E_CLIENT_FLAG_WINDOW_OPENGL = 0x10    /* Enables OpenGL on the window. Only used when graphics are disabled by the engine or the client (E_CLIENT_NO_GRAPHICS). */
+    E_CLIENT_FLAG_OPENGL_WINDOW = 0x10    /* Enables OpenGL on the window. Only used when graphics are disabled by the engine or the client (E_CLIENT_NO_GRAPHICS). */
 } e_client_flags;
 
 typedef struct e_client_vtable e_client_vtable;
@@ -1214,6 +1349,7 @@ typedef enum
     E_CLIENT_EVENT_CURSOR_MOVE,
     E_CLIENT_EVENT_CURSOR_BUTTON_DOWN,
     E_CLIENT_EVENT_CURSOR_BUTTON_UP,
+    E_CLIENT_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
 } e_client_event_type;
 
 typedef struct
@@ -1244,7 +1380,7 @@ typedef struct
             int y;
             int button;
             unsigned int flags;
-        } cursorButtonDown, cursorButtonUp;
+        } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
     } data;
 } e_client_event;
 
@@ -1285,6 +1421,7 @@ struct e_client
     e_graphics* pGraphics;
     e_graphics_device* pGraphicsDevice;
     e_graphics_surface* pGraphicsSurface;
+    e_input* pInput;
     const char* pConfigSection;
     e_allocation_callbacks allocationCallbacks;
     e_bool32 freeOnUninit;
@@ -1297,8 +1434,13 @@ E_API void e_client_uninit(e_client* pClient, const e_allocation_callbacks* pAll
 E_API e_engine* e_client_get_engine(e_client* pClient);
 E_API e_log* e_client_get_log(e_client* pClient);
 E_API e_window* e_client_get_window(e_client* pClient);
+E_API e_input* e_client_get_input(e_client* pClient);
 E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);
+E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_event* pEvent);
 E_API e_result e_client_step(e_client* pClient, double dt);
+E_API e_result e_client_step_input(e_client* pClient);
+E_API e_bool32 e_client_has_cursor_moved(e_client* pClient);
+E_API e_result e_client_get_absolute_cursor_position(e_client* pClient, int* pPosX, int* pPosY);
 /* ==== END e_client.h ==== */
 
 

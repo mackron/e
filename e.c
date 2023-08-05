@@ -122,6 +122,8 @@
 #define CGLTF_IMPLEMENTATION
 #include "external/cgltf/cgltf.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "external/stb/stb_image.h"
 
 
 #define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
@@ -288,12 +290,22 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 
 static e_result e_window_handle_event(e_window* pWindow, e_window_event* pEvent)
 {
+    e_result result;
+
     E_ASSERT(pEvent != NULL);
     E_ASSERT(pWindow != NULL);
-    E_ASSERT(pWindow->pVTable != NULL);
-    E_ASSERT(pWindow->pVTable->onEvent != NULL);
 
-    return pWindow->pVTable->onEvent(pWindow->pVTableUserData, pWindow, pEvent);
+    if (pWindow->pVTable == NULL || pWindow->pVTable->onEvent == NULL) {
+        result = E_NOT_IMPLEMENTED;
+    } else {
+        result = pWindow->pVTable->onEvent(pWindow->pVTableUserData, pWindow, pEvent);
+    }
+
+    if (result == E_NOT_IMPLEMENTED) {
+        return e_window_default_event_handler(pWindow, pEvent);
+    } else {
+        return result;
+    }
 }
 
 static e_window_event e_window_event_init(e_window_event_type type)
@@ -657,6 +669,38 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
 
+            case WM_MOUSEMOVE:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_MOVE);
+                e.data.cursorMove.x = LOWORD(lParam);
+                e.data.cursorMove.y = HIWORD(lParam);
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+        #if 0
+            case WM_INPUT:
+            {
+                UINT dwSize = 0;
+
+                GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
+                if (dwSize > 0) {
+                    RAWINPUT* pRawInput = (RAWINPUT*)malloc(dwSize);
+                    if (pRawInput != NULL) {
+                        if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, pRawInput, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
+                            if (pRawInput->header.dwType == RIM_TYPEMOUSE) {
+                                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_MOVE);
+                                e.data.cursorMove.x = pRawInput->data.mouse.lLastX;
+                                e.data.cursorMove.y = pRawInput->data.mouse.lLastY;
+                                e_window_handle_event(pWindow->pOwnerWindow, &e);
+                            }
+                        }
+
+                        free(pRawInput);
+                    }
+                }
+            } break;
+        #endif
+
             default: break;
         }
     }
@@ -921,11 +965,11 @@ typedef union e_XEvent
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
     } xany;
 
     struct
@@ -949,143 +993,143 @@ typedef union e_XEvent
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
-	    e_Window root;
-	    e_Window subwindow;
-	    e_Time time;
-	    int x;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        e_Window root;
+        e_Window subwindow;
+        e_Time time;
+        int x;
         int y;
-	    int x_root;
+        int x_root;
         int y_root;
-	    unsigned int state;
-	    unsigned int button;
-	    e_Bool same_screen;
+        unsigned int state;
+        unsigned int button;
+        e_Bool same_screen;
     } xbutton;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
-	    e_Window root;
-	    e_Window subwindow;
-	    e_Time time;
-	    int x;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        e_Window root;
+        e_Window subwindow;
+        e_Time time;
+        int x;
         int y;
-	    int x_root;
+        int x_root;
         int y_root;
-	    unsigned int state;
-	    char is_hint;
-	    e_Bool same_screen;
+        unsigned int state;
+        char is_hint;
+        e_Bool same_screen;
     } xmotion;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
-	    int mode;
-	    int detail;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        int mode;
+        int detail;
     } xfocus;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window parent;
-	    e_Window window;
-	    int x;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window parent;
+        e_Window window;
+        int x;
         int y;
-	    int width;
+        int width;
         int height;
-	    int border_width;
-	    e_Bool override_redirect;
+        int border_width;
+        e_Bool override_redirect;
     } xcreatewindow;
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window event;
-	    e_Window window;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window event;
+        e_Window window;
     } xdestroywindow;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window event;
-	    e_Window window;
-	    e_Bool from_configure;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window event;
+        e_Window window;
+        e_Bool from_configure;
     } xunmap;
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window event;
-	    e_Window window;
-	    e_Bool override_redirect;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window event;
+        e_Window window;
+        e_Bool override_redirect;
     } xmap;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window event;
-	    e_Window window;
-	    int x;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window event;
+        e_Window window;
+        int x;
         int y;
-	    int width;
+        int width;
         int height;
-	    int border_width;
-	    e_Window above;
-	    e_Bool override_redirect;
+        int border_width;
+        e_Window above;
+        e_Bool override_redirect;
     } xconfigure;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
-	    e_Atom atom;
-	    e_Time time;
-	    int state;
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        e_Atom atom;
+        e_Time time;
+        int state;
     } xproperty;
 
     struct
     {
-	    int type;
-	    unsigned long serial;
-	    e_Bool send_event;
-	    e_Display* display;
-	    e_Window window;
-	    e_Atom message_type;
-	    int format;
-	    union
+        int type;
+        unsigned long serial;
+        e_Bool send_event;
+        e_Display* display;
+        e_Window window;
+        e_Atom message_type;
+        int format;
+        union
         {
-		    char  b[20];
-		    short s[10];
-		    long  l[5];
-		} data;
+            char  b[20];
+            short s[10];
+            long  l[5];
+        } data;
     } xclient;
 
     long pad[24];
@@ -7807,6 +7851,164 @@ E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pS
 
 
 
+/* === BEG e_image.h === */
+#ifndef E_NO_STB_IMAGE
+typedef struct
+{
+    e_stream* pStream;
+    e_bool32 atEnd;
+} e_stb_image_callback_data;
+
+static int e_stb_image_read(void* pUserData, char* pData, int size)
+{
+    e_stb_image_callback_data* pCallbackData = (e_stb_image_callback_data*)pUserData;
+    e_result result;
+    size_t bytesRead;
+
+    result = e_stream_read(pCallbackData->pStream, pData, size, &bytesRead);
+    if (result != E_SUCCESS || bytesRead < (size_t)size) {
+        pCallbackData->atEnd = E_TRUE;
+    } else {
+        pCallbackData->atEnd = E_FALSE;
+    }
+
+    return (int)bytesRead;
+}
+
+static void e_stb_image_skip(void* pUserData, int n)
+{
+    e_stream_seek(((e_stb_image_callback_data*)pUserData)->pStream, n, E_SEEK_ORIGIN_CURRENT);
+}
+
+static int e_stb_image_eof(void* pUserData)
+{
+    return ((e_stb_image_callback_data*)pUserData)->atEnd;
+}
+
+static stbi_io_callbacks e_stb_image_callbacks =
+{
+    e_stb_image_read,
+    e_stb_image_skip,
+    e_stb_image_eof
+};
+
+static e_result e_load_image_stb(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat)
+{
+    int x, y, n;
+    unsigned char* pData;
+    e_stb_image_callback_data callbacksData;
+
+    E_UNUSED(pUserData);
+    E_UNUSED(pAllocationCallbacks); /* Don't know how to use allocation callbacks with stb_image. */
+
+    callbacksData.pStream = pStream;
+    callbacksData.atEnd   = E_FALSE;
+
+    pData = stbi_load_from_callbacks(&e_stb_image_callbacks, &callbacksData, &x, &y, &n, 0);
+    if (pData == NULL) {
+        return E_ERROR;
+    }
+
+    *ppData = pData;
+    *pSizeX = (e_uint32)x;
+    *pSizeY = (e_uint32)y;
+
+    if (n == 3) {
+        *pFormat = E_FORMAT_R8G8B8_UNORM;
+    } else if (n == 4) {
+        *pFormat = E_FORMAT_R8G8B8A8_UNORM;
+    } else {
+        *pFormat = E_FORMAT_UNKNOWN;
+    }
+
+    return E_SUCCESS;
+}
+
+static e_image_loader_vtable e_image_loader_stb_vtable =
+{
+    e_load_image_stb
+};
+#endif
+
+E_API e_result e_load_image(e_image_loader_vtable* pVTable, void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat)
+{
+    if (ppData != NULL) {
+        *ppData = NULL;
+    }
+
+    if (pSizeX != NULL) {
+        *pSizeX = 0;
+    }
+    if (pSizeY != NULL) {
+        *pSizeY = 0;
+    }
+
+    if (pFormat != NULL) {
+        *pFormat = E_FORMAT_UNKNOWN;
+    }
+
+    if (pStream == NULL || ppData == NULL || pSizeX == NULL || pSizeY == NULL || pFormat == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pVTable == NULL) {
+        #ifndef E_NO_STB_IMAGE
+        {
+            pVTable = &e_image_loader_stb_vtable;
+        }
+        #else
+        {
+            return E_INVALID_ARGS;
+        }
+        #endif
+    }
+
+    if (pVTable->load == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return pVTable->load(pUserData, pStream, pAllocationCallbacks, ppData, pSizeX, pSizeY, pFormat);
+}
+
+E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat)
+{
+    e_result result;
+    e_file* pFile;
+
+    if (ppData != NULL) {
+        *ppData = NULL;
+    }
+
+    if (pSizeX != NULL) {
+        *pSizeX = 0;
+    }
+    if (pSizeY != NULL) {
+        *pSizeY = 0;
+    }
+
+    if (pFormat != NULL) {
+        *pFormat = E_FORMAT_UNKNOWN;
+    }
+
+    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_load_image(pVTable, pUserData, &pFile->stream, pAllocationCallbacks, ppData, pSizeX, pSizeY, pFormat);
+    e_fs_close(pFile, pAllocationCallbacks);
+
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+/* === END e_image.h === */
+
+
+
+
 /* ==== BEG e_engine.c ==== */
 /* Helper for retrieving the GLBapi object from the engine. This is just a cast. */
 #if !defined(E_NO_OPENGL) && !defined(E_EMSCRIPTEN)
@@ -8378,8 +8580,212 @@ E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_obj
 {
     return e_platform_window_get_object(pWindow->pPlatformWindow, type);
 }
+
+E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event* pEvent)
+{
+    /* NOTE: This function must never return E_NOT_IMPLEMENTED. */
+
+    (void)pWindow;
+    (void)pEvent;
+
+    return E_SUCCESS;
+}
 /* ==== END e_window.c ==== */
 
+
+
+E_API e_input_config e_input_config_init(void)
+{
+    e_input_config config;
+
+    E_ZERO_OBJECT(&config);
+
+    return config;
+}
+
+
+typedef struct
+{
+   size_t size;
+} e_input_alloc_layout;
+
+E_API e_result e_input_get_alloc_layout(const e_input_config* pConfig, e_input_alloc_layout* pLayout)
+{
+    E_ASSERT(pConfig != NULL);
+    E_ASSERT(pLayout != NULL);
+
+    pLayout->size = E_ALIGN_64(sizeof(e_input));
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_alloc_size(const e_input_config* pConfig, size_t* pSize)
+{
+    e_result result;
+    e_input_alloc_layout layout;
+
+    E_ASSERT(pSize   != NULL);
+    E_ASSERT(pConfig != NULL);
+
+    result = e_input_get_alloc_layout(pConfig, &layout);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    *pSize = layout.size;
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input* pInput)
+{
+    e_result result;
+    e_input_alloc_layout layout;
+    size_t iCursor;
+
+    E_UNUSED(pAllocationCallbacks);
+
+    if (pInput == NULL) {
+       return E_INVALID_ARGS;
+    }
+
+    result = e_input_get_alloc_layout(pConfig, &layout);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    E_ASSERT(layout.size >= sizeof(e_input));
+
+    E_ZERO_MEMORY(pInput, layout.size);
+
+    for (iCursor = 0; iCursor < E_MAX_CURSORS; iCursor += 1) {
+        pInput->prevAbsoluteCursorPosX[iCursor]    = MAX_INT;
+        pInput->prevAbsoluteCursorPosY[iCursor]    = MAX_INT;
+        pInput->currentAbsoluteCursorPosX[iCursor] = MAX_INT;
+        pInput->currentAbsoluteCursorPosY[iCursor] = MAX_INT;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_init(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input** ppInput)
+{
+    e_result result;
+    size_t allocSize;
+    e_input* pInput;
+    e_input_config defaultConfig;
+
+    if (ppInput == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppInput = NULL;
+
+    if (pConfig == NULL) {
+        defaultConfig = e_input_config_init();
+        pConfig = &defaultConfig;
+    }
+
+    result = e_input_alloc_size(pConfig, &allocSize);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    pInput = (e_input*)e_malloc(allocSize, pAllocationCallbacks);
+    if (pInput == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    result = e_input_init_preallocated(pConfig, pAllocationCallbacks, pInput);
+    if (result != E_SUCCESS) {
+        e_free(pInput, pAllocationCallbacks);
+        return result;
+    }
+
+    pInput->freeOnUninit = E_TRUE;
+
+    *ppInput = pInput;
+    return E_SUCCESS;
+}
+
+E_API void e_input_uninit(e_input* pInput, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pInput == NULL) {
+        return;
+    }
+
+    if (pInput->freeOnUninit) {
+        e_free(pInput, pAllocationCallbacks);
+    }
+}
+
+E_API e_result e_input_step(e_input* pInput)
+{
+    size_t iCursor;
+
+    /* This function normalizes the input data so that the next frame can get accurate input data for things like cursor deltas and whether or not the cursor have moved. */
+    if (pInput == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    for (iCursor = 0; iCursor < E_MAX_CURSORS; iCursor += 1) {
+        pInput->prevAbsoluteCursorPosX[iCursor] = pInput->currentAbsoluteCursorPosX[iCursor];
+        pInput->prevAbsoluteCursorPosY[iCursor] = pInput->currentAbsoluteCursorPosY[iCursor];
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_update_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY)
+{
+    if (pInput == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (cursorIndex >= E_MAX_CURSORS) {
+        return E_INVALID_ARGS;
+    }
+
+    pInput->prevAbsoluteCursorPosX[cursorIndex] = pInput->currentAbsoluteCursorPosX[cursorIndex];
+    pInput->prevAbsoluteCursorPosY[cursorIndex] = pInput->currentAbsoluteCursorPosY[cursorIndex];
+
+    pInput->currentAbsoluteCursorPosX[cursorIndex] = posX;
+    pInput->currentAbsoluteCursorPosY[cursorIndex] = posY;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int* pPosX, int* pPosY)
+{
+    if (pPosX != NULL) {
+        *pPosX = 0;
+    }
+    if (pPosY != NULL) {
+        *pPosY = 0;
+    }
+
+    if (pInput == NULL || pPosX == NULL || pPosY == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return E_INVALID_ARGS;
+    }
+
+    *pPosX = pInput->currentAbsoluteCursorPosX[cursorIndex];
+    *pPosY = pInput->currentAbsoluteCursorPosY[cursorIndex];
+
+    return E_SUCCESS;
+}
+
+E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex)
+{
+    if (pInput == NULL) {
+        return E_FALSE;
+    }
+
+    if (cursorIndex >= E_MAX_CURSORS) {
+        return E_FALSE;
+    }
+
+    return pInput->prevAbsoluteCursorPosX[cursorIndex] != pInput->currentAbsoluteCursorPosX[cursorIndex] ||
+           pInput->prevAbsoluteCursorPosY[cursorIndex] != pInput->currentAbsoluteCursorPosY[cursorIndex];
+}
 
 
 
@@ -8656,7 +9062,7 @@ static e_result e_graphics_device_opengl_init(void* pUserData, e_graphics_device
             EGL_ALPHA_SIZE, 8,
             EGL_NONE
         };
-	    EGLint const pContextConfigEGL[] =
+        EGLint const pContextConfigEGL[] =
         {
             EGL_CONTEXT_CLIENT_VERSION, 2,  /* Is this the WebGL version, or the GLES version? Assuming when this is run on web it means the WebGL version? How would I make this force GLES 3 on non web platforms? */
             EGL_NONE
@@ -10573,12 +10979,22 @@ E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface)
 /* ==== BEG e_client.c ==== */
 static e_result e_client_handle_event(e_client* pClient, e_client_event* pEvent)
 {
+    e_result result;
+
     E_ASSERT(pEvent  != NULL);
     E_ASSERT(pClient != NULL);
-    E_ASSERT(pClient->pVTable != NULL);
-    E_ASSERT(pClient->pVTable->onEvent != NULL);
 
-    return pClient->pVTable->onEvent(pClient->pVTableUserData, pClient, pEvent);
+    if (pClient->pVTable == NULL || pClient->pVTable->onEvent == NULL) {
+        result = E_NOT_IMPLEMENTED;
+    } else {
+        result = pClient->pVTable->onEvent(pClient->pVTableUserData, pClient, pEvent);
+    }
+
+    if (result == E_NOT_IMPLEMENTED) {
+        return e_client_default_event_handler(pClient, pEvent);
+    } else {
+        return result;
+    }
 }
 
 static e_client_event e_client_event_init(e_client_event_type type)
@@ -10626,10 +11042,41 @@ static e_result e_client_window_event_callback(void* pUserData, e_window* pWindo
             e_client_handle_event(pClient, &e);
         } break;
 
-        break;
+        case E_WINDOW_EVENT_CURSOR_MOVE:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_CURSOR_MOVE);
+            e.data.cursorMove.pWindow = pWindow;
+            e.data.cursorMove.x = pEvent->data.cursorMove.x;
+            e.data.cursorMove.y = pEvent->data.cursorMove.y;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_CURSOR_BUTTON_DOWN:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_DOWN);
+            e.data.cursorButtonDown.pWindow = pWindow;
+            e.data.cursorButtonDown.button = pEvent->data.cursorButtonDown.button;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_CURSOR_BUTTON_UP:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_UP);
+            e.data.cursorButtonUp.pWindow = pWindow;
+            e.data.cursorButtonUp.button = pEvent->data.cursorButtonUp.button;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_CURSOR_BUTTON_DOUBLE_CLICK:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_DOUBLE_CLICK);
+            e.data.cursorButtonDoubleClick.pWindow = pWindow;
+            e.data.cursorButtonDoubleClick.button = pEvent->data.cursorButtonDoubleClick.button;
+            e_client_handle_event(pClient, &e);
+        } break;
     }
 
-    return E_SUCCESS;
+    return e_window_default_event_handler(pWindow, pEvent);
 }
 
 static e_window_vtable e_gClientWindowVTable =
@@ -10655,18 +11102,42 @@ E_API e_client_config e_client_config_init(e_engine* pEngine, const char* pConfi
 typedef struct
 {
     size_t size;
-    size_t windowOffset;
+    size_t inputOffset;
 } e_client_alloc_layout;
+
+static e_input_config e_input_config_init_from_client_config(const e_client_config* pClientConfig)
+{
+    e_input_config inputConfig = e_input_config_init();
+
+    /* TODO: Do something with this when the time comes. */
+    (void)pClientConfig;
+
+    return inputConfig;
+}
 
 static e_result e_client_get_alloc_layout(const e_client_config* pConfig, e_client_alloc_layout* pLayout)
 {
+    e_result result;
+
     E_ASSERT(pConfig != NULL);
     E_ASSERT(pLayout != NULL);
 
-    pLayout->size  = E_ALIGN_64(sizeof(e_client));
+    pLayout->size = E_ALIGN_64(sizeof(e_client));
 
-    pLayout->windowOffset = pLayout->size;
-    pLayout->size += E_ALIGN_64(sizeof(e_client));
+    pLayout->inputOffset = pLayout->size;
+    {
+        e_input_config inputConfig;
+        size_t inputSize;
+
+        inputConfig = e_input_config_init_from_client_config(pConfig);
+        result = e_input_alloc_size(&inputConfig, &inputSize);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+
+        pLayout->size += E_ALIGN_64(inputSize);
+    }
+    
 
     return E_SUCCESS;
 }
@@ -10710,12 +11181,14 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         return result;
     }
 
+    E_ZERO_MEMORY(pClient, layout.size);
+
     pClient->pEngine         = pConfig->pEngine;
     pClient->pUserData       = pConfig->pUserData;
     pClient->pVTable         = pConfig->pVTable;
     pClient->pVTableUserData = pConfig->pVTableUserData;
     pClient->flags           = pConfig->flags;
-    pClient->pWindow         = NULL;  /* Will be initialized below. */
+    pClient->pInput          = NULL;    /* Will be initialized below. */
     pClient->pConfigSection  = pConfig->pConfigFileSection;
     pClient->allocationCallbacks = e_allocation_callbacks_init_copy(pAllocationCallbacks);
 
@@ -10724,15 +11197,13 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         pClient->flags |= E_CLIENT_FLAG_NO_GRAPHICS;
     }
 
-    /* The window need to be initialized. This has been preallocated and is sitting at the end of the pClient object. */
+    /* The window need to be initialized. */
     if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) == 0) {
         unsigned int resolutionX;
         unsigned int resolutionY;
         unsigned int windowFlags;
         const char* pTitle;
         char* pTitleFromConfig = NULL;
-
-        pClient->pWindow = (e_window*)E_OFFSET_PTR(pClient, layout.windowOffset);
 
         pTitle = pConfig->pWindowTitle;
         if (pTitle == NULL) {
@@ -10764,13 +11235,13 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         }
 
         windowFlags = 0;
-        if ((pConfig->pEngine->flags & E_ENGINE_FLAG_NO_OPENGL) == 0 || (pConfig->flags & E_CLIENT_FLAG_WINDOW_OPENGL) != 0) {
+        if ((pConfig->pEngine->flags & E_ENGINE_FLAG_NO_OPENGL) == 0 || (pConfig->flags & E_CLIENT_FLAG_OPENGL_WINDOW) != 0) {
             windowFlags |= E_WINDOW_FLAG_OPENGL;
         }
 
         windowConfig = e_window_config_init(pClient->pEngine, pTitle, 0, 0, resolutionX, resolutionY, windowFlags, &e_gClientWindowVTable, pClient);
 
-        result = e_window_init_preallocated(&windowConfig, pAllocationCallbacks, pClient->pWindow);
+        result = e_window_init(&windowConfig, pAllocationCallbacks, &pClient->pWindow);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize client window.");
             return result;
@@ -10796,7 +11267,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         result = e_graphics_init(&graphicsConfig, pAllocationCallbacks, &pClient->pGraphics);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize graphics sub-system for client.");
-            return result;
+            goto error0;
         }
 
 
@@ -10810,8 +11281,7 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         result = e_graphics_device_init(&deviceConfig, pAllocationCallbacks, &pClient->pGraphicsDevice);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize graphics device for client.");
-            e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
-            return result;
+            goto error1;
         }
 
 
@@ -10821,13 +11291,46 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         result = e_graphics_surface_init(&surfaceConfig, pAllocationCallbacks, &pClient->pGraphicsSurface);
         if (result != E_SUCCESS) {
             e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize graphics surface for client.");
-            e_graphics_device_uninit(pClient->pGraphicsDevice, pAllocationCallbacks);
-            e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
-            return result;
+            goto error2;
+        }
+    }
+
+    /* Input. */
+    {
+        e_input_config inputConfig = e_input_config_init_from_client_config(pConfig);
+
+        pClient->pInput = (e_input*)E_OFFSET_PTR(pClient, layout.inputOffset);
+
+        result = e_input_init_preallocated(&inputConfig, pAllocationCallbacks, pClient->pInput);
+        if (result != E_SUCCESS) {
+            e_log_postf(e_engine_get_log(pConfig->pEngine), E_LOG_LEVEL_ERROR, "Failed to initialize input sub-system for client.");
+            goto error3;
         }
     }
 
     return E_SUCCESS;
+
+
+/*error4:
+    e_input_uninit(pClient->pInput, pAllocationCallbacks);*/
+error3:
+    if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
+        e_graphics_surface_uninit(pClient->pGraphicsSurface, pAllocationCallbacks);
+    }
+error2:
+    if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
+        e_graphics_device_uninit(pClient->pGraphicsDevice, pAllocationCallbacks);
+    }
+error1:
+    if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
+        e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
+    }
+error0:
+    if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) == 0) {
+        e_window_uninit(pClient->pWindow, pAllocationCallbacks);
+    }
+
+    return result;
 }
 
 E_API e_result e_client_init(const e_client_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_client** ppClient)
@@ -10876,7 +11379,24 @@ E_API void e_client_uninit(e_client* pClient, const e_allocation_callbacks* pAll
         return;
     }
 
-    e_window_uninit(pClient->pWindow, pAllocationCallbacks);
+    e_input_uninit(pClient->pInput, pAllocationCallbacks);
+    pClient->pInput = NULL;
+
+    if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
+        e_graphics_surface_uninit(pClient->pGraphicsSurface, pAllocationCallbacks);
+        pClient->pGraphicsSurface = NULL;
+
+        e_graphics_device_uninit(pClient->pGraphicsDevice, pAllocationCallbacks);
+        pClient->pGraphicsDevice = NULL;
+
+        e_graphics_uninit(pClient->pGraphics, pAllocationCallbacks);
+        pClient->pGraphics = NULL;
+    }
+
+    if ((pClient->flags & E_CLIENT_FLAG_NO_WINDOW) == 0) {
+        e_window_uninit(pClient->pWindow, pAllocationCallbacks);
+        pClient->pWindow = NULL;
+    }
 
     if (pClient->freeOnUninit) {
         e_free(pClient, pAllocationCallbacks);
@@ -10910,11 +11430,25 @@ E_API e_window* e_client_get_window(e_client* pClient)
     return pClient->pWindow;
 }
 
+E_API e_input* e_client_get_input(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return NULL;
+    }
+
+    return pClient->pInput;
+}
+
 E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent)
 {
+    /* NOTE: This function must never return E_NOT_IMPLEMENTED. */
+
     if (pClient == NULL || pEvent == NULL) {
         return E_INVALID_ARGS;
     }
+
+    /* Pass the message into our input handler. */
+    e_client_update_input_from_event(pClient->pInput, pEvent);
 
     switch (pEvent->type)
     {
@@ -10947,6 +11481,27 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
     return E_SUCCESS;
 }
 
+E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_event* pEvent)
+{
+    if (pInput == NULL || pEvent == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    switch (pEvent->type)
+    {
+        case E_CLIENT_EVENT_CURSOR_MOVE:
+        {
+            e_input_update_absolute_cursor_position(pInput, 0, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+        } break;
+    }
+
+    /*
+    NOTE: Always returning E_SUCCESS here even when the event type isn't handled. We want this function to
+    be able to be called without the caller having to check the event type.
+    */
+    return E_SUCCESS;
+}
+
 
 static e_result e_client_step_default(void* pUserData, e_client* pClient, double dt)
 {
@@ -10961,6 +11516,10 @@ static e_result e_client_step_default(void* pUserData, e_client* pClient, double
         //glClear(GL_COLOR_BUFFER_BIT);
     }
     e_graphics_present_surface(pClient->pGraphics, pClient->pGraphicsSurface);
+
+
+    /* Step the input state last. */
+    e_client_step_input(pClient);
 
     return E_SUCCESS;
 }
@@ -10984,6 +11543,21 @@ E_API e_result e_client_step(e_client* pClient, double dt)
     }
 
     return E_SUCCESS;
+}
+
+E_API e_result e_client_step_input(e_client* pClient)
+{
+    return e_input_step(e_client_get_input(pClient));
+}
+
+E_API e_bool32 e_client_has_cursor_moved(e_client* pClient)
+{
+    return e_input_has_cursor_moved(e_client_get_input(pClient), 0);
+}
+
+E_API e_result e_client_get_absolute_cursor_position(e_client* pClient, int* pPosX, int* pPosY)
+{
+    return e_input_get_absolute_cursor_position(e_client_get_input(pClient), 0, pPosX, pPosY);
 }
 /* ==== END e_client.c ==== */
 
