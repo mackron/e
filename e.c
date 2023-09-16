@@ -100,7 +100,7 @@
 #define ARGV_IMPLEMENTATION
 #include "external/argv/argv.h"
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
     #pragma warning(push)
     #pragma warning(disable:4244)   /* warning C4244: '=': conversion from 'int' to 'lu_byte', possible loss of data */
     #pragma warning(disable:4267)   /* '=': conversion from 'size_t' to 'lua_Integer', possible loss of data */
@@ -111,12 +111,18 @@
     #pragma warning(disable:4701)   /* potentially uninitialized local variable '' used */
     #pragma warning(disable:4702)   /* unreachable code */
     #pragma warning(disable:4709)   /* comma operator within array index expression */
+#elif defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wpedantic" /* Too many pedantic errors with Lua. Just disable them. */
 #endif
 #define LUA_USE_C89
+#define LUA_USE_POSIX
 #define LUA_IMPL
 #include "external/minilua/minilua.h"
 #if defined(_MSC_VER)
     #pragma warning(push)
+#elif defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic pop
 #endif
 
 #define CGLTF_IMPLEMENTATION
@@ -1455,7 +1461,7 @@ static void* e_platform_window_get_object(const e_platform_window* pWindow, e_pl
 
     switch (type)
     {
-        case E_PLATFORM_OBJECT_XLIB_DISPLAY:     return e_gDisplay;
+        case E_PLATFORM_OBJECT_XLIB_DISPLAY:     return e_platform_get_object(type);
         case E_PLATFORM_OBJECT_XLIB_WINDOW:      return (void*)(e_uintptr)pWindow->window;
         case E_PLATFORM_OBJECT_XLIB_VISUAL_INFO: return pWindow->pGLVisualInfo;
         default: break;
@@ -1751,12 +1757,20 @@ E_API void e_dlclose(e_handle hLibrary)
 #endif
 }
 
-E_API void* e_dlsym(e_handle hLibrary, const char* pSymbol)
+E_API e_proc e_dlsym(e_handle hLibrary, const char* pSymbol)
 {
 #if defined(E_WINDOWS)
-    return (void*)GetProcAddress((HMODULE)hLibrary, pSymbol);
+    return (e_proc)GetProcAddress((HMODULE)hLibrary, pSymbol);
 #else
-    return dlsym(hLibrary, pSymbol);
+    /* When compiling with -Wpedantic we'll get warnings about converting from a void* to a function pointer. It's safe - just disable the warning. */
+    #if defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8))
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wpedantic"
+    #endif
+    return (e_proc)dlsym(hLibrary, pSymbol);
+    #if defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8))
+        #pragma GCC diagnostic pop
+    #endif
 #endif
 }
 
@@ -9919,9 +9933,9 @@ static e_result e_graphics_device_vulkan_init(void* pUserData, e_graphics_device
         pGraphicsVulkan->vk.vkGetPhysicalDeviceQueueFamilyProperties(pDeviceVulkan->physicalDeviceVK, &queueFamilyCount, pQueueFamilyProperties);
 
         /* Initialize our queue indices to -1 so we can identifier whether or not we've found one. */
-        pDeviceVulkan->graphicsQueueFamilyIndex = (size_t)-1;
-        pDeviceVulkan->computeQueueFamilyIndex  = (size_t)-1;
-        pDeviceVulkan->transferQueueFamilyIndex = (size_t)-1;
+        pDeviceVulkan->graphicsQueueFamilyIndex = (uint32_t)-1;
+        pDeviceVulkan->computeQueueFamilyIndex  = (uint32_t)-1;
+        pDeviceVulkan->transferQueueFamilyIndex = (uint32_t)-1;
     
         /*
         First we need to find a graphics queue. We'll use the first one we find. We'll do the same
@@ -9937,7 +9951,7 @@ static e_result e_graphics_device_vulkan_init(void* pUserData, e_graphics_device
         }
 
         /* If we didn't find a queue family that supports both graphics and compute, we'll try to find separate queue families. */
-        if (pDeviceVulkan->graphicsQueueFamilyIndex == (size_t)-1) {
+        if (pDeviceVulkan->graphicsQueueFamilyIndex == (uint32_t)-1) {
             for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
                 if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
                     pDeviceVulkan->graphicsQueueFamilyIndex = iQueueFamily;
@@ -9946,7 +9960,7 @@ static e_result e_graphics_device_vulkan_init(void* pUserData, e_graphics_device
             }
         }
 
-        if (pDeviceVulkan->graphicsQueueFamilyIndex == (size_t)-1) {
+        if (pDeviceVulkan->graphicsQueueFamilyIndex == (uint32_t)-1) {
             for (iQueueFamily = 0; iQueueFamily < queueFamilyCount; iQueueFamily += 1) {
                 if ((pQueueFamilyProperties[iQueueFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0) {
                     pDeviceVulkan->computeQueueFamilyIndex = iQueueFamily;
@@ -9963,7 +9977,7 @@ static e_result e_graphics_device_vulkan_init(void* pUserData, e_graphics_device
             }
         }
 
-        if (pDeviceVulkan->transferQueueFamilyIndex == (size_t)-1) {
+        if (pDeviceVulkan->transferQueueFamilyIndex == (uint32_t)-1) {
             pDeviceVulkan->transferQueueFamilyIndex = pDeviceVulkan->graphicsQueueFamilyIndex;  /* Couldn't find a dedicated transfer queue. Use the graphics queue. */
         }
 
@@ -10341,6 +10355,7 @@ static e_result e_graphics_surface_vulkan_refresh(void* pUserData, e_graphics_su
 
     /* TODO: Here is where we should re-create the swapchain. Don't forget to pass in the previous swapchain here. */
     (void)pSurfaceVulkan;
+    (void)allocationCallbacksVK;
 
     return E_SUCCESS;
 }
@@ -10395,6 +10410,7 @@ static const e_graphics_vtable* e_graphics_get_backend_vtable(e_graphics_backend
     return NULL;
 }
 
+#if 0
 static const char* e_graphics_get_backend_name_from_vtable(const e_graphics_vtable* pVTable, void* pVTableUserData)
 {
     if (pVTable == NULL || pVTable->get_name == NULL) {
@@ -10403,6 +10419,7 @@ static const char* e_graphics_get_backend_name_from_vtable(const e_graphics_vtab
 
     return pVTable->get_name(pVTableUserData);
 }
+#endif
 
 static const char* e_graphics_get_backend_name(e_graphics_backend backend)
 {
@@ -11074,6 +11091,8 @@ static e_result e_client_window_event_callback(void* pUserData, e_window* pWindo
             e.data.cursorButtonDoubleClick.button = pEvent->data.cursorButtonDoubleClick.button;
             e_client_handle_event(pClient, &e);
         } break;
+        
+        default: break;
     }
 
     return e_window_default_event_handler(pWindow, pEvent);
@@ -11493,6 +11512,8 @@ E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_
         {
             e_input_update_absolute_cursor_position(pInput, 0, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
         } break;
+        
+        default: break;
     }
 
     /*

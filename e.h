@@ -220,9 +220,22 @@ typedef enum
 
 
 /* dlopen, etc. with e_handle as the library handle. */
+
+/*
+e_proc is annoying because when compiling with GCC we get pendantic warnings about converting
+between `void*` and `void (*)()`. We can't use `void (*)()` with MSVC however, because we'll get
+warning C4191 about "type cast between incompatible function types". To work around this I'm going
+to use a different data type depending on the compiler.
+*/
+#if defined(__GNUC__)
+typedef void (* e_proc)(void);
+#else
+typedef void* e_proc;
+#endif
+
 E_API e_handle e_dlopen(const char* pFilePath);
 E_API void     e_dlclose(e_handle hLibrary);
-E_API void*    e_dlsym(e_handle hLibrary, const char* pSymbol);
+E_API e_proc   e_dlsym(e_handle hLibrary, const char* pSymbol);
 E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes);
 
 
