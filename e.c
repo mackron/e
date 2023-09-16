@@ -115,8 +115,10 @@
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wpedantic" /* Too many pedantic errors with Lua. Just disable them. */
 #endif
+#if defined(E_POSIX)
+    #define LUA_USE_POSIX
+#endif
 #define LUA_USE_C89
-#define LUA_USE_POSIX
 #define LUA_IMPL
 #include "external/minilua/minilua.h"
 #if defined(_MSC_VER)
@@ -3912,7 +3914,6 @@ static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator
 
 static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
 {
-    e_result result;
     c89str_allocation_callbacks cstr89AllocationCallbacks = e_allocation_callbacks_to_c89str(pAllocationCallbacks);
     wchar_t* queryW = NULL;
     size_t queryWLen;
@@ -3944,33 +3945,33 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     */
 
     /* First thing is to append the directory path we originally specified. */
-    result = e_result_from_errno(c89str_newn(&query, &cstr89AllocationCallbacks, pDirectoryPath, directoryPathLen));
-    if (result != E_SUCCESS) {
+    query = c89str_newn(&cstr89AllocationCallbacks, pDirectoryPath, directoryPathLen);
+    if (query == NULL) {
         return NULL;
     }
 
     /* Next we need to normalize the slashes. */
-    c89str_replace_all(&query, &cstr89AllocationCallbacks, "/", 1, "\\", 1);    /* This will not fail. */
+    query = c89str_replace_all(query, &cstr89AllocationCallbacks, "/", 1, "\\", 1);    /* This will not fail. */
 
     /* Next we need to remove the trailing slash. */
-    c89str_len(&query, &queryLen);  /* This will not fail. */
+    queryLen = c89str_len(query);  /* This will not fail. */
     if (queryLen > 0) {
         if (query[queryLen-1] == '/' || query[queryLen-1] == '\\') {
-            c89str_remove(&query, &cstr89AllocationCallbacks, queryLen-1, 1);    /* This will not fail. */
+            query = c89str_remove(query, &cstr89AllocationCallbacks, queryLen-1, 1);    /* This will not fail. */
         }
     }
 
     /* Now we need to append the wildcard. */
-    result = e_result_from_errno(c89str_catn(&query, &cstr89AllocationCallbacks, "\\*", 2));
-    if (result != E_SUCCESS) {
-        c89str_delete(&query, &cstr89AllocationCallbacks);
+    query = c89str_catn(query, &cstr89AllocationCallbacks, "\\*", 2);
+    if (e_result_from_errno(c89str_result(query)) != E_SUCCESS) {
+        c89str_delete(query, &cstr89AllocationCallbacks);
         return NULL;
     }
 
     /* Now we need to prepend the "\\?\" to the path. */
-    result = e_result_from_errno(c89str_prependn(&query, &cstr89AllocationCallbacks, "\\\\?\\", 4));
-    if (result != E_SUCCESS) {
-        c89str_delete(&query, &cstr89AllocationCallbacks);
+    query = c89str_prependn(query, &cstr89AllocationCallbacks, "\\\\?\\", 4);
+    if (e_result_from_errno(c89str_result(query)) != E_SUCCESS) {
+        c89str_delete(query, &cstr89AllocationCallbacks);
         return NULL;
     }
 
@@ -3980,13 +3981,13 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     */
     queryWLen = MultiByteToWideChar(CP_UTF8, 0, query, -1, NULL, 0);    /* -1 because our string is null terminated. */
     if (queryWLen == 0) {
-        c89str_delete(&query, &cstr89AllocationCallbacks);
+        c89str_delete(query, &cstr89AllocationCallbacks);
         return NULL;
     }
 
     queryW = (wchar_t*)e_malloc(sizeof(*queryW) * (queryWLen+1), pAllocationCallbacks); /* +1 for the null terminator. */
     if (queryW == NULL) {
-        c89str_delete(&query, &cstr89AllocationCallbacks);
+        c89str_delete(query, &cstr89AllocationCallbacks);
         return NULL;
     }
 
@@ -3997,7 +3998,7 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     }
 
     /* We're done with the UT8-8 query. From here on out queryW will be used. */
-    c89str_delete(&query, &cstr89AllocationCallbacks);
+    c89str_delete(query, &cstr89AllocationCallbacks);
     query = NULL;
 
     /*
