@@ -10,49 +10,6 @@
 
 #include <stdio.h>  /* For printing to stdout. */
 
-#if defined(_WIN32)
-    #define E_WINDOWS
-#else
-    #define E_POSIX
-
-    #ifdef __unix__
-        #define E_UNIX
-        #ifdef __ORBIS__
-            #define E_ORBIS
-        #elif defined(__PROSPERO__)
-            #define E_PROSPERO
-        #elif defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-            #define E_BSD
-        #endif
-    #endif
-    #ifdef __linux__
-        #define E_LINUX
-    #endif
-    #ifdef __APPLE__
-        #define E_APPLE
-    #endif
-    #ifdef __ANDROID__
-        #define E_ANDROID
-    #endif
-    #ifdef __EMSCRIPTEN__
-        #define E_EMSCRIPTEN
-    #endif
-    #if defined(__NX__)
-        #define E_NX
-    #endif
-
-    #if defined(E_UNIX) && (defined(E_LINUX) || defined(E_BSD))
-        #define E_DESKTOP_UNIX
-    #endif
-#endif
-
-
-#if defined(SIZE_MAX)
-    #define E_SIZE_MAX  SIZE_MAX
-#else
-    #define E_SIZE_MAX  0xFFFFFFFF  /* When SIZE_MAX is not defined by the standard library just default to the maximum 32-bit unsigned integer. */
-#endif
-
 
 /* No Vulkan with Emscripten. */
 #if defined(E_EMSCRIPTEN)
@@ -72,7 +29,7 @@
 #endif
 
 #ifndef E_NO_VULKAN
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     #define VK_USE_PLATFORM_WIN32_KHR
     #endif
 
@@ -338,13 +295,19 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
 static e_result e_platform_window_uninit(e_platform_window* pWindow, const e_allocation_callbacks* pAllocationCallbacks);
 static void* e_platform_window_get_object(const e_platform_window* pWindow, e_platform_object_type type);    /* Return null when an internal object is not supported. */
 static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned int sizeX, unsigned int sizeY);
+static e_result e_platform_window_capture_cursor(e_platform_window* pWindow);
+static e_result e_platform_window_release_cursor(e_platform_window* pWindow);
+static e_result e_platform_window_set_cursor_position(e_platform_window* pWindow, int cursorPosX, int cursorPosY);
+static e_result e_platform_window_get_cursor_position(e_platform_window* pWindow, int* pCursorPosX, int* pCursorPosY);
+static e_result e_platform_window_show_cursor(e_platform_window* pWindow);
+static e_result e_platform_window_hide_cursor(e_platform_window* pWindow);
 
 typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
 static e_result e_platform_exit_main_loop(int exitCode);
 
 
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
 #include <windows.h>
 
 #define E_PLATFORM_WINDOW_CLASS_NAME    L"e_window_class"
@@ -470,6 +433,7 @@ static e_result e_platform_uninit(void)
     return E_SUCCESS;
 }
 
+#if 0
 static void* e_platform_get_object(e_platform_object_type type)
 {
 #if 0
@@ -484,6 +448,7 @@ static void* e_platform_get_object(e_platform_object_type type)
     /* Getting here means we're not aware of the object type. */
     return NULL;
 }
+#endif
 
 
 struct e_platform_window
@@ -491,6 +456,10 @@ struct e_platform_window
     e_window* pOwnerWindow;
     HWND hWnd;
     HDC hDC;    /* Can use GetDC() instead, but in my experience that has tended to be extremely slow. */
+    HCURSOR hDefaultCursor;
+    HCURSOR hCurrentCursor;
+    HCURSOR hOldCursor;
+    e_bool32 isCursorHidden;
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -589,6 +558,11 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
         e_SetPixelFormat(pWindow->hDC, pixelFormat, &pfd);
     }
 
+    /* Some other default states. */
+    pWindow->isCursorHidden = E_FALSE;
+    pWindow->hDefaultCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(32512));
+    pWindow->hCurrentCursor = pWindow->hDefaultCursor;
+
     return E_SUCCESS;
 }
 
@@ -645,6 +619,100 @@ static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned 
     return E_SUCCESS;
 }
 
+static e_result e_platform_window_capture_cursor(e_platform_window* pWindow)
+{
+    SetCapture(pWindow->hWnd);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_release_cursor(e_platform_window* pWindow)
+{
+    (void)pWindow;
+
+    ReleaseCapture();
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_set_cursor_position(e_platform_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    POINT pt;
+
+    pt.x = cursorPosX;
+    pt.y = cursorPosY;
+    ClientToScreen(pWindow->hWnd, &pt);
+    SetCursorPos(pt.x, pt.y);
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_get_cursor_position(e_platform_window* pWindow, int* pCursorPosX, int* pCursorPosY)
+{
+    POINT pt;
+
+    GetCursorPos(&pt);
+    ScreenToClient(pWindow->hWnd, &pt);
+
+    if (pCursorPosX != NULL) {
+        *pCursorPosX = pt.x;
+    }
+    if (pCursorPosY != NULL) {
+        *pCursorPosY = pt.y;
+    }
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_show_cursor(e_platform_window* pWindow)
+{
+    /*
+    We don't use ShowCursor() here. We want this to be per-window which means we'll actually want to do it
+    in WM_SETCURSOR based on a variable.
+    */
+    pWindow->isCursorHidden = E_FALSE;
+    pWindow->hCurrentCursor = pWindow->hDefaultCursor;
+
+    /*
+    The cursor is usually set with SetCursor() in WM_SETCURSOR, but unfortunately that will not get fired
+    if the mouse has been captured. Therefore, if the mouse has been captured by this window, we need to
+    set the set the cursor here.
+    */
+    if (GetCapture() == pWindow->hWnd) {
+        SetCursor(pWindow->hCurrentCursor);
+    }
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_hide_cursor(e_platform_window* pWindow)
+{
+    pWindow->isCursorHidden = E_TRUE;
+    pWindow->hCurrentCursor = NULL;
+
+    /* Like when showing the cursor, if the mouse is captured we'll need to hide it here. */
+    if (GetCapture() == pWindow->hWnd) {
+        pWindow->hOldCursor = SetCursor(pWindow->hCurrentCursor);
+    } else {
+        /*
+        The mouse is not captured, but it's still possible that WM_SETCURSOR is not fired right away which
+        might happen when the cursor is hidden in response to a mouse click. WM_SETCURSOR is fired when the
+        mouse moves, not when the mouse is clicked. To deal with this, we will check if the cursor is over
+        the client area of the window and if it is we'll set the cursor to NULL.
+        */
+        POINT pt;
+        RECT clientRect;
+
+        GetCursorPos(&pt);
+        ScreenToClient(pWindow->hWnd, &pt);
+        GetClientRect(pWindow->hWnd, &clientRect);
+
+        if ((pt.x >= clientRect.left && pt.x < clientRect.right && pt.y >= clientRect.top && pt.y < clientRect.bottom) && GetForegroundWindow() == pWindow->hWnd) {
+            pWindow->hOldCursor = SetCursor(pWindow->hCurrentCursor);
+        }
+    }
+
+    return E_SUCCESS;
+}
+
 
 static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -669,19 +737,115 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
 
+            case WM_SETCURSOR:
+            {
+                /*
+                TODO: This is fired every time the mouse moves. I wonder if we should do our own checks
+                to determine if calling SetCursor() is required in order to perhaps improve performance.
+                */
+                if (LOWORD(lParam) == HTCLIENT) {
+                    if (pWindow->hCurrentCursor == NULL) {
+                        pWindow->hOldCursor = SetCursor(NULL);
+                    } else {
+                        if (pWindow->hOldCursor == NULL) {
+                            SetCursor(pWindow->hDefaultCursor);
+                        } else {
+                            SetCursor(pWindow->hOldCursor);
+                        }
+                    }
+
+                    return 0;
+                }
+            } break;
+
             case WM_MOVE:
             {
                 e = e_window_event_init(E_WINDOW_EVENT_MOVE);
-                e.data.move.x = LOWORD(lParam);
-                e.data.move.y = HIWORD(lParam);
+                e.data.move.x = (short)LOWORD(lParam);
+                e.data.move.y = (short)HIWORD(lParam);
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
 
             case WM_MOUSEMOVE:
             {
                 e = e_window_event_init(E_WINDOW_EVENT_CURSOR_MOVE);
-                e.data.cursorMove.x = LOWORD(lParam);
-                e.data.cursorMove.y = HIWORD(lParam);
+                e.data.cursorMove.x = (short)LOWORD(lParam);
+                e.data.cursorMove.y = (short)HIWORD(lParam);
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+            /* Mouse buttons. */
+            case WM_LBUTTONDOWN:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_DOWN);
+                e.data.cursorButtonDown.x = (short)LOWORD(lParam);
+                e.data.cursorButtonDown.y = (short)HIWORD(lParam);
+                e.data.cursorButtonDown.button = E_CURSOR_BUTTON_LEFT;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_RBUTTONDOWN:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_DOWN);
+                e.data.cursorButtonDown.x = (short)LOWORD(lParam);
+                e.data.cursorButtonDown.y = (short)HIWORD(lParam);
+                e.data.cursorButtonDown.button = E_CURSOR_BUTTON_RIGHT;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_MBUTTONDOWN:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_DOWN);
+                e.data.cursorButtonDown.x = (short)LOWORD(lParam);
+                e.data.cursorButtonDown.y = (short)HIWORD(lParam);
+                e.data.cursorButtonDown.button = E_CURSOR_BUTTON_MIDDLE;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_XBUTTONDOWN:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_DOWN);
+                e.data.cursorButtonDown.x = (short)LOWORD(lParam);
+                e.data.cursorButtonDown.y = (short)HIWORD(lParam);
+                e.data.cursorButtonDown.button = (HIWORD(wParam) == XBUTTON1) ? E_CURSOR_BUTTON_4 : E_CURSOR_BUTTON_5;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+            case WM_LBUTTONUP:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_UP);
+                e.data.cursorButtonUp.x = (short)LOWORD(lParam);
+                e.data.cursorButtonUp.y = (short)HIWORD(lParam);
+                e.data.cursorButtonUp.button = E_CURSOR_BUTTON_LEFT;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_RBUTTONUP:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_UP);
+                e.data.cursorButtonUp.x = (short)LOWORD(lParam);
+                e.data.cursorButtonUp.y = (short)HIWORD(lParam);
+                e.data.cursorButtonUp.button = E_CURSOR_BUTTON_RIGHT;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_MBUTTONUP:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_UP);
+                e.data.cursorButtonUp.x = (short)LOWORD(lParam);
+                e.data.cursorButtonUp.y = (short)HIWORD(lParam);
+                e.data.cursorButtonUp.button = E_CURSOR_BUTTON_MIDDLE;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+            case WM_XBUTTONUP:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_BUTTON_UP);
+                e.data.cursorButtonUp.x = (short)LOWORD(lParam);
+                e.data.cursorButtonUp.y = (short)HIWORD(lParam);
+                e.data.cursorButtonUp.button = (HIWORD(wParam) == XBUTTON1) ? E_CURSOR_BUTTON_4 : E_CURSOR_BUTTON_5;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+            /* Mouse wheel. */
+            case WM_MOUSEWHEEL:
+            {
+                e = e_window_event_init(E_WINDOW_EVENT_CURSOR_WHEEL);
+                e.data.cursorWheel.delta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
 
@@ -788,7 +952,7 @@ static e_result e_platform_exit_main_loop(int exitCode)
     PostQuitMessage(exitCode);
     return E_SUCCESS;
 }
-#endif  /* E_WINDOWS */
+#endif  /* E_WIN32 */
 
 
 #if defined(E_POSIX)
@@ -1743,7 +1907,7 @@ static e_result e_platform_exit_main_loop(int exitCode)
 
 E_API e_handle e_dlopen(const char* pFilePath)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     return (e_handle)LoadLibraryA(pFilePath);
 #else
     return (e_handle)dlopen(pFilePath, RTLD_LAZY);
@@ -1752,7 +1916,7 @@ E_API e_handle e_dlopen(const char* pFilePath)
 
 E_API void e_dlclose(e_handle hLibrary)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     FreeLibrary((HMODULE)hLibrary);
 #else
     dlclose(hLibrary);
@@ -1761,7 +1925,7 @@ E_API void e_dlclose(e_handle hLibrary)
 
 E_API e_proc e_dlsym(e_handle hLibrary, const char* pSymbol)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     return (e_proc)GetProcAddress((HMODULE)hLibrary, pSymbol);
 #else
     /* When compiling with -Wpedantic we'll get warnings about converting from a void* to a function pointer. It's safe - just disable the warning. */
@@ -1778,7 +1942,7 @@ E_API e_proc e_dlsym(e_handle hLibrary, const char* pSymbol)
 
 E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     DWORD errorCode = GetLastError();
     if (errorCode == 0) {
         return E_SUCCESS;
@@ -2100,6 +2264,115 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
 
 
 
+/* ==== BEG e_timer.h ==== */
+#if defined(E_WIN32) && !defined(E_POSIX)
+    static LARGE_INTEGER e_gTimerFrequency;   /* <-- Initialized to zero since it's static. */
+    RANE_API void e_timer_init(e_timer* pTimer)
+    {
+        LARGE_INTEGER counter;
+
+        if (e_gTimerFrequency.QuadPart == 0) {
+            QueryPerformanceFrequency(&e_gTimerFrequency);
+        }
+
+        QueryPerformanceCounter(&counter);
+        pTimer->counter = counter.QuadPart;
+    }
+
+    RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+    {
+        LARGE_INTEGER counter;
+        if (!QueryPerformanceCounter(&counter)) {
+            return 0;
+        }
+
+        return (double)(counter.QuadPart - pTimer->counter) / e_gTimerFrequency.QuadPart;
+    }
+#elif defined(E_APPLE) && (__MAC_OS_X_VERSION_MIN_REQUIRED < 101200)
+    static e_uint64 e_gTimerFrequency = 0;
+    RANE_API void e_timer_init(e_timer* pTimer)
+    {
+        mach_timebase_info_data_t baseTime;
+        mach_timebase_info(&baseTime);
+        e_gTimerFrequency = (baseTime.denom * 1e9) / baseTime.numer;
+
+        pTimer->counter = mach_absolute_time();
+    }
+
+    RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+    {
+        e_uint64 newTimeCounter = mach_absolute_time();
+        e_uint64 oldTimeCounter = pTimer->counter;
+
+        return (newTimeCounter - oldTimeCounter) / e_gTimerFrequency;
+    }
+#elif defined(E_EMSCRIPTEN)
+    RANE_API MA_INLINE void e_timer_init(e_timer* pTimer)
+    {
+        pTimer->counterD = emscripten_get_now();
+    }
+
+    RANE_API MA_INLINE double e_timer_get_time_in_seconds(e_timer* pTimer)
+    {
+        return (emscripten_get_now() - pTimer->counterD) / 1000;    /* Emscripten is in milliseconds. */
+    }
+#else
+    #if defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 199309L
+        #if defined(CLOCK_MONOTONIC)
+            #define MA_CLOCK_ID CLOCK_MONOTONIC
+        #else
+            #define MA_CLOCK_ID CLOCK_REALTIME
+        #endif
+
+        RANE_API void e_timer_init(e_timer* pTimer)
+        {
+            struct timespec newTime;
+            clock_gettime(MA_CLOCK_ID, &newTime);
+
+            pTimer->counter = (newTime.tv_sec * 1000000000) + newTime.tv_nsec;
+        }
+
+        RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+        {
+            e_uint64 newTimeCounter;
+            e_uint64 oldTimeCounter;
+
+            struct timespec newTime;
+            clock_gettime(MA_CLOCK_ID, &newTime);
+
+            newTimeCounter = (newTime.tv_sec * 1000000000) + newTime.tv_nsec;
+            oldTimeCounter = pTimer->counter;
+
+            return (newTimeCounter - oldTimeCounter) / 1000000000.0;
+        }
+    #else
+        RANE_API void e_timer_init(e_timer* pTimer)
+        {
+            struct timeval newTime;
+            gettimeofday(&newTime, NULL);
+
+            pTimer->counter = (newTime.tv_sec * 1000000) + newTime.tv_usec;
+        }
+
+        RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+        {
+            e_uint64 newTimeCounter;
+            e_uint64 oldTimeCounter;
+
+            struct timeval newTime;
+            gettimeofday(&newTime, NULL);
+
+            newTimeCounter = (newTime.tv_sec * 1000000) + newTime.tv_usec;
+            oldTimeCounter = pTimer->counter;
+
+            return (newTimeCounter - oldTimeCounter) / 1000000.0;
+        }
+    #endif
+#endif
+/* ==== END e_timer.h ==== */
+
+
+
 /* ==== BEG e_net.c ==== */
 #if defined(E_POSIX)
 #include <sys/socket.h>
@@ -2117,7 +2390,7 @@ An added complication here is that we would normally need to link to ws2_32.dll,
 we're trying to keep the build system simple we'll need to do some runtime linking with the Windows
 build.
 */
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
 typedef e_uintptr           E_SOCKET;
 #define E_WSAAPI            __stdcall
 #define E_INVALID_SOCKET    ((E_SOCKET)(~0))
@@ -2213,7 +2486,7 @@ struct e_sockaddr_in6
 
 
 /* We need to declare a few function pointer types for runtime linking on Windows. */
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
 typedef int            (E_WSAAPI * e_pfn_WSAGetLastError)(void);
 typedef int            (E_WSAAPI * e_pfn_WSACleanup)(void);
 typedef int            (E_WSAAPI * e_pfn_WSAStartup)(e_uint16 wVersionRequested, E_WSADATA* lpWSAData);
@@ -2336,7 +2609,7 @@ This is our low-level socket abstraction. The idea is to keep this extremely lig
 we've redeclared everything on the Windows side, that part is already done. On the POSIX side,
 we need only set up a few typedefs and defines.
 */
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     /* Everything has already been declared above. */
 #else
     #define e_addrinfo          addrinfo
@@ -2375,7 +2648,7 @@ we need only set up a few typedefs and defines.
 
 E_API e_result e_net_init(void)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     return e_winsock_init();
 #else
     return E_SUCCESS;
@@ -2384,7 +2657,7 @@ E_API e_result e_net_init(void)
 
 E_API void e_net_uninit(void)
 {
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     e_winsock_uninit();
 #else
     /* Nothing to do. */
@@ -3894,7 +4167,7 @@ static e_result e_fs_info_default(void* pUserData, e_file* pFile, e_file_info* p
 
 
 /* Unfortunately file iteration is platform-specific. */
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
 typedef struct
 {
     e_fs_iterator iterator;
@@ -8070,7 +8343,7 @@ static e_result e_result_from_vk(VkResult result)
 
 
 
-E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData)
+E_API e_engine_config e_engine_config_init(int argc, const char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData)
 {
     e_engine_config config;
 
@@ -8272,6 +8545,10 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
         e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Networking sub-system failed to initialize. Networking may be unavailable.");
     }
 
+    /* Timer. */
+    e_timer_init(&pEngine->timer);
+    pEngine->lastTimeInSeconds = e_timer_get_time_in_seconds(&pEngine->timer);
+
     *ppEngine = pEngine;
     return E_SUCCESS;
 }
@@ -8319,15 +8596,21 @@ E_API e_log* e_engine_get_log(e_engine* pEngine)
 
 static e_result e_engine_step_callback(void* pUserData)
 {
+    double currentTimeInSeconds = 0;
+    double dt = 0;
     e_engine* pEngine = (e_engine*)pUserData;
+
     E_ASSERT(pEngine != NULL);
 
     if (pEngine->pVTable == NULL || pEngine->pVTable->onStep == NULL) {
         return E_INVALID_OPERATION;
     }
 
-    /* TODO: Calculate delta time. */
-    return pEngine->pVTable->onStep(pEngine->pVTableUserData, pEngine, 0);
+    currentTimeInSeconds = e_timer_get_time_in_seconds(&pEngine->timer);
+    dt = currentTimeInSeconds - pEngine->lastTimeInSeconds;
+    pEngine->lastTimeInSeconds = currentTimeInSeconds;
+
+    return pEngine->pVTable->onStep(pEngine->pVTableUserData, pEngine, dt);
 }
 
 E_API e_result e_engine_run(e_engine* pEngine)
@@ -8338,6 +8621,8 @@ E_API e_result e_engine_run(e_engine* pEngine)
     if (pEngine == NULL) {
         return E_INVALID_ARGS;
     }
+
+    e_engine_reset_timer(pEngine);
 
     result = e_platform_main_loop(&exitCode, e_engine_step_callback, (void*)pEngine);
     if (result != E_SUCCESS) {
@@ -8372,6 +8657,15 @@ E_API e_config_file* e_engine_get_config_file(e_engine* pEngine)
     }
 
     return &pEngine->configFile;
+}
+
+E_API void e_engine_reset_timer(e_engine* pEngine)
+{
+    if (pEngine == NULL) {
+        return;
+    }
+
+    pEngine->lastTimeInSeconds = e_timer_get_time_in_seconds(&pEngine->timer);
 }
 
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend)
@@ -8605,10 +8899,66 @@ E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event*
 
     return E_SUCCESS;
 }
+
+E_API e_result e_window_capture_cursor(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_capture_cursor(pWindow->pPlatformWindow);
+}
+
+E_API e_result e_window_release_cursor(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_release_cursor(pWindow->pPlatformWindow);
+}
+
+E_API e_result e_window_set_cursor_position(e_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_set_cursor_position(pWindow->pPlatformWindow, cursorPosX, cursorPosY);
+}
+
+E_API e_result e_window_get_cursor_position(e_window* pWindow, int* pCursorPosX, int* pCursorPosY)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_get_cursor_position(pWindow->pPlatformWindow, pCursorPosX, pCursorPosY);
+}
+
+E_API e_result e_window_show_cursor(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_show_cursor(pWindow->pPlatformWindow);
+}
+
+E_API e_result e_window_hide_cursor(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_hide_cursor(pWindow->pPlatformWindow);
+}
 /* ==== END e_window.c ==== */
 
 
 
+
+/* === BEG e_input.c === */
 E_API e_input_config e_input_config_init(void)
 {
     e_input_config config;
@@ -8745,12 +9095,18 @@ E_API e_result e_input_step(e_input* pInput)
     for (iCursor = 0; iCursor < E_MAX_CURSORS; iCursor += 1) {
         pInput->prevAbsoluteCursorPosX[iCursor] = pInput->currentAbsoluteCursorPosX[iCursor];
         pInput->prevAbsoluteCursorPosY[iCursor] = pInput->currentAbsoluteCursorPosY[iCursor];
+
+        /* Set the previous mouse button states. */
+        memcpy(pInput->prevCursorButtonStates[iCursor], pInput->cursorButtonStates[iCursor], sizeof(pInput->cursorButtonStates[iCursor]));
+
+        // Reset mouse wheel deltas.
+        pInput->cursorWheelDelta[iCursor] = 0;
     }
 
     return E_SUCCESS;
 }
 
-E_API e_result e_input_update_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY)
+E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY)
 {
     if (pInput == NULL) {
         return E_INVALID_ARGS;
@@ -8759,9 +9115,6 @@ E_API e_result e_input_update_absolute_cursor_position(e_input* pInput, e_uint32
     if (cursorIndex >= E_MAX_CURSORS) {
         return E_INVALID_ARGS;
     }
-
-    pInput->prevAbsoluteCursorPosX[cursorIndex] = pInput->currentAbsoluteCursorPosX[cursorIndex];
-    pInput->prevAbsoluteCursorPosY[cursorIndex] = pInput->currentAbsoluteCursorPosY[cursorIndex];
 
     pInput->currentAbsoluteCursorPosX[cursorIndex] = posX;
     pInput->currentAbsoluteCursorPosY[cursorIndex] = posY;
@@ -8788,19 +9141,118 @@ E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cu
     return E_SUCCESS;
 }
 
-E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex)
+E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int prevCursorPosX, int prevCursorPosY)
 {
     if (pInput == NULL) {
-        return E_FALSE;
+        return E_INVALID_ARGS;
     }
 
     if (cursorIndex >= E_MAX_CURSORS) {
+        return E_INVALID_ARGS;
+    }
+
+    pInput->prevAbsoluteCursorPosX[cursorIndex] = prevCursorPosX;
+    pInput->prevAbsoluteCursorPosY[cursorIndex] = prevCursorPosY;
+
+    return E_SUCCESS;
+}
+
+E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
         return E_FALSE;
     }
 
     return pInput->prevAbsoluteCursorPosX[cursorIndex] != pInput->currentAbsoluteCursorPosX[cursorIndex] ||
            pInput->prevAbsoluteCursorPosY[cursorIndex] != pInput->currentAbsoluteCursorPosY[cursorIndex];
 }
+
+E_API void e_input_get_cursor_move_delta(e_input* pInput, e_uint32 cursorIndex, int* pDeltaX, int* pDeltaY)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return;
+    }
+
+    if (pDeltaX != NULL) {
+        *pDeltaX = pInput->currentAbsoluteCursorPosX[cursorIndex] - pInput->prevAbsoluteCursorPosX[cursorIndex];
+    }
+    if (pDeltaY != NULL) {
+        *pDeltaY = pInput->currentAbsoluteCursorPosY[cursorIndex] - pInput->prevAbsoluteCursorPosY[cursorIndex];
+    }
+}
+
+E_API int e_input_get_cursor_move_delta_x(e_input* pInput, e_uint32 cursorIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return 0;
+    }
+
+    return pInput->currentAbsoluteCursorPosX[cursorIndex] - pInput->prevAbsoluteCursorPosX[cursorIndex];
+}
+
+E_API int e_input_get_cursor_move_delta_y(e_input* pInput, e_uint32 cursorIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return 0;
+    }
+
+    return pInput->currentAbsoluteCursorPosY[cursorIndex] - pInput->prevAbsoluteCursorPosY[cursorIndex];
+}
+
+E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex, int state)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+        return;
+    }
+
+    pInput->cursorButtonStates[cursorIndex][buttonIndex] = state;
+}
+
+E_API int e_input_get_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+        return 0;
+    }
+
+    return pInput->cursorButtonStates[cursorIndex][buttonIndex];
+}
+
+E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+        return E_FALSE;
+    }
+
+    return pInput->cursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_DOWN && pInput->prevCursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_UP;
+}
+
+E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+        return E_FALSE;
+    }
+
+    return pInput->cursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_UP && pInput->prevCursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_DOWN;
+}
+
+E_API void e_input_set_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex, int delta)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return;
+    }
+
+    pInput->cursorWheelDelta[cursorIndex] = delta;
+}
+
+E_API int e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex)
+{
+    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+        return 0;
+    }
+
+    return pInput->cursorWheelDelta[cursorIndex];
+}
+/* === END e_input.c === */
 
 
 
@@ -8827,7 +9279,7 @@ typedef struct
     /* Platform-specific rendering context. */
     union
     {
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
         struct
         {
             HGLRC hRC;  /* Used for window render targets. */
@@ -8964,7 +9416,7 @@ static e_result e_graphics_opengl_set_surface(void* pUserData, e_graphics* pGrap
     (void)pSurfaceOpenGL;
 
 #if 0
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     e_engine_gl(pSurface->pGraphics->pEngine)->wglMakeCurrent((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC), pSurfaceOpenGL->platform.win32.hRC);
 #endif
 #if defined(E_DESKTOP_UNIX)
@@ -8990,7 +9442,7 @@ static e_result e_graphics_opengl_present_surface(void* pUserData, e_graphics* p
     (void)pSurface;
 
 #if 0
-#if defined(E_WINDOWS)
+#if defined(E_WIN32)
     e_SwapBuffers((HDC)e_window_get_platform_object(pSurface->pWindow, E_PLATFORM_OBJECT_WIN32_HDC));
 #endif
 #if defined(E_DESKTOP_UNIX)
@@ -9035,7 +9487,7 @@ static e_result e_graphics_device_opengl_init(void* pUserData, e_graphics_device
     }
 
     /* Different ways of initializing a rendering context depending on the platform. */
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         GLBapi* pGL = e_engine_gl(pDevice->pGraphics->pEngine);
         E_ASSERT(pGL != NULL);
@@ -9113,7 +9565,7 @@ static void e_graphics_device_opengl_uninit(void* pUserData, e_graphics_device* 
     (void)pAllocationCallbacks;
 
     /* Check if it's a window render target. If so, it needs to be deleted using platform-specific code. */
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         if (pDeviceOpenGL->platform.win32.hRC != NULL) {
             e_engine_gl(pDevice->pGraphics->pEngine)->wglDeleteContext(pDeviceOpenGL->platform.win32.hRC);
@@ -9160,7 +9612,7 @@ static e_result e_graphics_surface_opengl_init(void* pUserData, e_graphics_surfa
     (void)pAllocationCallbacks;
 
     /* There's different ways to create a surface depending on the platform. */
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         (void)pSurfaceOpenGL;
         return E_SUCCESS;
@@ -9201,7 +9653,7 @@ static void e_graphics_surface_opengl_uninit(void* pUserData, e_graphics_surface
     (void)pAllocationCallbacks;
 
     /* Check if it's a window render target. If so, it needs to be deleted using platform-specific code. */
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         (void)pSurfaceOpenGL;
     }
@@ -9478,7 +9930,7 @@ static e_result e_graphics_vulkan_init(void* pUserData, e_graphics* pGraphics, c
         const char* pRequiredExtensions[] =
         {
             VK_KHR_SURFACE_EXTENSION_NAME,
-        #if defined(E_WINDOWS)
+        #if defined(E_WIN32)
             VK_KHR_WIN32_SURFACE_EXTENSION_NAME
         #endif
         };
@@ -10117,7 +10569,7 @@ static e_result e_graphics_surface_vulkan_init(void* pUserData, e_graphics_surfa
     The first step is to create the VkSurfaceKHR object which is the platform-specific part. We create
     this from the window that was passed into the surface config.
     */
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         VkWin32SurfaceCreateInfoKHR surfaceInfo;
         surfaceInfo.sType     = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
@@ -10320,7 +10772,7 @@ error2:
 error1:
     pDeviceVulkan->vk.vkDestroySwapchainKHR(pDeviceVulkan->deviceVK, pSurfaceVulkan->swapchainVK, &allocationCallbacksVK);
 error0:
-    #if defined(E_WINDOWS)
+    #if defined(E_WIN32)
     {
         pGraphicsVulkan->vk.vkDestroySurfaceKHR(pGraphicsVulkan->instanceVK, pSurfaceVulkan->surfaceVK, &allocationCallbacksVK);
     }
@@ -11073,6 +11525,8 @@ static e_result e_client_window_event_callback(void* pUserData, e_window* pWindo
         {
             e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_DOWN);
             e.data.cursorButtonDown.pWindow = pWindow;
+            e.data.cursorButtonDown.x = pEvent->data.cursorButtonDown.x;
+            e.data.cursorButtonDown.y = pEvent->data.cursorButtonDown.y;
             e.data.cursorButtonDown.button = pEvent->data.cursorButtonDown.button;
             e_client_handle_event(pClient, &e);
         } break;
@@ -11081,6 +11535,8 @@ static e_result e_client_window_event_callback(void* pUserData, e_window* pWindo
         {
             e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_UP);
             e.data.cursorButtonUp.pWindow = pWindow;
+            e.data.cursorButtonUp.x = pEvent->data.cursorButtonDown.x;
+            e.data.cursorButtonUp.y = pEvent->data.cursorButtonDown.y;
             e.data.cursorButtonUp.button = pEvent->data.cursorButtonUp.button;
             e_client_handle_event(pClient, &e);
         } break;
@@ -11089,7 +11545,17 @@ static e_result e_client_window_event_callback(void* pUserData, e_window* pWindo
         {
             e = e_client_event_init(E_CLIENT_EVENT_CURSOR_BUTTON_DOUBLE_CLICK);
             e.data.cursorButtonDoubleClick.pWindow = pWindow;
+            e.data.cursorButtonDoubleClick.x = pEvent->data.cursorButtonDown.x;
+            e.data.cursorButtonDoubleClick.y = pEvent->data.cursorButtonDown.y;
             e.data.cursorButtonDoubleClick.button = pEvent->data.cursorButtonDoubleClick.button;
+            e_client_handle_event(pClient, &e);
+        } break;
+
+        case E_WINDOW_EVENT_CURSOR_WHEEL:
+        {
+            e = e_client_event_init(E_CLIENT_EVENT_CURSOR_WHEEL);
+            e.data.cursorWheel.pWindow = pWindow;
+            e.data.cursorWheel.delta = pEvent->data.cursorWheel.delta;
             e_client_handle_event(pClient, &e);
         } break;
         
@@ -11270,6 +11736,12 @@ E_API e_result e_client_init_preallocated(const e_client_config* pConfig, const 
         if (pTitleFromConfig != NULL) {
             e_free(pTitleFromConfig, pAllocationCallbacks);
         }
+
+        pClient->windowSizeX = resolutionX;
+        pClient->windowSizeY = resolutionY;
+        pClient->windowResized = E_TRUE;    /* Always set this to true so that e_client_has_window_resized() always returns true at least once which will give applications a chance to do an initialize setup for their graphics system. */
+    } else {
+        pClient->windowResized = E_FALSE;
     }
 
     if ((pClient->flags & E_CLIENT_FLAG_NO_GRAPHICS) == 0) {
@@ -11450,6 +11922,36 @@ E_API e_window* e_client_get_window(e_client* pClient)
     return pClient->pWindow;
 }
 
+E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_uint32 sizeY)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pClient->windowSizeX = sizeX;
+    pClient->windowSizeY = sizeY;
+    pClient->windowResized = E_TRUE;
+
+    return E_SUCCESS;
+}
+
+E_API e_bool32 e_client_has_window_resized(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY)
+{
+    if (pClient == NULL) {
+        return E_FALSE;
+    }
+
+    if (pSizeX != NULL) {
+        *pSizeX = pClient->windowSizeX;
+    }
+
+    if (pSizeY != NULL) {
+        *pSizeY = pClient->windowSizeY;
+    }
+
+    return pClient->windowResized;
+}
+
 E_API e_input* e_client_get_input(e_client* pClient)
 {
     if (pClient == NULL) {
@@ -11468,7 +11970,7 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
     }
 
     /* Pass the message into our input handler. */
-    e_client_update_input_from_event(pClient->pInput, pEvent);
+    e_client_update_input_from_event(pClient, pEvent);
 
     switch (pEvent->type)
     {
@@ -11485,6 +11987,9 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
 
         case E_CLIENT_EVENT_WINDOW_SIZE:
         {
+            /* Tell the client that the window has been resized. */
+            e_client_on_window_resize(pClient, (e_uint32)pEvent->data.windowSize.x, (e_uint32)pEvent->data.windowSize.y);
+
             /*
             When the window is resized we need to also resize the surface. If we don't do this, the surface's
             swapchain can be put into an invalid state and graphics will break.
@@ -11501,9 +12006,9 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
     return E_SUCCESS;
 }
 
-E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_event* pEvent)
+E_API e_result e_client_update_input_from_event(e_client* pClient, const e_client_event* pEvent)
 {
-    if (pInput == NULL || pEvent == NULL) {
+    if (pClient == NULL || pEvent == NULL) {
         return E_INVALID_ARGS;
     }
 
@@ -11511,7 +12016,22 @@ E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_
     {
         case E_CLIENT_EVENT_CURSOR_MOVE:
         {
-            e_input_update_absolute_cursor_position(pInput, 0, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+            e_input_set_absolute_cursor_position(pClient->pInput, 0, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+        } break;
+
+        case E_CLIENT_EVENT_CURSOR_BUTTON_DOWN:
+        {
+            e_input_set_cursor_button_state(pClient->pInput, 0, pEvent->data.cursorButtonDown.button, E_BUTTON_STATE_DOWN);
+        } break;
+
+        case E_CLIENT_EVENT_CURSOR_BUTTON_UP:
+        {
+            e_input_set_cursor_button_state(pClient->pInput, 0, pEvent->data.cursorButtonUp.button, E_BUTTON_STATE_UP);
+        } break;
+
+        case E_CLIENT_EVENT_CURSOR_WHEEL:
+        {
+            e_input_set_cursor_wheel_delta(pClient->pInput, 0, pEvent->data.cursorWheel.delta);
         } break;
         
         default: break;
@@ -11539,10 +12059,6 @@ static e_result e_client_step_default(void* pUserData, e_client* pClient, double
     }
     e_graphics_present_surface(pClient->pGraphics, pClient->pGraphicsSurface);
 
-
-    /* Step the input state last. */
-    e_client_step_input(pClient);
-
     return E_SUCCESS;
 }
 
@@ -11559,6 +12075,26 @@ E_API e_result e_client_step(e_client* pClient, double dt)
     } else {
         result = e_client_step_default(NULL, pClient, dt);
     }
+
+    /* Reset the window resize state. */
+    pClient->windowResized = E_FALSE;
+
+    /* Step the input state last. */
+    e_client_step_input(pClient);
+
+    /* After stepping the input, if we have a pinned mouse cursor we'll want to position it back to it's location. */
+    if (pClient->isCursorPinned) {
+        /*
+        When the mouse is pinned we need to update the previous and current cursor positions to match the pinned
+        position or else the cursor offset will just reverse itself each frame.
+        */
+        e_input_set_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+        e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+
+        //printf("Mouse Pinned: %d %d\n", pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+        e_window_set_cursor_position(pClient->pWindow, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+    }
+
 
     if (result != E_SUCCESS) {
         return result;
@@ -11580,6 +12116,71 @@ E_API e_bool32 e_client_has_cursor_moved(e_client* pClient)
 E_API e_result e_client_get_absolute_cursor_position(e_client* pClient, int* pPosX, int* pPosY)
 {
     return e_input_get_absolute_cursor_position(e_client_get_input(pClient), 0, pPosX, pPosY);
+}
+
+E_API e_result e_client_capture_cursor(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_window_capture_cursor(pClient->pWindow);
+}
+
+E_API e_result e_client_release_cursor(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_window_release_cursor(pClient->pWindow);
+}
+
+E_API e_result e_client_pin_cursor(e_client* pClient, int pinnedCursorPosX, int pinnedCursorPosY)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pClient->isCursorPinned = E_TRUE;
+    pClient->pinnedCursorPosX = pinnedCursorPosX;
+    pClient->pinnedCursorPosY = pinnedCursorPosY;
+
+    /* The position of the cursor needs to be updated. */
+    e_input_set_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+    e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+    e_window_set_cursor_position(pClient->pWindow, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_client_unpin_cursor(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pClient->isCursorPinned = E_FALSE;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_client_show_cursor(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_window_show_cursor(pClient->pWindow);
+}
+
+E_API e_result e_client_hide_cursor(e_client* pClient)
+{
+    if (pClient == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_window_hide_cursor(pClient->pWindow);
 }
 /* ==== END e_client.c ==== */
 

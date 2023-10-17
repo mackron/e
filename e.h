@@ -19,6 +19,49 @@ do stuff. This is where you'd probably step your clients.
 #include <stdarg.h> /* va_list */
 #include <math.h>
 
+#if defined(_WIN32)
+    #define E_WIN32
+#else
+    #define E_POSIX
+
+    #ifdef __unix__
+        #define E_UNIX
+        #ifdef __ORBIS__
+            #define E_ORBIS
+        #elif defined(__PROSPERO__)
+            #define E_PROSPERO
+        #elif defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+            #define E_BSD
+        #endif
+    #endif
+    #ifdef __linux__
+        #define E_LINUX
+    #endif
+    #ifdef __APPLE__
+        #define E_APPLE
+    #endif
+    #ifdef __ANDROID__
+        #define E_ANDROID
+    #endif
+    #ifdef __EMSCRIPTEN__
+        #define E_EMSCRIPTEN
+    #endif
+    #if defined(__NX__)
+        #define E_NX
+    #endif
+
+    #if defined(E_UNIX) && (defined(E_LINUX) || defined(E_BSD))
+        #define E_DESKTOP_UNIX
+    #endif
+#endif
+
+
+#if defined(SIZE_MAX)
+    #define E_SIZE_MAX  SIZE_MAX
+#else
+    #define E_SIZE_MAX  0xFFFFFFFF  /* When SIZE_MAX is not defined by the standard library just default to the maximum 32-bit unsigned integer. */
+#endif
+
 #ifndef E_API
 #ifdef __cplusplus
 #define E_API extern "C"
@@ -219,6 +262,10 @@ typedef enum
 } e_format;
 
 
+
+E_API const char* e_result_description(e_result result);
+
+
 /* dlopen, etc. with e_handle as the library handle. */
 
 /*
@@ -262,6 +309,19 @@ E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, s
 E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 /* ==== END e_misc.h ==== */
+
+
+
+/* ==== BEG e_timer.h ==== */
+typedef struct
+{
+    e_int64 counter;
+    double counterD;
+} e_timer;
+
+E_API void e_timer_init(e_timer* pTimer);
+E_API double e_timer_get_time_in_seconds(e_timer* pTimer);
+/* ==== END e_timer.h ==== */
 
 
 
@@ -776,7 +836,7 @@ struct e_engine_config
 {
     void* pUserData;
     int argc;
-    char** argv;
+    const char** argv;
     unsigned int flags;
     e_engine_vtable* pVTable;
     void* pVTableUserData;
@@ -785,7 +845,7 @@ struct e_engine_config
     void* pFSVTableUserData;
 };
 
-E_API e_engine_config e_engine_config_init(int argc, char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData);
+E_API e_engine_config e_engine_config_init(int argc, const char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData);
 
 
 struct e_engine
@@ -793,13 +853,15 @@ struct e_engine
     void* pUserData;
     unsigned int flags;
     int argc;
-    char** argv;
+    const char** argv;
     e_engine_vtable* pVTable;
     void* pVTableUserData;
     e_log* pLog;
     e_bool8 isOwnerOfLog;
     e_fs fs;
     e_config_file configFile;
+    e_timer timer;  /* For calculating delta times. */
+    double lastTimeInSeconds;
     void* pGL;  /* Cast to GLBapi* to access OpenGL functions. */
     void* pVK;  /* Cast to VkbAPI* to access Vulkan functions. */
 };
@@ -811,6 +873,7 @@ E_API e_result e_engine_run(e_engine* pEngine);
 E_API e_result e_engine_exit(e_engine* pEngine, int exitCode);  /* Exits the main loop. */
 E_API e_fs* e_engine_get_file_system(e_engine* pEngine);
 E_API e_config_file* e_engine_get_config_file(e_engine* pEngine);
+E_API void e_engine_reset_timer(e_engine* pEngine);
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend);
 E_API void* e_engine_get_glapi(const e_engine* pEngine);
 E_API void* e_engine_get_vkapi(const e_engine* pEngine);
@@ -837,8 +900,15 @@ typedef enum
     E_WINDOW_EVENT_CURSOR_MOVE,
     E_WINDOW_EVENT_CURSOR_BUTTON_DOWN,
     E_WINDOW_EVENT_CURSOR_BUTTON_UP,
-    E_WINDOW_EVENT_CURSOR_BUTTON_DOUBLE_CLICK
+    E_WINDOW_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
+    E_WINDOW_EVENT_CURSOR_WHEEL
 } e_window_event_type;
+
+#define E_CURSOR_BUTTON_LEFT   0
+#define E_CURSOR_BUTTON_RIGHT  1
+#define E_CURSOR_BUTTON_MIDDLE 2
+#define E_CURSOR_BUTTON_4      3
+#define E_CURSOR_BUTTON_5      4
 
 typedef struct e_platform_window e_platform_window; /* Platform-specific window object. This is defined in the implementation on a per-platform basis. */
 
@@ -881,6 +951,10 @@ struct e_window_event
             int x;
             int y;
         } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
+        struct
+        {
+            int delta;
+        } cursorWheel;
     } data;
 };
 
@@ -951,6 +1025,12 @@ E_API void* e_window_get_user_data(const e_window* pWindow);
 E_API e_window_vtable* e_window_get_vtable(const e_window* pWindow);
 E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_object_type type);
 E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event* pEvent);
+E_API e_result e_window_capture_cursor(e_window* pWindow);
+E_API e_result e_window_release_cursor(e_window* pWindow);
+E_API e_result e_window_set_cursor_position(e_window* pWindow, int cursorPosX, int cursorPosY);
+E_API e_result e_window_get_cursor_position(e_window* pWindow, int* pCursorPosX, int* pCursorPosY);
+E_API e_result e_window_show_cursor(e_window* pWindow);
+E_API e_result e_window_hide_cursor(e_window* pWindow);
 /* ==== END e_window.h ==== */
 
 
@@ -962,6 +1042,8 @@ E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event*
 E_INLINE double e_sqrtd (double x) { return sqrt(x); }
 E_INLINE float  e_sqrtf (float  x) { return (float)e_sqrtd(x); }
 E_INLINE float  e_rsqrtf(float  x) { return 1 / e_sqrtf(x); }   /* <-- This can be optimized. See miniaudio's implementation. */
+
+E_INLINE float  e_lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
 
 typedef struct
@@ -987,14 +1069,17 @@ typedef struct
 typedef struct
 {
     float x, y, z, w;
-} e_quat4f;
+} e_quatf;
 
 
 E_INLINE float e_degrees(float radians) { return radians * 57.29577951308232087685f; }
 E_INLINE float e_radians(float degrees) { return degrees *  0.01745329251994329577f; }
 
+E_INLINE e_vec2f e_vec2f_2f(float x, float y)                   { e_vec2f result = {x, y}; return result; }
+E_INLINE e_vec3f e_vec3f_3f(float x, float y, float z)          { e_vec3f result = {x, y, z}; return result; }
 
 E_INLINE e_vec4f e_vec4f_4f(float x, float y, float z, float w) { e_vec4f result = {x, y, z, w}; return result; }
+E_INLINE e_vec4f e_vec4f_vec3f_1f(e_vec3f v, float w)           { return e_vec4f_4f(v.x, v.y, v.z, w); }
 E_INLINE e_vec4f e_vec4f_zero()                                 { return e_vec4f_4f(0, 0, 0, 0); }
 E_INLINE e_vec4f e_vec4f_add(e_vec4f a, e_vec4f b)              { return e_vec4f_4f(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
 E_INLINE e_vec4f e_vec4f_sub(e_vec4f a, e_vec4f b)              { return e_vec4f_4f(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
@@ -1005,50 +1090,30 @@ E_INLINE float   e_vec4f_dot(e_vec4f a, e_vec4f b)              { return a.x*b.x
 E_INLINE float   e_vec4f_len(e_vec4f a)                         { return e_sqrtf(e_vec4f_dot(a, a)); }
 E_INLINE e_vec4f e_vec4f_normalize(e_vec4f a)                   { return e_vec4f_mul_1f(a, e_rsqrtf(e_vec4f_dot(a, a))); }
 E_INLINE e_vec4f e_vec4f_mul_mat4f(e_vec4f v, e_mat4f m)        { return e_vec4f_4f(e_vec4f_dot(m.c[0], v), e_vec4f_dot(m.c[1], v), e_vec4f_dot(m.c[2], v), e_vec4f_dot(m.c[3], v)); }
+E_INLINE e_vec4f e_vec4f_negate(e_vec4f v)                      { return e_vec4f_4f(-v.x, -v.y, -v.z, -v.w); }
+E_INLINE e_vec4f e_vec4f_cross(e_vec4f a, e_vec4f b)            { return e_vec4f_4f(a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x, 0); }
+
+E_INLINE e_vec4f e_vec4f_from_pitch_yaw(float pitch, float yaw)
+{
+    float cp = cosf(pitch);
+    float sp = sinf(pitch);
+    float cy = cosf(yaw);
+    float sy = sinf(yaw);
+
+    return e_vec4f_4f
+    (
+        sy*cp,
+        -sp,
+        -cy*cp,
+        0
+    );
+}
 
 
 E_INLINE e_mat4f e_mat4f_init(e_vec4f c0, e_vec4f c1, e_vec4f c2, e_vec4f c3) { e_mat4f result; result.c[0] = c0; result.c[1] = c1; result.c[2] = c2; result.c[3] = c3; return result; }
-E_INLINE e_mat4f e_mat4f_identity()                             { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), e_vec4f_4f(0, 0, 0, 1)); }
+E_INLINE e_mat4f e_mat4f_identity()                             { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0,  1, 0, 0), e_vec4f_4f(0, 0, 1,    0), e_vec4f_4f(0, 0, 0,    1)); }
 E_INLINE e_mat4f e_mat4f_vulkan_clip_correction()               { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, -1, 0, 0), e_vec4f_4f(0, 0, 0.5f, 0), e_vec4f_4f(0, 0, 0.5f, 1)); }
-E_INLINE e_mat4f e_mat4f_translate(e_vec4f translation)         { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), translation); }
-E_INLINE e_mat4f mat4_scale(e_vec4f scale)                      { return e_mat4f_init(e_vec4f_4f(scale.x, 0, 0, 0), e_vec4f_4f(0, scale.y, 0, 0), e_vec4f_4f(0, 0, scale.z, 0), e_vec4f_4f(0, 0, 0, scale.w)); }
-
-E_INLINE e_mat4f e_mat4f_rotate(float angleInRadians, e_vec3f axis)
-{
-    float c = cosf(angleInRadians);
-    float s = sinf(angleInRadians);
-
-    return e_mat4f_init
-    (
-        e_vec4f_4f((axis.x * axis.x) * (1 - c) + c,            (axis.x * axis.y) * (1 - c) - (axis.z * s), (axis.x * axis.z) * (1 - c) + (axis.y * s), 0),
-        e_vec4f_4f((axis.y * axis.x) * (1 - c) + (axis.z * s), (axis.y * axis.y) * (1 - c) + c,            (axis.y * axis.z) * (1 - c) - (axis.x * s), 0),
-        e_vec4f_4f((axis.z * axis.x) * (1 - c) - (axis.y * s), (axis.z * axis.y) * (1 - c) + (axis.x * s), (axis.z * axis.z) * (1 - c) + c,            0),
-        e_vec4f_4f(0,                                          0,                                          0,                                          1)
-    );
-}
-
-E_INLINE e_mat4f mat4_ortho(float left, float right, float bottom, float top, float znear, float zfar)
-{
-    return e_mat4f_init
-    (
-        e_vec4f_4f(2 / (right - left), 0, 0,  0),
-        e_vec4f_4f(0, 2 / (top - bottom), 0,  0),
-        e_vec4f_4f(0, 0, -2 / (zfar - znear), 0),
-        e_vec4f_4f(-((right + left) / (right - left)), -((top + bottom) / (top - bottom)), -((zfar + znear) / (zfar - znear)), 1)
-    );
-}
-
-E_INLINE e_mat4f e_mat4f_perspective(float fovy, float aspect, float znear, float zfar)
-{
-    float f = (float)tan(E_PI/2 - fovy/2);
-    return e_mat4f_init
-    (
-        e_vec4f_4f(f / aspect, 0, 0, 0),
-        e_vec4f_4f(0, f, 0, 0),
-        e_vec4f_4f(0, 0,     (zfar + znear) / (znear - zfar), -1),
-        e_vec4f_4f(0, 0, (2 * zfar * znear) / (znear - zfar),  0)
-    );
-}
+E_INLINE e_mat4f e_mat4f_3x3(e_mat4f m)                         { return e_mat4f_init(m.c[0], m.c[1], m.c[2], e_vec4f_4f(0, 0, 0, 0)); }
 
 E_INLINE e_mat4f e_mat4f_mul(e_mat4f a, e_mat4f b)
 {
@@ -1090,7 +1155,268 @@ E_INLINE e_vec4f e_mat4f_mul_vec4(e_mat4f m, e_vec4f v)
         m.c[0].w*v.x + m.c[1].w*v.y + m.c[2].w*v.z + m.c[3].w*v.w
     );
 }
+
+E_INLINE e_mat4f e_mat4f_translate(e_vec4f translation) { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), e_vec4f_4f(translation.x, translation.y, translation.z, 1)); }
+E_INLINE e_mat4f mat4_scale(e_vec4f scale)              { return e_mat4f_init(e_vec4f_4f(scale.x, 0, 0, 0), e_vec4f_4f(0, scale.y, 0, 0), e_vec4f_4f(0, 0, scale.z, 0), e_vec4f_4f(0, 0, 0, scale.w)); }
+
+E_INLINE e_mat4f e_mat4f_rotate(float angleInRadians, e_vec3f axis)
+{
+    float c = cosf(angleInRadians);
+    float s = sinf(angleInRadians);
+
+    return e_mat4f_init
+    (
+        e_vec4f_4f((axis.x * axis.x) * (1 - c) + c,            (axis.x * axis.y) * (1 - c) - (axis.z * s), (axis.x * axis.z) * (1 - c) + (axis.y * s), 0),
+        e_vec4f_4f((axis.y * axis.x) * (1 - c) + (axis.z * s), (axis.y * axis.y) * (1 - c) + c,            (axis.y * axis.z) * (1 - c) - (axis.x * s), 0),
+        e_vec4f_4f((axis.z * axis.x) * (1 - c) - (axis.y * s), (axis.z * axis.y) * (1 - c) + (axis.x * s), (axis.z * axis.z) * (1 - c) + c,            0),
+        e_vec4f_4f(0,                                          0,                                          0,                                          1)
+    );
+}
+
+E_INLINE e_mat4f e_mat4f_from_euler_angles(float pitch, float yaw, float roll)
+{
+    e_mat4f rz;
+    e_mat4f ry;
+    e_mat4f rx;
+
+    float cx = cosf(pitch);
+    float sx = sinf(pitch);
+    float cy = cosf(yaw);
+    float sy = sinf(yaw);
+    float cz = cosf(roll);
+    float sz = sinf(roll);
+
+    /* Must be compatible with OpenGL, where pitch is rotation about X, yaw is Y and roll is Z. */
+    rz = e_mat4f_init
+    (
+        e_vec4f_4f(cz, -sz, 0, 0),
+        e_vec4f_4f(sz,  cz, 0, 0),
+        e_vec4f_4f(0,    0, 1, 0),
+        e_vec4f_4f(0,    0, 0, 1)
+    );
+
+    ry = e_mat4f_init
+    (
+        e_vec4f_4f(cy, 0, sy, 0),
+        e_vec4f_4f(0,  1, 0,  0),
+        e_vec4f_4f(-sy, 0, cy, 0),
+        e_vec4f_4f(0,  0, 0,  1)
+    );
+
+    rx = e_mat4f_init
+    (
+        e_vec4f_4f(1, 0,  0,   0),
+        e_vec4f_4f(0, cx, -sx, 0),
+        e_vec4f_4f(0, sx,  cx, 0),
+        e_vec4f_4f(0, 0,  0,   1)
+    );
+
+    return e_mat4f_mul(rx, e_mat4f_mul(ry, rz));
+}
+
+E_INLINE e_mat4f e_mat4f_ortho(float left, float right, float bottom, float top, float znear, float zfar)
+{
+    return e_mat4f_init
+    (
+        e_vec4f_4f(2 / (right - left), 0, 0,  0),
+        e_vec4f_4f(0, 2 / (top - bottom), 0,  0),
+        e_vec4f_4f(0, 0, -2 / (zfar - znear), 0),
+        e_vec4f_4f(-((right + left) / (right - left)), -((top + bottom) / (top - bottom)), -((zfar + znear) / (zfar - znear)), 1)
+    );
+}
+
+E_INLINE e_mat4f e_mat4f_perspective(float fovy, float aspect, float znear, float zfar)
+{
+    float f = (float)tan(E_PI/2 - fovy/2);
+    return e_mat4f_init
+    (
+        e_vec4f_4f(f / aspect, 0, 0, 0),
+        e_vec4f_4f(0, f, 0, 0),
+        e_vec4f_4f(0, 0,     (zfar + znear) / (znear - zfar), -1),
+        e_vec4f_4f(0, 0, (2 * zfar * znear) / (znear - zfar),  0)
+    );
+}
+
+E_INLINE e_mat4f e_mat4f_inverse(e_mat4f m)
+{
+    float s0 = m.c[0].x * m.c[1].y - m.c[1].x * m.c[0].y;
+    float s1 = m.c[0].x * m.c[1].z - m.c[1].x * m.c[0].z;
+    float s2 = m.c[0].x * m.c[1].w - m.c[1].x * m.c[0].w;
+    float s3 = m.c[0].y * m.c[1].z - m.c[1].y * m.c[0].z;
+    float s4 = m.c[0].y * m.c[1].w - m.c[1].y * m.c[0].w;
+    float s5 = m.c[0].z * m.c[1].w - m.c[1].z * m.c[0].w;
+
+    float c5 = m.c[2].z * m.c[3].w - m.c[3].z * m.c[2].w;
+    float c4 = m.c[2].y * m.c[3].w - m.c[3].y * m.c[2].w;
+    float c3 = m.c[2].y * m.c[3].z - m.c[3].y * m.c[2].z;
+    float c2 = m.c[2].x * m.c[3].w - m.c[3].x * m.c[2].w;
+    float c1 = m.c[2].x * m.c[3].z - m.c[3].x * m.c[2].z;
+    float c0 = m.c[2].x * m.c[3].y - m.c[3].x * m.c[2].y;
+
+    float invdet;
+    float det = (s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0);
+    if (det <= 1e-10) {
+        return e_mat4f_identity();
+    }
+
+    invdet = 1 / det;
+
+    return e_mat4f_init
+    (
+        e_vec4f_4f(( m.c[1].y * c5 - m.c[1].z * c4 + m.c[1].w * c3) * invdet,
+                   (-m.c[0].y * c5 + m.c[0].z * c4 - m.c[0].w * c3) * invdet,
+                   ( m.c[3].y * s5 - m.c[3].z * s4 + m.c[3].w * s3) * invdet,
+                   (-m.c[2].y * s5 + m.c[2].z * s4 - m.c[2].w * s3) * invdet),
+
+        e_vec4f_4f((-m.c[1].x * c5 + m.c[1].z * c2 - m.c[1].w * c1) * invdet,
+                   ( m.c[0].x * c5 - m.c[0].z * c2 + m.c[0].w * c1) * invdet,
+                   (-m.c[3].x * s5 + m.c[3].z * s2 - m.c[3].w * s1) * invdet,
+                   ( m.c[2].x * s5 - m.c[2].z * s2 + m.c[2].w * s1) * invdet),
+
+        e_vec4f_4f(( m.c[1].x * c4 - m.c[1].y * c2 + m.c[1].w * c0) * invdet,
+                   (-m.c[0].x * c4 + m.c[0].y * c2 - m.c[0].w * c0) * invdet,
+                   ( m.c[3].x * s4 - m.c[3].y * s2 + m.c[3].w * s0) * invdet,
+                   (-m.c[2].x * s4 + m.c[2].y * s2 - m.c[2].w * s0) * invdet),
+
+        e_vec4f_4f((-m.c[1].x * c3 + m.c[1].y * c1 - m.c[1].z * c0) * invdet,
+                   ( m.c[0].x * c3 - m.c[0].y * c1 + m.c[0].z * c0) * invdet,
+                   (-m.c[3].x * s3 + m.c[3].y * s1 - m.c[3].z * s0) * invdet,
+                   ( m.c[2].x * s3 - m.c[2].y * s1 + m.c[2].z * s0) * invdet)
+    );
+}
+
+E_INLINE e_mat4f e_mat4f_transpose(e_mat4f m)
+{
+    return e_mat4f_init
+    (
+        e_vec4f_4f(m.c[0].x, m.c[1].x, m.c[2].x, m.c[3].x),
+        e_vec4f_4f(m.c[0].y, m.c[1].y, m.c[2].y, m.c[3].y),
+        e_vec4f_4f(m.c[0].z, m.c[1].z, m.c[2].z, m.c[3].z),
+        e_vec4f_4f(m.c[0].w, m.c[1].w, m.c[2].w, m.c[3].w)
+    );
+}
+
+E_INLINE e_mat4f e_mat4f_normal(e_mat4f m)
+{
+    return e_mat4f_transpose(e_mat4f_inverse(e_mat4f_3x3(m)));
+}
+
+
+E_INLINE e_quatf e_quatf_4f(float x, float y, float z, float w) { e_quatf result = {x, y, z, w}; return result; }
+E_INLINE e_quatf e_quatf_identity()                             { return e_quatf_4f(0, 0, 0, 1); }
+E_INLINE e_quatf e_quatf_mul(e_quatf a, e_quatf b)              { return e_quatf_4f(a.x*b.w + a.w*b.x + a.y*b.z - a.z*b.y, a.y*b.w + a.w*b.y + a.z*b.x - a.x*b.z, a.z*b.w + a.w*b.z + a.x*b.y - a.y*b.x, a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z); }
+E_INLINE e_quatf e_quatf_mul_1f(e_quatf a, float b)             { return e_quatf_4f(a.x*b, a.y*b, a.z*b, a.w*b); }
+E_INLINE e_quatf e_quatf_div(e_quatf a, e_quatf b)              { return e_quatf_4f(a.x/b.x, a.y/b.y, a.z/b.z, a.w/b.w); }
+E_INLINE float   e_quatf_dot(e_quatf a, e_quatf b)              { return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w; }
+E_INLINE e_quatf e_quatf_conjugate(e_quatf a)                   { return e_quatf_4f(-a.x, -a.y, -a.z, a.w); }
+E_INLINE e_quatf e_quatf_normalize(e_quatf a)                   { return e_quatf_mul_1f(a, e_rsqrtf(e_quatf_dot(a, a))); }
+
+E_INLINE e_quatf e_quatf_from_axis_angle(e_vec3f axis, float angleInRadians)
+{
+    float s = sinf(angleInRadians / 2);
+    return e_quatf_4f(axis.x * s, axis.y * s, axis.z * s, cosf(angleInRadians / 2));
+}
+
+E_INLINE e_quatf e_quatf_from_euler_angles(float pitch, float yaw, float roll)
+{
+    float cy = cosf(yaw * 0.5f);
+    float sy = sinf(yaw * 0.5f);
+    float cp = cosf(pitch * 0.5f);
+    float sp = sinf(pitch * 0.5f);
+    float cr = cosf(roll * 0.5f);
+    float sr = sinf(roll * 0.5f);
+
+    return e_quatf_4f
+    (
+        cy * cp * sr - sy * sp * cr,
+        sy * cp * sr + cy * sp * cr,
+        sy * cp * cr - cy * sp * sr,
+        cy * cp * cr + sy * sp * sr
+    );
+}
+
+E_INLINE e_mat4f e_quatf_to_mat4f(e_quatf q)
+{
+    float x2 = q.x * q.x;
+    float y2 = q.y * q.y;
+    float z2 = q.z * q.z;
+    float xy = q.x * q.y;
+    float xz = q.x * q.z;
+    float yz = q.y * q.z;
+    float wx = q.w * q.x;
+    float wy = q.w * q.y;
+    float wz = q.w * q.z;
+
+    return e_mat4f_init
+    (
+        e_vec4f_4f(1 - 2 * (y2 + z2), 2 * (xy - wz), 2 * (xz + wy), 0),
+        e_vec4f_4f(2 * (xy + wz), 1 - 2 * (x2 + z2), 2 * (yz - wx), 0),
+        e_vec4f_4f(2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (x2 + y2), 0),
+        e_vec4f_4f(0, 0, 0, 1)
+    );
+}
+
+E_INLINE e_quatf e_quatf_from_mat4f(e_mat4f m)
+{
+    e_quatf q;
+    float t;
+    float r;
+    
+    t = m.c[0].x + m.c[1].y + m.c[2].z;
+
+    if (t > 0) {
+        r = e_sqrtf(1 + t);
+        q.w = 0.5f * r;
+        r = 0.5f / r;
+        q.x = (m.c[1].z - m.c[2].y) * r;
+        q.y = (m.c[2].x - m.c[0].z) * r;
+        q.z = (m.c[0].y - m.c[1].x) * r;
+    } else {
+        if (m.c[0].x > m.c[1].y && m.c[0].x > m.c[2].z) {
+            r = e_sqrtf(1 + m.c[0].x - m.c[1].y - m.c[2].z);
+            q.x = 0.5f * r;
+            r = 0.5f / r;
+            q.y = (m.c[0].y + m.c[1].x) * r;
+            q.z = (m.c[2].x + m.c[0].z) * r;
+            q.w = (m.c[1].z - m.c[2].y) * r;
+        } else if (m.c[1].y > m.c[2].z) {
+            r = e_sqrtf(1 + m.c[1].y - m.c[0].x - m.c[2].z);
+            q.y = 0.5f * r;
+            r = 0.5f / r;
+            q.z = (m.c[1].z + m.c[2].y) * r;
+            q.x = (m.c[0].y + m.c[1].x) * r;
+            q.w = (m.c[2].x - m.c[0].z) * r;
+        } else {
+            r = e_sqrtf(1 + m.c[2].z - m.c[0].x - m.c[1].y);
+            q.z = 0.5f * r;
+            r = 0.5f / r;
+            q.x = (m.c[2].x + m.c[0].z) * r;
+            q.y = (m.c[1].z + m.c[2].y) * r;
+            q.w = (m.c[0].y - m.c[1].x) * r;
+        }
+    }
+
+    return q;
+}
+
+E_INLINE e_quatf e_quatf_lookat(e_vec3f eye, e_vec3f target, e_vec3f up)
+{
+    e_vec4f f = e_vec4f_normalize(e_vec4f_sub(e_vec4f_vec3f_1f(target, 0), e_vec4f_vec3f_1f(eye, 0)));
+    e_vec4f s = e_vec4f_normalize(e_vec4f_cross(f, e_vec4f_vec3f_1f(up, 0)));
+    e_vec4f u = e_vec4f_cross(s, f);
+
+    e_mat4f m = e_mat4f_init
+    (
+        e_vec4f_4f(s.x, u.x, -f.x, 0),
+        e_vec4f_4f(s.y, u.y, -f.y, 0),
+        e_vec4f_4f(s.z, u.z, -f.z, 0),
+        e_vec4f_4f(0, 0, 0, 1)
+    );
+
+    return e_quatf_from_mat4f(m);
+}
 /* ==== END e_math.h ==== */
+
 
 
 
@@ -1098,6 +1424,16 @@ E_INLINE e_vec4f e_mat4f_mul_vec4(e_mat4f m, e_vec4f v)
 #ifndef E_MAX_CURSORS
 #define E_MAX_CURSORS 4
 #endif
+
+#ifndef E_MAX_CURSOR_BUTTONS
+#define E_MAX_CURSOR_BUTTONS    8
+#endif
+
+#define E_BUTTON_STATE_UP       0
+#define E_BUTTON_STATE_DOWN     1
+
+#define E_KEY_STATE_UP          0
+#define E_KEY_STATE_DOWN        1
 
 typedef struct e_input_config e_input_config;
 typedef struct e_input        e_input;
@@ -1116,6 +1452,9 @@ struct e_input
     int prevAbsoluteCursorPosY[E_MAX_CURSORS];
     int currentAbsoluteCursorPosX[E_MAX_CURSORS];
     int currentAbsoluteCursorPosY[E_MAX_CURSORS];
+    int cursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
+    int prevCursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
+    int cursorWheelDelta[E_MAX_CURSORS];
     e_bool32 freeOnUninit;
 };
 
@@ -1123,10 +1462,20 @@ E_API e_result e_input_alloc_size(const e_input_config* pConfig, size_t* pSize);
 E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input* pInput);
 E_API e_result e_input_init(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input** ppInput);
 E_API void e_input_uninit(e_input* pInput, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_input_step(e_input* pInput);
-E_API e_result e_input_update_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY);
+E_API e_result e_input_step(e_input* pInput);   /* This should be called at the *end* of your frame. It will clear the state of the input system for things like mouse wheel deltas. */
+E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY);
 E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int* pPosX, int* pPosY);
+E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int prevCursorPosX, int prevCursorPosY);
 E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex);
+E_API void e_input_get_cursor_move_delta(e_input* pInput, e_uint32 cursorIndex, int* pDeltaX, int* pDeltaY);
+E_API int  e_input_get_cursor_move_delta_x(e_input* pInput, e_uint32 cursorIndex);
+E_API int  e_input_get_cursor_move_delta_y(e_input* pInput, e_uint32 cursorIndex);
+E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex, int state);
+E_API int  e_input_get_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
+E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
+E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
+E_API void e_input_set_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex, int delta);
+E_API int  e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex);
 /* === END e_input.h === */
 
 
@@ -1363,6 +1712,7 @@ typedef enum
     E_CLIENT_EVENT_CURSOR_BUTTON_DOWN,
     E_CLIENT_EVENT_CURSOR_BUTTON_UP,
     E_CLIENT_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
+    E_CLIENT_EVENT_CURSOR_WHEEL
 } e_client_event_type;
 
 typedef struct
@@ -1394,6 +1744,11 @@ typedef struct
             int button;
             unsigned int flags;
         } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
+        struct
+        {
+            e_window* pWindow;
+            int delta;
+        } cursorWheel;
     } data;
 } e_client_event;
 
@@ -1431,10 +1786,16 @@ struct e_client
     void* pVTableUserData;
     unsigned int flags;
     e_window* pWindow;
+    e_uint32 windowSizeX;
+    e_uint32 windowSizeY;
+    e_bool32 windowResized;
     e_graphics* pGraphics;
     e_graphics_device* pGraphicsDevice;
     e_graphics_surface* pGraphicsSurface;
     e_input* pInput;
+    e_bool32 isCursorPinned;
+    int pinnedCursorPosX;
+    int pinnedCursorPosY;
     const char* pConfigSection;
     e_allocation_callbacks allocationCallbacks;
     e_bool32 freeOnUninit;
@@ -1447,13 +1808,21 @@ E_API void e_client_uninit(e_client* pClient, const e_allocation_callbacks* pAll
 E_API e_engine* e_client_get_engine(e_client* pClient);
 E_API e_log* e_client_get_log(e_client* pClient);
 E_API e_window* e_client_get_window(e_client* pClient);
+E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_uint32 sizeY);        /* Use this to tell the client that the window has been resized. */
+E_API e_bool32 e_client_has_window_resized(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY);  /* Returns true if the window has been resized since the last step. pSizeX and pSizeY will always be filled with the correct window size, even when false has returned. */
 E_API e_input* e_client_get_input(e_client* pClient);
-E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);
-E_API e_result e_client_update_input_from_event(e_input* pInput, const e_client_event* pEvent);
+E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);           /* You will usually want to call this in response to all events from the client. If you don't, you'll need to implement certain functionality yourself. See the implementation for details. */
+E_API e_result e_client_update_input_from_event(e_client* pClient, const e_client_event* pEvent);
 E_API e_result e_client_step(e_client* pClient, double dt);
 E_API e_result e_client_step_input(e_client* pClient);
 E_API e_bool32 e_client_has_cursor_moved(e_client* pClient);
 E_API e_result e_client_get_absolute_cursor_position(e_client* pClient, int* pPosX, int* pPosY);
+E_API e_result e_client_capture_cursor(e_client* pClient);
+E_API e_result e_client_release_cursor(e_client* pClient);
+E_API e_result e_client_pin_cursor(e_client* pClient, int pinnedCursorPosX, int pinnedCursorPosY);
+E_API e_result e_client_unpin_cursor(e_client* pClient);
+E_API e_result e_client_show_cursor(e_client* pClient);
+E_API e_result e_client_hide_cursor(e_client* pClient);
 /* ==== END e_client.h ==== */
 
 
