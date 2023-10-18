@@ -87,9 +87,10 @@
 #define CGLTF_IMPLEMENTATION
 #include "external/cgltf/cgltf.h"
 
+#ifndef E_NO_STB_IMAGE
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb/stb_image.h"
-
+#endif
 
 #define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
 #define E_DEFAULT_RESOLUTION_X      1280
@@ -2433,6 +2434,8 @@ e_pfn_getnameinfo    e_net_getnameinfo;
 e_pfn_inet_pton      e_net_inet_pton;
 e_pfn_inet_ntop      e_net_inet_ntop;
 e_pfn_htons          e_net_htons;
+e_pfn_htonl          e_net_htonl;
+e_pfn_ntohl          e_net_ntohl;
 e_pfn_getaddrinfo    e_net_getaddrinfo;
 e_pfn_freeaddrinfo   e_net_freeaddrinfo;
 
@@ -2472,6 +2475,8 @@ static e_result e_winsock_init()
         e_net_inet_pton   = (e_pfn_inet_pton)      e_dlsym(hWinSockDLL, "inet_pton");
         e_net_inet_ntop   = (e_pfn_inet_ntop)      e_dlsym(hWinSockDLL, "inet_ntop");
         e_net_htons       = (e_pfn_htons)          e_dlsym(hWinSockDLL, "htons");
+        e_net_htonl       = (e_pfn_htonl)          e_dlsym(hWinSockDLL, "htonl");
+        e_net_ntohl       = (e_pfn_ntohl)          e_dlsym(hWinSockDLL, "ntohl");
         e_net_getaddrinfo = (e_pfn_getaddrinfo)    e_dlsym(hWinSockDLL, "getaddrinfo");
         e_net_freeaddrinfo= (e_pfn_freeaddrinfo)   e_dlsym(hWinSockDLL, "freeaddrinfo");
     
