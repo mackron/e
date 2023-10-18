@@ -2374,13 +2374,6 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
 
 
 /* ==== BEG e_net.c ==== */
-#if defined(E_POSIX)
-#include <sys/socket.h>
-#include <netinet/in.h> /* sockaddr_in */
-#include <arpa/inet.h>  /* inet_pton */
-#include <netdb.h>      /* getaddrinfo, freeaddrinfo */
-#endif /* E_POSIX */
-
 /*
 Unfortunately the Windows ecosystem does not work well because winsock2.h conflicts with windows.h.
 Since a simple build system is one of the primary goals of this project, we're going to have to do
@@ -2391,24 +2384,6 @@ we're trying to keep the build system simple we'll need to do some runtime linki
 build.
 */
 #if defined(E_WIN32)
-typedef e_uintptr           E_SOCKET;
-#define E_WSAAPI            __stdcall
-#define E_INVALID_SOCKET    ((E_SOCKET)(~0))
-#define E_SOCKET_ERROR      (-1)
-
-#define E_AI_PASSIVE        0x00000001
-
-#define E_AF_UNSPEC         0
-#define E_AF_UNIX           1
-#define E_AF_INET           2
-#define E_AF_INET6          23
-
-#define E_SOCK_STREAM       1
-#define E_SOCK_DGRAM        2
-#define E_SOCK_RAW          3
-#define E_SOCK_RDM          4
-#define E_SOCK_SEQPACKET    5
-
 typedef struct E_WSADATA
 {
     e_uint16 wVersion;
@@ -2427,113 +2402,39 @@ typedef struct E_WSADATA
     char *lpVendorInfo;
 #endif
 } E_WSADATA;
-
-struct e_addrinfo
-{
-    e_int32 ai_flags;
-    e_int32 ai_family;
-    e_int32 ai_socktype;
-    e_int32 ai_protocol;
-    size_t ai_addrlen;
-    char *ai_canonname;
-    struct e_sockaddr *ai_addr;
-    struct e_addrinfo *ai_next;
-};
-
-struct e_sockaddr
-{
-    e_uint16 sa_family;
-    char sa_data[14];
-};
-
-struct e_in_addr
-{
-    union
-    {
-        struct { e_uint8 s_b1, s_b2, s_b3, s_b4; } un_b;
-        struct { e_uint16 s_w1, s_w2; } un_w;
-        e_uint32 addr;
-    } un;
-};
-
-struct e_sockaddr_in
-{
-    e_uint16 sin_family;
-    e_uint16 sin_port;
-    struct e_in_addr sin_addr;
-    char sin_zero[8];
-};
-
-struct e_in6_addr
-{
-    union
-    {
-        e_uint8  u6_addr8[16];
-        e_uint16 u6_addr16[8];
-        e_uint32 u6_addr32[4];
-    } u6_addr;
-};
-
-struct e_sockaddr_in6
-{
-    e_uint16 sin6_family;
-    e_uint16 sin6_port;
-    e_uint32 sin6_flowinfo;
-    struct e_in6_addr sin6_addr;
-    e_uint32 sin6_scope_id;
-};
 #endif
 
 
 /* We need to declare a few function pointer types for runtime linking on Windows. */
 #if defined(E_WIN32)
-typedef int            (E_WSAAPI * e_pfn_WSAGetLastError)(void);
-typedef int            (E_WSAAPI * e_pfn_WSACleanup)(void);
-typedef int            (E_WSAAPI * e_pfn_WSAStartup)(e_uint16 wVersionRequested, E_WSADATA* lpWSAData);
-typedef int            (E_WSAAPI * e_pfn_socket)(int af, int type, int protocol);
-typedef int            (E_WSAAPI * e_pfn_closesocket)(E_SOCKET s);
-typedef int            (E_WSAAPI * e_pfn_shutdown)(E_SOCKET s, int how);
-typedef int            (E_WSAAPI * e_pfn_bind)(E_SOCKET s, const struct e_sockaddr* name, int namelen);
-typedef int            (E_WSAAPI * e_pfn_listen)(E_SOCKET s, int backlog);
-typedef E_SOCKET       (E_WSAAPI * e_pfn_accept)(E_SOCKET s, struct e_sockaddr* addr, int* addrlen);
-typedef int            (E_WSAAPI * e_pfn_connect)(E_SOCKET s, const struct e_sockaddr* name, int namelen);
-typedef int            (E_WSAAPI * e_pfn_send)(E_SOCKET s, const char* buf, int len, int flags);
-typedef int            (E_WSAAPI * e_pfn_recv)(E_SOCKET s, char* buf, int len, int flags);
-typedef int            (E_WSAAPI * e_pfn_ioctlsocket)(E_SOCKET s, long cmd, unsigned long* argp);
-typedef int            (E_WSAAPI * e_pfn_select)(int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds, const struct timeval* timeout);
-typedef int            (E_WSAAPI * e_pfn_sendto)(E_SOCKET s, const char* buf, int len, int flags, const struct e_sockaddr* to, int tolen);
-typedef int            (E_WSAAPI * e_pfn_recvfrom)(E_SOCKET s, char* buf, int len, int flags, struct e_sockaddr* from, int* fromlen);
-typedef int            (E_WSAAPI * e_pfn_gethostname)(char* name, int namelen);
-typedef int            (E_WSAAPI * e_pfn_getnameinfo)(const struct e_sockaddr* sa, e_uint32 salen, char* host, e_uint32 hostlen, char* serv, e_uint32 servlen, int flags);
-typedef int            (E_WSAAPI * e_pfn_inet_pton)(int af, const char* src, void* dst);
-typedef const char*    (E_WSAAPI * e_pfn_inet_ntop)(int af, const void* src, char* dst, e_uint32 size);
-typedef unsigned short (E_WSAAPI * e_pfn_htons)(unsigned short hostshort);
-typedef int            (E_WSAAPI * e_pfn_getaddrinfo)(const char* node, const char* service, const struct e_addrinfo* hints, struct e_addrinfo** res);
-typedef void           (E_WSAAPI * e_pfn_freeaddrinfo)(struct e_addrinfo* ai);
+typedef int (E_WSAAPI * e_pfn_WSAGetLastError)(void);
+typedef int (E_WSAAPI * e_pfn_WSACleanup)(void);
+typedef int (E_WSAAPI * e_pfn_WSAStartup)(e_uint16 wVersionRequested, E_WSADATA* lpWSAData);
 
 static e_pfn_WSAGetLastError    e_WSAGetLastError;
 static e_pfn_WSACleanup         e_WSACleanup;
 static e_pfn_WSAStartup         e_WSAStartup;
-static e_pfn_socket             e_socket;
-static e_pfn_closesocket        e_closesocket;
-static e_pfn_shutdown           e_shutdown;
-static e_pfn_bind               e_bind;
-static e_pfn_listen             e_listen;
-static e_pfn_accept             e_accept;
-static e_pfn_connect            e_connect;
-static e_pfn_send               e_send;
-static e_pfn_recv               e_recv;
-static e_pfn_ioctlsocket        e_ioctlsocket;
-static e_pfn_select             e_select;
-static e_pfn_sendto             e_sendto;
-static e_pfn_recvfrom           e_recvfrom;
-static e_pfn_gethostname        e_gethostname;
-static e_pfn_getnameinfo        e_getnameinfo;
-static e_pfn_inet_pton          e_inet_pton;
-static e_pfn_inet_ntop          e_inet_ntop;
-static e_pfn_htons              e_htons;
-static e_pfn_getaddrinfo        e_getaddrinfo;
-static e_pfn_freeaddrinfo       e_freeaddrinfo;
+
+e_pfn_socket         e_net_socket;
+e_pfn_closesocket    e_net_closesocket;
+e_pfn_shutdown       e_net_shutdown;
+e_pfn_bind           e_net_bind;
+e_pfn_listen         e_net_listen;
+e_pfn_accept         e_net_accept;
+e_pfn_connect        e_net_connect;
+e_pfn_send           e_net_send;
+e_pfn_recv           e_net_recv;
+e_pfn_ioctlsocket    e_net_ioctlsocket;
+e_pfn_select         e_net_select;
+e_pfn_sendto         e_net_sendto;
+e_pfn_recvfrom       e_net_recvfrom;
+e_pfn_gethostname    e_net_gethostname;
+e_pfn_getnameinfo    e_net_getnameinfo;
+e_pfn_inet_pton      e_net_inet_pton;
+e_pfn_inet_ntop      e_net_inet_ntop;
+e_pfn_htons          e_net_htons;
+e_pfn_getaddrinfo    e_net_getaddrinfo;
+e_pfn_freeaddrinfo   e_net_freeaddrinfo;
 
 /* The function below is used to dynamically load the WinSock library. It needs to be reference counted. */
 static int e_gWinSockInitCount = 0;
@@ -2553,26 +2454,26 @@ static e_result e_winsock_init()
         e_WSAGetLastError = (e_pfn_WSAGetLastError)e_dlsym(hWinSockDLL, "WSAGetLastError");
         e_WSACleanup      = (e_pfn_WSACleanup)     e_dlsym(hWinSockDLL, "WSACleanup");
         e_WSAStartup      = (e_pfn_WSAStartup)     e_dlsym(hWinSockDLL, "WSAStartup");
-        e_socket          = (e_pfn_socket)         e_dlsym(hWinSockDLL, "socket");
-        e_closesocket     = (e_pfn_closesocket)    e_dlsym(hWinSockDLL, "closesocket");
-        e_shutdown        = (e_pfn_shutdown)       e_dlsym(hWinSockDLL, "shutdown");
-        e_bind            = (e_pfn_bind)           e_dlsym(hWinSockDLL, "bind");
-        e_listen          = (e_pfn_listen)         e_dlsym(hWinSockDLL, "listen");
-        e_accept          = (e_pfn_accept)         e_dlsym(hWinSockDLL, "accept");
-        e_connect         = (e_pfn_connect)        e_dlsym(hWinSockDLL, "connect");
-        e_send            = (e_pfn_send)           e_dlsym(hWinSockDLL, "send");
-        e_recv            = (e_pfn_recv)           e_dlsym(hWinSockDLL, "recv");
-        e_ioctlsocket     = (e_pfn_ioctlsocket)    e_dlsym(hWinSockDLL, "ioctlsocket");
-        e_select          = (e_pfn_select)         e_dlsym(hWinSockDLL, "select");
-        e_sendto          = (e_pfn_sendto)         e_dlsym(hWinSockDLL, "sendto");
-        e_recvfrom        = (e_pfn_recvfrom)       e_dlsym(hWinSockDLL, "recvfrom");
-        e_gethostname     = (e_pfn_gethostname)    e_dlsym(hWinSockDLL, "gethostname");
-        e_getnameinfo     = (e_pfn_getnameinfo)    e_dlsym(hWinSockDLL, "getnameinfo");
-        e_inet_pton       = (e_pfn_inet_pton)      e_dlsym(hWinSockDLL, "inet_pton");
-        e_inet_ntop       = (e_pfn_inet_ntop)      e_dlsym(hWinSockDLL, "inet_ntop");
-        e_htons           = (e_pfn_htons)          e_dlsym(hWinSockDLL, "htons");
-        e_getaddrinfo     = (e_pfn_getaddrinfo)    e_dlsym(hWinSockDLL, "getaddrinfo");
-        e_freeaddrinfo    = (e_pfn_freeaddrinfo)   e_dlsym(hWinSockDLL, "freeaddrinfo");
+        e_net_socket      = (e_pfn_socket)         e_dlsym(hWinSockDLL, "socket");
+        e_net_closesocket = (e_pfn_closesocket)    e_dlsym(hWinSockDLL, "closesocket");
+        e_net_shutdown    = (e_pfn_shutdown)       e_dlsym(hWinSockDLL, "shutdown");
+        e_net_bind        = (e_pfn_bind)           e_dlsym(hWinSockDLL, "bind");
+        e_net_listen      = (e_pfn_listen)         e_dlsym(hWinSockDLL, "listen");
+        e_net_accept      = (e_pfn_accept)         e_dlsym(hWinSockDLL, "accept");
+        e_net_connect     = (e_pfn_connect)        e_dlsym(hWinSockDLL, "connect");
+        e_net_send        = (e_pfn_send)           e_dlsym(hWinSockDLL, "send");
+        e_net_recv        = (e_pfn_recv)           e_dlsym(hWinSockDLL, "recv");
+        e_net_ioctlsocket = (e_pfn_ioctlsocket)    e_dlsym(hWinSockDLL, "ioctlsocket");
+        e_net_select      = (e_pfn_select)         e_dlsym(hWinSockDLL, "select");
+        e_net_sendto      = (e_pfn_sendto)         e_dlsym(hWinSockDLL, "sendto");
+        e_net_recvfrom    = (e_pfn_recvfrom)       e_dlsym(hWinSockDLL, "recvfrom");
+        e_net_gethostname = (e_pfn_gethostname)    e_dlsym(hWinSockDLL, "gethostname");
+        e_net_getnameinfo = (e_pfn_getnameinfo)    e_dlsym(hWinSockDLL, "getnameinfo");
+        e_net_inet_pton   = (e_pfn_inet_pton)      e_dlsym(hWinSockDLL, "inet_pton");
+        e_net_inet_ntop   = (e_pfn_inet_ntop)      e_dlsym(hWinSockDLL, "inet_ntop");
+        e_net_htons       = (e_pfn_htons)          e_dlsym(hWinSockDLL, "htons");
+        e_net_getaddrinfo = (e_pfn_getaddrinfo)    e_dlsym(hWinSockDLL, "getaddrinfo");
+        e_net_freeaddrinfo= (e_pfn_freeaddrinfo)   e_dlsym(hWinSockDLL, "freeaddrinfo");
     
         /* The WinSock library should be loaded at this point. */
         if (e_WSAStartup(MAKEWORD(2, 2), &e_gWinSockData) != 0) {
@@ -2603,48 +2504,6 @@ static void e_winsock_uninit()
     e_gWinSockInitCount -= 1;
 }
 #endif
-
-/*
-This is our low-level socket abstraction. The idea is to keep this extremely light weight. Since
-we've redeclared everything on the Windows side, that part is already done. On the POSIX side,
-we need only set up a few typedefs and defines.
-*/
-#if defined(E_WIN32)
-    /* Everything has already been declared above. */
-#else
-    #define e_addrinfo          addrinfo
-    #define e_sockaddr          sockaddr
-    #define e_sockaddr_in       sockaddr_in
-    #define e_sockaddr_in6      sockaddr_in6
-
-    #define e_socket            socket
-    #define e_closesocket       close
-    #define e_shutdown          shutdown
-    #define e_bind              bind
-    #define e_listen            listen
-    #define e_accept            accept
-    #define e_connect           connect
-    #define e_send              send
-    #define e_recv              recv
-    #define e_ioctlsocket       ioctl
-    #define e_select            select
-    #define e_sendto            sendto
-    #define e_recvfrom          recvfrom
-    #define e_gethostname       gethostname
-    #define e_getnameinfo       getnameinfo
-    #define e_inet_pton         inet_pton
-    #define e_inet_ntop         inet_ntop
-    #define e_htons             htons
-    #define e_getaddrinfo       getaddrinfo
-    #define e_freeaddrinfo      freeaddrinfo
-
-    #define E_INVALID_SOCKET    (-1)
-#endif
-
-#define E_SOCKET_ERROR          (-1)
-#define E_AI_PASSIVE            0x00000001
-
-
 
 E_API e_result e_net_init(void)
 {

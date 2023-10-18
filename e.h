@@ -326,11 +326,190 @@ E_API double e_timer_get_time_in_seconds(e_timer* pTimer);
 
 
 /* ==== BEG e_net.h ==== */
+/*
+The low-level socket library should be a direct mapping to the underlying socket API. The problem
+child here is Windows due to annyoing compilation errors when including winsock2.h and windows.h,
+and the need for linking to to the ws2_32 library.
+
+We're going to namespace our socket library as "e_net". On Unix this is just a direct mapping to
+the standard socket API and structures. On Windows, we'll redeclare our own versions of the
+necessary structures and link to the ws2_32 library at runtime in e_net_init(). The e_net_socket()
+will be declared as extern here, and set to the appropriate value in e_net_init().
+*/
 #if defined(_WIN32)
-    typedef e_uintptr e_socket_handle;
+typedef e_uintptr E_SOCKET;
+
+struct e_timeval    /* Might be able to move this out of the network section. */
+{
+    long tv_sec;
+    long tv_usec;
+};
+
+struct e_addrinfo
+{
+    e_int32 ai_flags;
+    e_int32 ai_family;
+    e_int32 ai_socktype;
+    e_int32 ai_protocol;
+    size_t ai_addrlen;
+    char *ai_canonname;
+    struct e_sockaddr *ai_addr;
+    struct e_addrinfo *ai_next;
+};
+
+struct e_sockaddr
+{
+    e_uint16 sa_family;
+    char sa_data[14];
+};
+
+struct e_in_addr
+{
+    union
+    {
+        struct { e_uint8 s_b1, s_b2, s_b3, s_b4; } un_b;
+        struct { e_uint16 s_w1, s_w2; } un_w;
+        e_uint32 addr;
+    } un;
+};
+
+struct e_sockaddr_in
+{
+    e_uint16 sin_family;
+    e_uint16 sin_port;
+    struct e_in_addr sin_addr;
+    char sin_zero[8];
+};
+
+struct e_in6_addr
+{
+    union
+    {
+        e_uint8  u6_addr8[16];
+        e_uint16 u6_addr16[8];
+        e_uint32 u6_addr32[4];
+    } u6_addr;
+};
+
+struct e_sockaddr_in6
+{
+    e_uint16 sin6_family;
+    e_uint16 sin6_port;
+    e_uint32 sin6_flowinfo;
+    struct e_in6_addr sin6_addr;
+    e_uint32 sin6_scope_id;
+};
+
+typedef struct
+{
+    unsigned int fd_count;
+    E_SOCKET fd_array[64];
+} e_fd_set;
+
+#define E_WSAAPI            __stdcall
+#define E_INVALID_SOCKET    ((E_NET_SOCKET)(~0))
+
+#define E_AF_UNSPEC         0
+#define E_AF_UNIX           1
+#define E_AF_INET           2
+#define E_AF_INET6          23
+
+#define E_SOCK_STREAM       1
+#define E_SOCK_DGRAM        2
+#define E_SOCK_RAW          3
+#define E_SOCK_RDM          4
+#define E_SOCK_SEQPACKET    5
+
+typedef int                 (E_WSAAPI * e_pfn_socket)(int af, int type, int protocol);
+typedef int                 (E_WSAAPI * e_pfn_closesocket)(E_SOCKET s);
+typedef int                 (E_WSAAPI * e_pfn_shutdown)(E_SOCKET s, int how);
+typedef int                 (E_WSAAPI * e_pfn_bind)(E_SOCKET s, const struct e_sockaddr* name, int namelen);
+typedef int                 (E_WSAAPI * e_pfn_listen)(E_SOCKET s, int backlog);
+typedef E_SOCKET            (E_WSAAPI * e_pfn_accept)(E_SOCKET s, struct e_sockaddr* addr, int* addrlen);
+typedef int                 (E_WSAAPI * e_pfn_connect)(E_SOCKET s, const struct e_sockaddr* name, int namelen);
+typedef int                 (E_WSAAPI * e_pfn_send)(E_SOCKET s, const char* buf, int len, int flags);
+typedef int                 (E_WSAAPI * e_pfn_recv)(E_SOCKET s, char* buf, int len, int flags);
+typedef int                 (E_WSAAPI * e_pfn_ioctlsocket)(E_SOCKET s, long cmd, unsigned long* argp);
+typedef int                 (E_WSAAPI * e_pfn_select)(int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds, const struct e_timeval* timeout);
+typedef int                 (E_WSAAPI * e_pfn_sendto)(E_SOCKET s, const char* buf, int len, int flags, const struct e_sockaddr* to, int tolen);
+typedef int                 (E_WSAAPI * e_pfn_recvfrom)(E_SOCKET s, char* buf, int len, int flags, struct e_sockaddr* from, int* fromlen);
+typedef int                 (E_WSAAPI * e_pfn_gethostname)(char* name, int namelen);
+typedef int                 (E_WSAAPI * e_pfn_getnameinfo)(const struct e_sockaddr* sa, e_uint32 salen, char* host, e_uint32 hostlen, char* serv, e_uint32 servlen, int flags);
+typedef int                 (E_WSAAPI * e_pfn_inet_pton)(int af, const char* src, void* dst);
+typedef const char*         (E_WSAAPI * e_pfn_inet_ntop)(int af, const void* src, char* dst, e_uint32 size);
+typedef unsigned short      (E_WSAAPI * e_pfn_htons)(unsigned short hostshort);
+typedef int                 (E_WSAAPI * e_pfn_getaddrinfo)(const char* node, const char* service, const struct e_addrinfo* hints, struct e_addrinfo** res);
+typedef void                (E_WSAAPI * e_pfn_freeaddrinfo)(struct e_addrinfo* ai);
+
+extern e_pfn_socket         e_net_socket;
+extern e_pfn_closesocket    e_net_closesocket;
+extern e_pfn_shutdown       e_net_shutdown;
+extern e_pfn_bind           e_net_bind;
+extern e_pfn_listen         e_net_listen;
+extern e_pfn_accept         e_net_accept;
+extern e_pfn_connect        e_net_connect;
+extern e_pfn_send           e_net_send;
+extern e_pfn_recv           e_net_recv;
+extern e_pfn_ioctlsocket    e_net_ioctlsocket;
+extern e_pfn_select         e_net_select;
+extern e_pfn_sendto         e_net_sendto;
+extern e_pfn_recvfrom       e_net_recvfrom;
+extern e_pfn_gethostname    e_net_gethostname;
+extern e_pfn_getnameinfo    e_net_getnameinfo;
+extern e_pfn_inet_pton      e_net_inet_pton;
+extern e_pfn_inet_ntop      e_net_inet_ntop;
+extern e_pfn_htons          e_net_htons;
+extern e_pfn_getaddrinfo    e_net_getaddrinfo;
+extern e_pfn_freeaddrinfo   e_net_freeaddrinfo;
 #else
-    typedef int       e_socket_handle;
+#include <sys/socket.h>
+#include <netinet/in.h> /* sockaddr_in */
+#include <arpa/inet.h>  /* inet_pton */
+#include <netdb.h>      /* getaddrinfo, freeaddrinfo */
+
+#define e_addrinfo          addrinfo
+#define e_sockaddr          sockaddr
+#define e_sockaddr_in       sockaddr_in
+#define e_sockaddr_in6      sockaddr_in6
+
+typedef SOCKET              E_SOCKET;
+#define E_INVALID_SOCKET    INVALID_SOCKET
+
+#define E_AF_UNSPEC         AF_UNSPEC
+#define E_AF_UNIX           AF_UNIX
+#define E_AF_INET           AF_INET
+#define E_AF_INET6          AF_INET6
+
+#define E_SOCK_STREAM       SOCK_STREAM
+#define E_SOCK_DGRAM        SOCK_DGRAM
+#define E_SOCK_RAW          SOCK_RAW
+#define E_SOCK_RDM          SOCK_RDM
+#define E_SOCK_SEQPACKET    SOCK_SEQPACKET
+
+#define e_net_socket        socket
+#define e_net_closesocket   closesocket
+#define e_net_shutdown      shutdown
+#define e_net_bind          bind
+#define e_net_listen        listen
+#define e_net_accept        accept
+#define e_net_connect       connect
+#define e_net_send          send
+#define e_net_recv          recv
+#define e_net_ioctlsocket   ioctlsocket
+#define e_net_select        select
+#define e_net_sendto        sendto
+#define e_net_recvfrom      recvfrom
+#define e_net_gethostname   gethostname
+#define e_net_getnameinfo   getnameinfo
+#define e_net_inet_pton     inet_pton
+#define e_net_inet_ntop     inet_ntop
+#define e_net_htons         htons
+#define e_net_getaddrinfo   getaddrinfo
+#define e_net_freeaddrinfo  freeaddrinfo
 #endif
+
+#define E_SOCKET_ERROR      (-1)
+#define E_AI_PASSIVE        0x00000001
 
 E_API e_result e_net_init(void);
 E_API void e_net_uninit(void);
