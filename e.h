@@ -430,7 +430,7 @@ typedef int                 (E_WSAAPI * e_pfn_connect)(E_SOCKET s, const struct 
 typedef int                 (E_WSAAPI * e_pfn_send)(E_SOCKET s, const char* buf, int len, int flags);
 typedef int                 (E_WSAAPI * e_pfn_recv)(E_SOCKET s, char* buf, int len, int flags);
 typedef int                 (E_WSAAPI * e_pfn_ioctlsocket)(E_SOCKET s, long cmd, unsigned long* argp);
-typedef int                 (E_WSAAPI * e_pfn_select)(int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds, const struct e_timeval* timeout);
+typedef int                 (E_WSAAPI * e_pfn_select)(int nfds, e_fd_set* readfds, e_fd_set* writefds, e_fd_set* exceptfds, const struct e_timeval* timeout);
 typedef int                 (E_WSAAPI * e_pfn_sendto)(E_SOCKET s, const char* buf, int len, int flags, const struct e_sockaddr* to, int tolen);
 typedef int                 (E_WSAAPI * e_pfn_recvfrom)(E_SOCKET s, char* buf, int len, int flags, struct e_sockaddr* from, int* fromlen);
 typedef int                 (E_WSAAPI * e_pfn_gethostname)(char* name, int namelen);
@@ -471,6 +471,7 @@ extern e_pfn_freeaddrinfo   e_net_freeaddrinfo;
 #define e_sockaddr          sockaddr
 #define e_sockaddr_in       sockaddr_in
 #define e_sockaddr_in6      sockaddr_in6
+#define e_fd_set            fd_set
 
 typedef SOCKET              E_SOCKET;
 #define E_INVALID_SOCKET    INVALID_SOCKET
