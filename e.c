@@ -2434,6 +2434,7 @@ e_pfn_getnameinfo    e_net_getnameinfo;
 e_pfn_inet_pton      e_net_inet_pton;
 e_pfn_inet_ntop      e_net_inet_ntop;
 e_pfn_htons          e_net_htons;
+e_pfn_ntohs          e_net_ntohs;
 e_pfn_htonl          e_net_htonl;
 e_pfn_ntohl          e_net_ntohl;
 e_pfn_getaddrinfo    e_net_getaddrinfo;
@@ -2475,6 +2476,7 @@ static e_result e_winsock_init()
         e_net_inet_pton   = (e_pfn_inet_pton)      e_dlsym(hWinSockDLL, "inet_pton");
         e_net_inet_ntop   = (e_pfn_inet_ntop)      e_dlsym(hWinSockDLL, "inet_ntop");
         e_net_htons       = (e_pfn_htons)          e_dlsym(hWinSockDLL, "htons");
+        e_net_ntohs       = (e_pfn_ntohs)          e_dlsym(hWinSockDLL, "ntohs");
         e_net_htonl       = (e_pfn_htonl)          e_dlsym(hWinSockDLL, "htonl");
         e_net_ntohl       = (e_pfn_ntohl)          e_dlsym(hWinSockDLL, "ntohl");
         e_net_getaddrinfo = (e_pfn_getaddrinfo)    e_dlsym(hWinSockDLL, "getaddrinfo");
@@ -2525,6 +2527,15 @@ E_API void e_net_uninit(void)
     e_winsock_uninit();
 #else
     /* Nothing to do. */
+#endif
+}
+
+E_API int e_net_get_last_error(void)
+{
+#if defined(E_WIN32)
+    return e_WSAGetLastError();
+#else
+    return errno;
 #endif
 }
 /* ==== END e_net.c ==== */

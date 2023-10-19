@@ -438,6 +438,7 @@ typedef int                 (E_WSAAPI * e_pfn_getnameinfo)(const struct e_sockad
 typedef int                 (E_WSAAPI * e_pfn_inet_pton)(int af, const char* src, void* dst);
 typedef const char*         (E_WSAAPI * e_pfn_inet_ntop)(int af, const void* src, char* dst, e_uint32 size);
 typedef unsigned short      (E_WSAAPI * e_pfn_htons)(unsigned short hostshort);
+typedef unsigned short      (E_WSAAPI * e_pfn_ntohs)(unsigned short netshort);
 typedef unsigned long       (E_WSAAPI * e_pfn_htonl)(unsigned long hostlong);
 typedef unsigned long       (E_WSAAPI * e_pfn_ntohl)(unsigned long netlong);
 typedef int                 (E_WSAAPI * e_pfn_getaddrinfo)(const char* node, const char* service, const struct e_addrinfo* hints, struct e_addrinfo** res);
@@ -461,6 +462,7 @@ extern e_pfn_getnameinfo    e_net_getnameinfo;
 extern e_pfn_inet_pton      e_net_inet_pton;
 extern e_pfn_inet_ntop      e_net_inet_ntop;
 extern e_pfn_htons          e_net_htons;
+extern e_pfn_ntohs          e_net_ntohs;
 extern e_pfn_htonl          e_net_htonl;
 extern e_pfn_ntohl          e_net_ntohl;
 extern e_pfn_getaddrinfo    e_net_getaddrinfo;
@@ -509,6 +511,7 @@ typedef SOCKET              E_SOCKET;
 #define e_net_inet_pton     inet_pton
 #define e_net_inet_ntop     inet_ntop
 #define e_net_htons         htons
+#define e_net_ntohs         ntohs
 #define e_net_htonl         htonl
 #define e_net_ntohl         ntohl
 #define e_net_getaddrinfo   getaddrinfo
@@ -520,6 +523,7 @@ typedef SOCKET              E_SOCKET;
 
 E_API e_result e_net_init(void);
 E_API void e_net_uninit(void);
+E_API int e_net_get_last_error(void);
 /* ==== END e_net.h ==== */
 
 
