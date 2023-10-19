@@ -2268,7 +2268,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
 /* ==== BEG e_timer.h ==== */
 #if defined(E_WIN32) && !defined(E_POSIX)
     static LARGE_INTEGER e_gTimerFrequency;   /* <-- Initialized to zero since it's static. */
-    RANE_API void e_timer_init(e_timer* pTimer)
+    E_API void e_timer_init(e_timer* pTimer)
     {
         LARGE_INTEGER counter;
 
@@ -2280,7 +2280,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
         pTimer->counter = counter.QuadPart;
     }
 
-    RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+    E_API double e_timer_get_time_in_seconds(e_timer* pTimer)
     {
         LARGE_INTEGER counter;
         if (!QueryPerformanceCounter(&counter)) {
@@ -2291,7 +2291,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
     }
 #elif defined(E_APPLE) && (__MAC_OS_X_VERSION_MIN_REQUIRED < 101200)
     static e_uint64 e_gTimerFrequency = 0;
-    RANE_API void e_timer_init(e_timer* pTimer)
+    E_API void e_timer_init(e_timer* pTimer)
     {
         mach_timebase_info_data_t baseTime;
         mach_timebase_info(&baseTime);
@@ -2300,7 +2300,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
         pTimer->counter = mach_absolute_time();
     }
 
-    RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+    E_API double e_timer_get_time_in_seconds(e_timer* pTimer)
     {
         e_uint64 newTimeCounter = mach_absolute_time();
         e_uint64 oldTimeCounter = pTimer->counter;
@@ -2308,12 +2308,12 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
         return (newTimeCounter - oldTimeCounter) / e_gTimerFrequency;
     }
 #elif defined(E_EMSCRIPTEN)
-    RANE_API MA_INLINE void e_timer_init(e_timer* pTimer)
+    E_API MA_INLINE void e_timer_init(e_timer* pTimer)
     {
         pTimer->counterD = emscripten_get_now();
     }
 
-    RANE_API MA_INLINE double e_timer_get_time_in_seconds(e_timer* pTimer)
+    E_API MA_INLINE double e_timer_get_time_in_seconds(e_timer* pTimer)
     {
         return (emscripten_get_now() - pTimer->counterD) / 1000;    /* Emscripten is in milliseconds. */
     }
@@ -2325,7 +2325,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
             #define MA_CLOCK_ID CLOCK_REALTIME
         #endif
 
-        RANE_API void e_timer_init(e_timer* pTimer)
+        E_API void e_timer_init(e_timer* pTimer)
         {
             struct timespec newTime;
             clock_gettime(MA_CLOCK_ID, &newTime);
@@ -2333,7 +2333,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
             pTimer->counter = (newTime.tv_sec * 1000000000) + newTime.tv_nsec;
         }
 
-        RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+        E_API double e_timer_get_time_in_seconds(e_timer* pTimer)
         {
             e_uint64 newTimeCounter;
             e_uint64 oldTimeCounter;
@@ -2347,7 +2347,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
             return (newTimeCounter - oldTimeCounter) / 1000000000.0;
         }
     #else
-        RANE_API void e_timer_init(e_timer* pTimer)
+        E_API void e_timer_init(e_timer* pTimer)
         {
             struct timeval newTime;
             gettimeofday(&newTime, NULL);
@@ -2355,7 +2355,7 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
             pTimer->counter = (newTime.tv_sec * 1000000) + newTime.tv_usec;
         }
 
-        RANE_API double e_timer_get_time_in_seconds(e_timer* pTimer)
+        E_API double e_timer_get_time_in_seconds(e_timer* pTimer)
         {
             e_uint64 newTimeCounter;
             e_uint64 oldTimeCounter;
