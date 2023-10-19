@@ -524,6 +524,7 @@ typedef SOCKET              E_SOCKET;
 E_API e_result e_net_init(void);
 E_API void e_net_uninit(void);
 E_API int e_net_get_last_error(void);
+E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 blocking);
 /* ==== END e_net.h ==== */
 
 

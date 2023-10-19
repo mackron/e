@@ -2533,9 +2533,34 @@ E_API void e_net_uninit(void)
 E_API int e_net_get_last_error(void)
 {
 #if defined(E_WIN32)
-    return e_WSAGetLastError();
+    int err = e_WSAGetLastError();
+    switch (err) {
+        case WSAEWOULDBLOCK: return EWOULDBLOCK;
+        default: return err;
+    }
 #else
     return errno;
+#endif
+}
+
+E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 nonBlocking)
+{
+#if defined(E_WIN32)
+    unsigned long value = nonBlocking ? 1 : 0;
+    return e_net_ioctlsocket(socket, FIONBIO, &value);
+#else
+    int flags = fcntl(socket, F_GETFL, 0);
+    if (flags == -1) {
+        return -1;
+    }
+
+    if (nonBlocking) {
+        flags |=  O_NONBLOCK;
+    } else {
+        flags &= ~O_NONBLOCK;
+    }
+
+    return fcntl(socket, F_SETFL, flags);
 #endif
 }
 /* ==== END e_net.c ==== */
@@ -7774,7 +7799,7 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
 
     result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
     if (result != E_SUCCESS) {
-        e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Could not open \"%s\". %s.\n", pFilePath, e_result_description(result));
+        e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Could not open \"%s\". %s.", pFilePath, e_result_description(result));
     }
 
     result = e_config_file_load(pConfigFile, e_fs_file_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
