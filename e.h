@@ -991,7 +991,7 @@ E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pS
 
 
 
-/* === BEG e_image.h === */
+/* ==== BEG e_image.h ==== */
 typedef struct e_image_loader_vtable e_image_loader_vtable;
 
 struct e_image_loader_vtable
@@ -1001,7 +1001,27 @@ struct e_image_loader_vtable
 
 E_API e_result e_load_image(e_image_loader_vtable* pVTable, void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
 E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
-/* === END e_image.h === */
+/* ==== END e_image.h ==== */
+
+
+
+/* ==== BEG e_font.h ==== */
+typedef struct e_font        e_font;
+typedef struct e_font_config e_font_config;
+
+struct e_font_config
+{
+    e_log* pLog;
+    e_fs* pFS;
+    const char* pFilePath;  /* Set to NULL if the font is being loaded using logical settings. In this case it will be loaded by the operating system. When set, will be loaded directly from a TTF file. */
+};
+
+E_API e_font_config e_font_config_init();
+E_API e_font_config e_font_config_init_file(e_fs* pFS, const char* pFilePath);
+
+E_API e_result e_font_init(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont);
+E_API void e_font_uninit(e_font* pFont, const e_allocation_callbacks* pAllocationCallbacks);
+/* ==== END e_font.h ==== */
 
 
 
@@ -1063,6 +1083,7 @@ E_API e_log* e_engine_get_log(e_engine* pEngine);
 E_API e_result e_engine_run(e_engine* pEngine);
 E_API e_result e_engine_exit(e_engine* pEngine, int exitCode);  /* Exits the main loop. */
 E_API e_fs* e_engine_get_file_system(e_engine* pEngine);
+static E_INLINE e_fs* e_engine_get_fs(e_engine* pEngine) { return e_engine_get_file_system(pEngine); }
 E_API e_config_file* e_engine_get_config_file(e_engine* pEngine);
 E_API void e_engine_reset_timer(e_engine* pEngine);
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend);

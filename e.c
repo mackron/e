@@ -92,6 +92,9 @@
 #include "external/stb/stb_image.h"
 #endif
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "external/stb/stb_truetype.h"
+
 #define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
 #define E_DEFAULT_RESOLUTION_X      1280
 #define E_DEFAULT_RESOLUTION_Y      720
@@ -8039,7 +8042,7 @@ E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pS
 
 
 
-/* === BEG e_image.h === */
+/* ==== BEG e_image.h ==== */
 #ifndef E_NO_STB_IMAGE
 typedef struct
 {
@@ -8192,9 +8195,138 @@ E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUse
 
     return E_SUCCESS;
 }
-/* === END e_image.h === */
+/* ==== END e_image.h ==== */
 
 
+
+/* ==== BEG e_font.c ==== */
+E_API e_font_config e_font_config_init()
+{
+    e_font_config config;
+
+    E_ZERO_OBJECT(&config);
+
+    return config;
+}
+
+E_API e_font_config e_font_config_init_file(e_fs* pFS, const char* pFilePath)
+{
+    e_font_config config;
+
+    config = e_font_config_init();
+    config.pFS = pFS;
+    config.pFilePath = pFilePath;
+
+    return config;
+}
+
+
+struct e_font
+{
+    unsigned char* pTTFData; /* Will only be set if the font was loaded from a file. This is the raw data of the TTF file. Will point just past the end of the struct. Do not free this separately. */
+    size_t ttfDataSize;
+    stbtt_fontinfo fontInfo;
+};
+
+
+static e_result e_font_init_log(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont)
+{
+    E_ASSERT(ppFont  != NULL);
+    E_ASSERT(pConfig != NULL);
+
+    /* Not yet implemented. */
+    (void)ppFont;
+    (void)pAllocationCallbacks;
+    (void)pConfig;
+    return E_ERROR;
+}
+
+static e_result e_font_init_file(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont)
+{
+    e_font* pFont = NULL;
+    e_result result;
+    e_file* pFile;
+    e_file_info fileInfo;
+
+    E_ASSERT(ppFont  != NULL);
+    E_ASSERT(pConfig != NULL);
+
+    /* stb_truetype requires us to provide a buffer containing the raw data of the file. */
+    result = e_fs_open(pConfig->pFS, pConfig->pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to open font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
+        return result;
+    }
+
+    result = e_fs_info(pFile, &fileInfo);
+    if (result != E_SUCCESS) {
+        e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to get info for font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
+        e_fs_close(pFile, pAllocationCallbacks);
+        return result;
+    }
+
+    pFont = (e_font*)e_malloc(sizeof(*pFont) + fileInfo.size, pAllocationCallbacks);
+    if (pFont == NULL) {
+        e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to allocate memory for font file '%s'.", pConfig->pFilePath);
+        e_fs_close(pFile, pAllocationCallbacks);
+        return E_OUT_OF_MEMORY;
+    }
+
+    /* The font data is sitting at the end of the font structure. */
+    pFont->pTTFData    = (unsigned char*)(pFont + 1);
+    pFont->ttfDataSize = fileInfo.size;
+
+    result = e_fs_read(pFile, pFont->pTTFData, fileInfo.size, NULL);
+    if (result != E_SUCCESS) {
+        e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to read font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
+        e_fs_close(pFile, pAllocationCallbacks);
+        e_free(pFont, pAllocationCallbacks);
+        return result;
+    }
+
+    /* Now that we've got the data in memory we can close the file. */
+    e_fs_close(pFile, pAllocationCallbacks);
+
+    /* At this point we have enough information to load the file via stb_truetype. */
+    if (stbtt_InitFont(&pFont->fontInfo, pFont->pTTFData, 0) == 0) {
+        e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to load font file '%s'.", pConfig->pFilePath);
+        e_free(pFont, pAllocationCallbacks);
+        return E_ERROR;
+    }
+
+    /* Done. */
+    *ppFont = pFont;
+    return E_SUCCESS;
+}
+
+E_API e_result e_font_init(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont)
+{
+    if (ppFont == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppFont = NULL;
+
+    if (pConfig == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pConfig->pFilePath != NULL) {
+        return e_font_init_file(pConfig, pAllocationCallbacks, ppFont);
+    } else {
+        return e_font_init_log(pConfig, pAllocationCallbacks, ppFont);
+    }
+}
+
+E_API void e_font_uninit(e_font* pFont, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pFont == NULL) {
+        return;
+    }
+
+    e_free(pFont, pAllocationCallbacks);
+}
+/* ==== END e_font.c ==== */
 
 
 /* ==== BEG e_engine.c ==== */
