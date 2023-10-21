@@ -12056,7 +12056,7 @@ E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_ui
     return E_SUCCESS;
 }
 
-E_API e_bool32 e_client_has_window_resized(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY)
+E_API e_bool32 e_client_get_window_size(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY)
 {
     if (pClient == NULL) {
         return E_FALSE;

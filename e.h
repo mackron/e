@@ -2046,7 +2046,7 @@ E_API e_engine* e_client_get_engine(e_client* pClient);
 E_API e_log* e_client_get_log(e_client* pClient);
 E_API e_window* e_client_get_window(e_client* pClient);
 E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_uint32 sizeY);        /* Use this to tell the client that the window has been resized. */
-E_API e_bool32 e_client_has_window_resized(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY);  /* Returns true if the window has been resized since the last step. pSizeX and pSizeY will always be filled with the correct window size, even when false has returned. */
+E_API e_bool32 e_client_get_window_size(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY);     /* Returns true if the window has been resized since the last step. pSizeX and pSizeY will always be filled with the correct window size, even when false has returned. */
 E_API e_input* e_client_get_input(e_client* pClient);
 E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);           /* You will usually want to call this in response to all events from the client. If you don't, you'll need to implement certain functionality yourself. See the implementation for details. */
 E_API e_result e_client_update_input_from_event(e_client* pClient, const e_client_event* pEvent);
