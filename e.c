@@ -8661,9 +8661,11 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     #endif
 
     /* Initialize our networking sub-system. This is only required for Windows, but we'll do it generically for all platforms. */
-    result = e_net_init();
-    if (result != E_SUCCESS) {
-        e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Networking sub-system failed to initialize. Networking may be unavailable.");
+    if ((flags & E_ENGINE_FLAG_NO_NETWORK) == 0) {
+        result = e_net_init();
+        if (result != E_SUCCESS) {
+            e_log_postf(pLog, E_LOG_LEVEL_WARNING, "Networking sub-system failed to initialize. Networking may be unavailable.");
+        }
     }
 
     /* Timer. */

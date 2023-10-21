@@ -1056,7 +1056,8 @@ typedef enum
     E_ENGINE_FLAG_NO_GRAPHICS = 0x01,   /* Will also disable the graphics sub-system in clients. */
     E_ENGINE_FLAG_NO_AUDIO    = 0x02,   /* Will also disable the audio sub-system in clients. */
     E_ENGINE_FLAG_NO_OPENGL   = 0x04,   /* Disables glbind, and by extension, the default OpenGL renderer used by clients. */
-    E_ENGINE_FLAG_NO_VULKAN   = 0x08    /* Disables vkbind, and by extension, the default Vulkan renderer used by clients. */
+    E_ENGINE_FLAG_NO_VULKAN   = 0x08,   /* Disables vkbind, and by extension, the default Vulkan renderer used by clients. */
+    E_ENGINE_FLAG_NO_NETWORK  = 0x10    /* Disables the network sub-system in clients. Useful if you want to use your own network system such as ENet. */
 } e_engine_flags;
 
 typedef struct e_engine_vtable e_engine_vtable;
