@@ -1006,8 +1006,27 @@ E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUse
 
 
 /* ==== BEG e_font.h ==== */
-typedef struct e_font        e_font;
-typedef struct e_font_config e_font_config;
+typedef struct e_font          e_font;
+typedef struct e_font_config   e_font_config;
+typedef struct e_font_metrics  e_font_metrics;
+typedef struct e_glyph_metrics e_glyph_metrics;
+
+struct e_font_metrics
+{
+    e_int32 ascent;
+    e_int32 descent;
+    e_int32 lineGap;
+};
+
+struct e_glyph_metrics
+{
+    e_int32 sizeX;
+    e_int32 sizeY;
+    e_int32 bearingX;
+    e_int32 bearingY;
+    e_int32 advanceX;
+    e_int32 advanceY;
+};
 
 struct e_font_config
 {
@@ -1021,6 +1040,12 @@ E_API e_font_config e_font_config_init_file(e_fs* pFS, const char* pFilePath);
 
 E_API e_result e_font_init(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont);
 E_API void e_font_uninit(e_font* pFont, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_uint32 e_font_get_glyph_index(e_font* pFont, e_uint32 codePoint);
+E_API float e_font_get_scale(e_font* pFont, float pixelHeight);
+E_API void e_font_get_metrics(e_font* pFont, float scale, e_font_metrics* pMetrics);
+E_API void e_font_get_glyph_metrics(e_font* pFont, float scale, e_uint32 glyphIndex, e_glyph_metrics* pMetrics);
+E_API e_int32 e_font_get_kerning(e_font* pFont, float scale, e_uint32 glyphIndex1, e_uint32 glyphIndex2);
+E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphIndex, e_uint32 bitmapSizeX, e_uint32 bitmapSizeY, e_uint32 stride, e_uint8* pBitmap);
 /* ==== END e_font.h ==== */
 
 

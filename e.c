@@ -8326,6 +8326,95 @@ E_API void e_font_uninit(e_font* pFont, const e_allocation_callbacks* pAllocatio
 
     e_free(pFont, pAllocationCallbacks);
 }
+
+E_API e_uint32 e_font_get_glyph_index(e_font* pFont, e_uint32 codePoint)
+{
+    if (pFont == NULL) {
+        return 0;
+    }
+
+    return (e_uint32)stbtt_FindGlyphIndex(&pFont->fontInfo, codePoint);
+}
+
+E_API float e_font_get_scale(e_font* pFont, float pixelHeight)
+{
+    if (pFont == NULL) {
+        return 0;
+    }
+
+    return stbtt_ScaleForPixelHeight(&pFont->fontInfo, pixelHeight);
+}
+
+E_API void e_font_get_metrics(e_font* pFont, float scale, e_font_metrics* pMetrics)
+{
+    int ascent;
+    int descent;
+    int lineGap;
+
+    if (pMetrics == NULL) {
+        return;
+    }
+
+    E_ZERO_OBJECT(&pMetrics);
+
+    if (pFont == NULL) {
+        return;
+    }
+
+    stbtt_GetFontVMetrics(&pFont->fontInfo, &ascent, &descent, &lineGap);
+
+    /* TODO: Check the rounding rules for this. */
+    pMetrics->ascent  = (e_int32)(ascent * scale);
+    pMetrics->descent = (e_int32)(descent * scale);
+    pMetrics->lineGap = (e_int32)(lineGap * scale);
+}
+
+E_API void e_font_get_glyph_metrics(e_font* pFont, float scale, e_uint32 glyphIndex, e_glyph_metrics* pMetrics)
+{
+    int advanceWidth;
+    int leftSideBearing;
+    int x0, y0, x1, y1;
+
+    if (pMetrics == NULL) {
+        return;
+    }
+
+    E_ZERO_OBJECT(&pMetrics);
+
+    if (pFont == NULL) {
+        return;
+    }
+
+    stbtt_GetGlyphHMetrics(&pFont->fontInfo, glyphIndex, &advanceWidth, &leftSideBearing);
+    stbtt_GetGlyphBitmapBox(&pFont->fontInfo, glyphIndex, scale, scale, &x0, &y0, &x1, &y1);
+
+    /* TODO: Check scaling rounding rules. */
+    pMetrics->sizeX    = (e_int32)(x1 - x0);
+    pMetrics->sizeY    = (e_int32)(y1 - y0);
+    pMetrics->bearingX = (e_int32)(leftSideBearing * scale);
+    pMetrics->bearingY = 0;
+    pMetrics->advanceX = (e_int32)(advanceWidth * scale);
+    pMetrics->advanceY = 0;
+}
+
+E_API e_int32 e_font_get_kerning(e_font* pFont, float scale, e_uint32 glyphIndex1, e_uint32 glyphIndex2)
+{
+    if (pFont == NULL) {
+        return 0;
+    }
+
+    /* TODO: Check scaling rounding rules. */
+    return (e_int32)(stbtt_GetGlyphKernAdvance(&pFont->fontInfo, glyphIndex1, glyphIndex2) * scale);
+}
+
+E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphIndex, e_uint32 bitmapSizeX, e_uint32 bitmapSizeY, e_uint32 stride, e_uint8* pBitmap)
+{
+    if (pFont == NULL || pBitmap == NULL) {
+        return;
+    }
+
+    stbtt_MakeGlyphBitmap(&pFont->fontInfo, pBitmap, (int)bitmapSizeX, (int)bitmapSizeY, (int)stride, scale, scale, glyphIndex);
+}
 /* ==== END e_font.c ==== */
 
 
