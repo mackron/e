@@ -1130,20 +1130,20 @@ typedef enum
 
 typedef enum
 {
-    E_WINDOW_EVENT_NONE,
-    E_WINDOW_EVENT_CLOSE,
-    E_WINDOW_EVENT_PAINT,
-    E_WINDOW_EVENT_SIZE,
-    E_WINDOW_EVENT_MOVE,
-    E_WINDOW_EVENT_CURSOR_MOVE,
-    E_WINDOW_EVENT_CURSOR_BUTTON_DOWN,
-    E_WINDOW_EVENT_CURSOR_BUTTON_UP,
-    E_WINDOW_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
-    E_WINDOW_EVENT_CURSOR_WHEEL,
-    E_WINDOW_EVENT_KEY_DOWN,
-    E_WINDOW_EVENT_KEY_UP,
-    E_WINDOW_EVENT_CHARACTER
-} e_window_event_type;
+    E_EVENT_NONE,
+    E_EVENT_CLOSE,
+    E_EVENT_PAINT,
+    E_EVENT_SIZE,
+    E_EVENT_MOVE,
+    E_EVENT_CURSOR_MOVE,
+    E_EVENT_CURSOR_BUTTON_DOWN,
+    E_EVENT_CURSOR_BUTTON_UP,
+    E_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
+    E_EVENT_CURSOR_WHEEL,
+    E_EVENT_KEY_DOWN,
+    E_EVENT_KEY_UP,
+    E_EVENT_CHARACTER
+} e_event_type;
 
 #define E_CURSOR_BUTTON_LEFT   0
 #define E_CURSOR_BUTTON_RIGHT  1
@@ -1265,7 +1265,7 @@ typedef struct e_window        e_window;
 
 struct e_window_event
 {
-    e_window_event_type type;
+    e_event_type type;
     union
     {
         struct
@@ -2058,22 +2058,9 @@ typedef struct e_client_vtable e_client_vtable;
 typedef struct e_client_config e_client_config;
 typedef struct e_client        e_client;
 
-
-typedef enum
-{
-    E_CLIENT_EVENT_WINDOW_CLOSE,
-    E_CLIENT_EVENT_WINDOW_SIZE,
-    E_CLIENT_EVENT_WINDOW_MOVE,
-    E_CLIENT_EVENT_CURSOR_MOVE,
-    E_CLIENT_EVENT_CURSOR_BUTTON_DOWN,
-    E_CLIENT_EVENT_CURSOR_BUTTON_UP,
-    E_CLIENT_EVENT_CURSOR_BUTTON_DOUBLE_CLICK,
-    E_CLIENT_EVENT_CURSOR_WHEEL
-} e_client_event_type;
-
 typedef struct
 {
-    e_client_event_type type;
+    e_event_type type;
     struct
     {
         struct
