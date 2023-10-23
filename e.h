@@ -1313,7 +1313,7 @@ struct e_event
         struct
         {
             e_window* pWindow;
-            e_uint32 keyCode;   /* This is a virtual key code, not a UTF-32 character. Use the WINDOW_EVENT_CHARACTER event to check for UTF-32 character inputs for text boxes or whatnot. */
+            e_uint32 key;   /* This is a virtual key code, not a UTF-32 character. Use the WINDOW_EVENT_CHARACTER event to check for UTF-32 character inputs for text boxes or whatnot. */
             e_bool8 isAutoRepeat;
         } keyDown, keyUp;
         struct
@@ -1802,6 +1802,8 @@ E_INLINE e_quatf e_quatf_lookat(e_vec3f eye, e_vec3f target, e_vec3f up)
 #define E_KEY_STATE_UP          0
 #define E_KEY_STATE_DOWN        1
 
+#define E_INPUT_CHARACTER_BUFFER_CAP 128
+
 typedef struct e_input_config e_input_config;
 typedef struct e_input        e_input;
 
@@ -1813,6 +1815,17 @@ struct e_input_config
 E_API e_input_config e_input_config_init(void);
 
 
+#define E_KEY_STATE_FLAG_UP         0x01
+#define E_KEY_STATE_FLAG_DOWN       0x02
+
+#define E_MAX_KEYS_DOWN             16
+
+typedef struct
+{
+    e_uint32 key;
+    e_uint32 stateFlags;
+} e_key_state;
+
 struct e_input
 {
     int prevAbsoluteCursorPosX[E_MAX_CURSORS];
@@ -1822,6 +1835,15 @@ struct e_input
     int cursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
     int prevCursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
     int cursorWheelDelta[E_MAX_CURSORS];
+    e_uint32 keysDown[E_MAX_KEYS_DOWN];
+    e_uint32 keysDownCount;
+    e_uint32 prevKeysDown[E_MAX_KEYS_DOWN];
+    e_uint32 prevKeysDownCount;
+    e_key_state keyPressedStates[E_MAX_KEYS_DOWN];    /* When empty, key was neither pressed nor released. */
+    e_uint32 keyPressedStateCount;
+    e_uint32 characters[E_INPUT_CHARACTER_BUFFER_CAP];
+    e_uint32 characterCount;
+    e_uint32 characterIndex;    /* The index of the next character in the buffer. */
     e_bool32 freeOnUninit;
 };
 
@@ -1843,6 +1865,13 @@ E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 curso
 E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
 E_API void e_input_set_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex, int delta);
 E_API int  e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex);
+E_API void e_input_set_key_down(e_input* pInput, e_uint32 key);
+E_API void e_input_set_key_up(e_input* pInput, e_uint32 key);
+E_API e_bool32 e_input_was_key_pressed(e_input* pInput, e_uint32 key);
+E_API e_bool32 e_input_was_key_released(e_input* pInput, e_uint32 key);
+E_API e_bool32 e_input_is_key_down(e_input* pInput, e_uint32 key);
+E_API void e_input_enqueue_character(e_input* pInput, e_uint32 utf32);
+E_API e_uint32 e_input_dequeue_character(e_input* pInput); /* Will return 0 if there are no more characters buffered. */
 /* === END e_input.h === */
 
 

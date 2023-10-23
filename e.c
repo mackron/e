@@ -456,6 +456,128 @@ static void* e_platform_get_object(e_platform_object_type type)
 #endif
 
 
+static e_uint32 e_key_from_win32(unsigned int key)
+{
+    switch (key)
+    {
+        case VK_BACK:       return E_KEY_BACKSPACE;
+        case VK_TAB:        return E_KEY_TAB;
+        case VK_CLEAR:      return 0x0C;
+        case VK_RETURN:     return E_KEY_ENTER;
+        case VK_LSHIFT:     return E_KEY_LSHIFT;
+        case VK_RSHIFT:     return E_KEY_RSHIFT;
+        case VK_LCONTROL:   return E_KEY_LCONTROL;
+        case VK_RCONTROL:   return E_KEY_RCONTROL;
+        case VK_LMENU:      return E_KEY_LALT;
+        case VK_RMENU:      return E_KEY_RALT;
+        case VK_SHIFT:      return E_KEY_LSHIFT;
+        case VK_CONTROL:    return E_KEY_LCONTROL;
+        case VK_MENU:       return E_KEY_LALT;
+        case VK_PAUSE:      return E_KEY_PAUSE;
+        case VK_CAPITAL:    return E_KEY_CAPS_LOCK;
+        case VK_ESCAPE:     return E_KEY_ESCAPE;
+        case VK_SPACE:      return E_KEY_SPACE;
+        case VK_PRIOR:      return E_KEY_PAGE_UP;
+        case VK_NEXT:       return E_KEY_PAGE_DOWN;
+        case VK_END:        return E_KEY_END;
+        case VK_HOME:       return E_KEY_HOME;
+        case VK_LEFT:       return E_KEY_LEFT;
+        case VK_UP:         return E_KEY_UP;
+        case VK_RIGHT:      return E_KEY_RIGHT;
+        case VK_DOWN:       return E_KEY_DOWN;
+        case VK_SNAPSHOT:   return E_KEY_PRINT_SCREEN;
+        case VK_INSERT:     return E_KEY_INSERT;
+        case VK_DELETE:     return E_KEY_DELETE;
+        case VK_HELP:       return 0x2F;
+        case VK_LWIN:       return E_KEY_LWIN;
+        case VK_RWIN:       return E_KEY_RWIN;
+        case VK_APPS:       return 0x5D;
+        case VK_SLEEP:      return 0x5F;
+        case VK_NUMPAD0:    return E_KEY_NUMPAD_0;
+        case VK_NUMPAD1:    return E_KEY_NUMPAD_1;
+        case VK_NUMPAD2:    return E_KEY_NUMPAD_2;
+        case VK_NUMPAD3:    return E_KEY_NUMPAD_3;
+        case VK_NUMPAD4:    return E_KEY_NUMPAD_4;
+        case VK_NUMPAD5:    return E_KEY_NUMPAD_5;
+        case VK_NUMPAD6:    return E_KEY_NUMPAD_6;
+        case VK_NUMPAD7:    return E_KEY_NUMPAD_7;
+        case VK_NUMPAD8:    return E_KEY_NUMPAD_8;
+        case VK_NUMPAD9:    return E_KEY_NUMPAD_9;
+        case VK_MULTIPLY:   return E_KEY_MULTIPLY;
+        case VK_ADD:        return E_KEY_ADD;
+        case VK_SEPARATOR:  return 0x6C;
+        case VK_SUBTRACT:   return E_KEY_SUBTRACT;
+        case VK_DECIMAL:    return E_KEY_DECIMAL;
+        case VK_DIVIDE:     return E_KEY_DIVIDE;
+        case VK_F1:         return E_KEY_F1;
+        case VK_F2:         return E_KEY_F2;
+        case VK_F3:         return E_KEY_F3;
+        case VK_F4:         return E_KEY_F4;
+        case VK_F5:         return E_KEY_F5;
+        case VK_F6:         return E_KEY_F6;
+        case VK_F7:         return E_KEY_F7;
+        case VK_F8:         return E_KEY_F8;
+        case VK_F9:         return E_KEY_F9;
+        case VK_F10:        return E_KEY_F10;
+        case VK_F11:        return E_KEY_F11;
+        case VK_F12:        return E_KEY_F12;
+        case VK_NUMLOCK:    return E_KEY_NUM_LOCK;
+        case VK_SCROLL:     return E_KEY_SCROLL_LOCK;
+        case VK_OEM_1:      return E_KEY_SEMICOLON;
+        case VK_OEM_PLUS:   return E_KEY_EQUAL;
+        case VK_OEM_COMMA:  return E_KEY_COMMA;
+        case VK_OEM_MINUS:  return E_KEY_MINUS;
+        case VK_OEM_PERIOD: return E_KEY_PERIOD;
+        case VK_OEM_2:      return E_KEY_SLASH;
+        case VK_OEM_3:      return E_KEY_BACKTICK;
+        case VK_OEM_4:      return E_KEY_LEFT_BRACKET;
+        case VK_OEM_5:      return E_KEY_BACKSLASH;
+        case VK_OEM_6:      return E_KEY_RIGHT_BRACKET;
+        case VK_OEM_7:      return E_KEY_QUOTE;
+        case '0':           return E_KEY_0;
+        case '1':           return E_KEY_1;
+        case '2':           return E_KEY_2;
+        case '3':           return E_KEY_3;
+        case '4':           return E_KEY_4;
+        case '5':           return E_KEY_5;
+        case '6':           return E_KEY_6;
+        case '7':           return E_KEY_7;
+        case '8':           return E_KEY_8;
+        case '9':           return E_KEY_9;
+        case 'A':           return E_KEY_A;
+        case 'B':           return E_KEY_B;
+        case 'C':           return E_KEY_C;
+        case 'D':           return E_KEY_D;
+        case 'E':           return E_KEY_E;
+        case 'F':           return E_KEY_F;
+        case 'G':           return E_KEY_G;
+        case 'H':           return E_KEY_H;
+        case 'I':           return E_KEY_I;
+        case 'J':           return E_KEY_J;
+        case 'K':           return E_KEY_K;
+        case 'L':           return E_KEY_L;
+        case 'M':           return E_KEY_M;
+        case 'N':           return E_KEY_N;
+        case 'O':           return E_KEY_O;
+        case 'P':           return E_KEY_P;
+        case 'Q':           return E_KEY_Q;
+        case 'R':           return E_KEY_R;
+        case 'S':           return E_KEY_S;
+        case 'T':           return E_KEY_T;
+        case 'U':           return E_KEY_U;
+        case 'V':           return E_KEY_V;
+        case 'W':           return E_KEY_W;
+        case 'X':           return E_KEY_X;
+        case 'Y':           return E_KEY_Y;
+        case 'Z':           return E_KEY_Z;
+        default: break;
+    }
+
+    /* Getting here means we don't have a proper mapping. Just return the key as-is. */
+    return key;
+}
+
+
 struct e_platform_window
 {
     e_window* pOwnerWindow;
@@ -878,6 +1000,21 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                 }
             } break;
         #endif
+
+            case WM_KEYDOWN:
+            {
+                e = e_window_event_init(E_EVENT_KEY_DOWN, pWindow->pOwnerWindow);
+                e.data.keyDown.key = e_key_from_win32((unsigned int)wParam);
+                e.data.keyDown.isAutoRepeat = (lParam & (1 << 30)) != 0;
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
+
+            case WM_KEYUP:
+            {
+                e = e_window_event_init(E_EVENT_KEY_UP, pWindow->pOwnerWindow);
+                e.data.keyUp.key = e_key_from_win32((unsigned int)wParam);
+                e_window_handle_event(pWindow->pOwnerWindow, &e);
+            } break;
 
             case WM_CHAR:
             {
@@ -9252,6 +9389,16 @@ E_API e_result e_input_step(e_input* pInput)
         pInput->cursorWheelDelta[iCursor] = 0;
     }
 
+    /* Keyboard input needs to be reset. */
+    
+    /* Copy over the previous keys down, but don't clear the current list. They'll be cleared out when the keys are released. */
+    memcpy(pInput->prevKeysDown, pInput->keysDown, sizeof(pInput->keysDown));
+    pInput->prevKeysDownCount = pInput->keysDownCount;
+
+    memset(pInput->keyPressedStates, 0, sizeof(pInput->keyPressedStates));
+    pInput->keyPressedStateCount  = 0;
+    pInput->characterCount = 0;
+
     return E_SUCCESS;
 }
 
@@ -9400,6 +9547,182 @@ E_API int e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex)
     }
 
     return pInput->cursorWheelDelta[cursorIndex];
+}
+
+E_API void e_input_set_key_down(e_input* pInput, e_uint32 key)
+{
+    e_uint32 iKey;
+
+    if (pInput == NULL) {
+        return;
+    }
+
+    /* If there's no room in the key down buffer we'll need to just drop this key. */
+    if (pInput->keysDownCount >= E_COUNTOF(pInput->keysDown)) {
+        return;
+    }
+
+    /*
+    The key needs to be added to the key down list. It should not be possible to press a key more than once so assume
+    the caller is calling this and e_input_set_key_up() properly.
+    */
+    pInput->keysDown[pInput->keysDownCount] = key;
+    pInput->keysDownCount += 1;
+
+
+    /*
+    The key pressed/released state needs to be tracked. This will allow us to check if the key was pressed
+    in situations where it was pressed and released between calls to e_input_step().
+    */
+
+    /* Find the key. */
+    for (iKey = 0; iKey < pInput->keyPressedStateCount; ++iKey) {
+        if (pInput->keyPressedStates[iKey].key == key) {
+            break;
+        }
+    }
+
+    if (iKey >= E_COUNTOF(pInput->keyPressedStates)) {
+        return;
+    }
+
+    if (iKey == pInput->keyPressedStateCount) {
+        pInput->keyPressedStateCount += 1;
+    }
+
+    pInput->keyPressedStates[iKey].key = key;
+    pInput->keyPressedStates[iKey].stateFlags |= E_KEY_STATE_FLAG_DOWN;
+}
+
+E_API void e_input_set_key_up(e_input* pInput, e_uint32 key)
+{
+    e_uint32 iKey;
+
+    if (pInput == NULL) {
+        return;
+    }
+
+    /* We just need to clear out the key from the currently downed key list. */
+    for (iKey = 0; iKey < pInput->keysDownCount; iKey += 1) {
+        if (pInput->keysDown[iKey] == key) {
+            /* Move the other keys down. */
+            for (; iKey < pInput->keysDownCount - 1; iKey += 1) {
+                pInput->keysDown[iKey] = pInput->keysDown[iKey + 1];
+            }
+            pInput->keysDownCount -= 1;
+
+            break;
+        }
+    }
+
+    /* As with set_key_down(), we need to apply a separate flag to track the pressed/released state. */
+    for (iKey = 0; iKey < pInput->keyPressedStateCount; ++iKey) {
+        if (pInput->keyPressedStates[iKey].key == key) {
+            break;
+        }
+    }
+
+    if (iKey >= E_COUNTOF(pInput->keyPressedStates)) {
+        return;
+    }
+
+    if (iKey == pInput->keyPressedStateCount) {
+        pInput->keyPressedStateCount += 1;
+    }
+
+    pInput->keyPressedStates[iKey].key = key;
+    pInput->keyPressedStates[iKey].stateFlags |= E_KEY_STATE_FLAG_UP;
+}
+
+E_API e_bool32 e_input_was_key_pressed(e_input* pInput, e_uint32 key)
+{
+    e_uint32 iKey;
+
+    if (pInput == NULL) {
+        return E_FALSE;
+    }
+
+    /* Find the key. */
+    for (iKey = 0; iKey < pInput->keyPressedStateCount; ++iKey) {
+        if (pInput->keyPressedStates[iKey].key == key) {
+            return (pInput->keyPressedStates[iKey].stateFlags & E_KEY_STATE_FLAG_DOWN) != 0;
+        }
+    }
+
+    /* Getting here means the key's state isn't in the buffer which means it musn't have been pressed this frame. */
+    return E_FALSE;
+}
+
+E_API e_bool32 e_input_was_key_released(e_input* pInput, e_uint32 key)
+{
+    e_uint32 iKey;
+
+    if (pInput == NULL) {
+        return E_FALSE;
+    }
+
+    /* Find the key. */
+    for (iKey = 0; iKey < pInput->keyPressedStateCount; ++iKey) {
+        if (pInput->keyPressedStates[iKey].key == key) {
+            return (pInput->keyPressedStates[iKey].stateFlags & E_KEY_STATE_FLAG_UP) != 0;
+        }
+    }
+
+    /* Getting here means the key's state isn't in the buffer which means it musn't have been released this frame. */
+    return E_FALSE;
+}
+
+E_API e_bool32 e_input_is_key_down(e_input* pInput, e_uint32 key)
+{
+    e_uint32 iKey;
+
+    if (pInput == NULL) {
+        return E_FALSE;
+    }
+
+    /* Find the key. */
+    for (iKey = 0; iKey < pInput->keysDownCount; ++iKey) {
+        if (pInput->keysDown[iKey] == key) {
+            return E_TRUE;
+        }
+    }
+
+    /* Getting here means the key couldn't be found in the list of downed keys. */
+    return E_FALSE;
+}
+
+E_API void e_input_enqueue_character(e_input* pInput, e_uint32 utf32)
+{
+    e_uint32 iNextCharacter;
+
+    if (pInput == NULL) {
+        return;
+    }
+
+    iNextCharacter = (pInput->characterIndex + pInput->characterCount) % E_COUNTOF(pInput->characters);
+    pInput->characters[iNextCharacter] = utf32;
+    pInput->characterCount += 1;
+}
+
+E_API e_uint32 e_input_dequeue_character(e_input* pInput)
+{
+    e_uint32 utf32;
+
+    if (pInput == NULL) {
+        return 0;
+    }
+
+    if (pInput->characterCount == 0) {
+        return 0;
+    }
+
+    utf32 = pInput->characters[pInput->characterIndex];
+
+    pInput->characterCount -= 1;
+    pInput->characterIndex = (pInput->characterIndex + 1) % E_COUNTOF(pInput->characters);
+
+    return utf32;
+
 }
 /* === END e_input.c === */
 
@@ -12091,6 +12414,24 @@ E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event
         case E_EVENT_CURSOR_WHEEL:
         {
             e_input_set_cursor_wheel_delta(pClient->pInput, 0, pEvent->data.cursorWheel.delta);
+        } break;
+
+        case E_EVENT_KEY_DOWN:
+        {
+            /* Our input system doesn't use auto-repeat so ignore any auto-repeated keys. */
+            if (!pEvent->data.keyDown.isAutoRepeat) {
+                e_input_set_key_down(pClient->pInput, pEvent->data.keyDown.key);
+            }
+        } break;
+
+        case E_EVENT_KEY_UP:
+        {
+            e_input_set_key_up(pClient->pInput, pEvent->data.keyUp.key);
+        } break;
+
+        case E_EVENT_CHARACTER:
+        {
+            e_input_enqueue_character(pClient->pInput, pEvent->data.character.utf32);
         } break;
         
         default: break;
