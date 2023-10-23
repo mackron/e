@@ -1263,51 +1263,62 @@ typedef struct e_window_vtable e_window_vtable;
 typedef struct e_window_config e_window_config;
 typedef struct e_window        e_window;
 
-struct e_window_event
+struct e_event
 {
     e_event_type type;
     union
     {
         struct
         {
-            int _unused;
+            e_window* pWindow;
+        } any;
+        struct
+        {
+            e_window* pWindow;
         } close;
         struct
         {
-            int _unused;
+            e_window* pWindow;
         } paint;
         struct
         {
+            e_window* pWindow;
             int x;
             int y;
         } size;
         struct
         {
+            e_window* pWindow;
             int x;
             int y;
         } move;
         struct
         {
+            e_window* pWindow;
             int x;
             int y;
         } cursorMove;
         struct
         {
+            e_window* pWindow;
             int button;
             int x;
             int y;
         } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
         struct
         {
+            e_window* pWindow;
             int delta;
         } cursorWheel;
         struct
         {
+            e_window* pWindow;
             e_uint32 keyCode;   /* This is a virtual key code, not a UTF-32 character. Use the WINDOW_EVENT_CHARACTER event to check for UTF-32 character inputs for text boxes or whatnot. */
             e_bool8 isAutoRepeat;
         } keyDown, keyUp;
         struct
         {
+            e_window* pWindow;
             e_uint32 utf32;
             e_bool8 isAutoRepeat;
         } character;
@@ -1316,7 +1327,7 @@ struct e_window_event
 
 struct e_window_vtable
 {
-    e_result (* onEvent)(void* pUserData, e_window* pWindow, e_window_event* pEvent);
+    e_result (* onEvent)(void* pUserData, e_window* pWindow, e_event* pEvent);
 };
 
 struct e_window_config
@@ -1380,7 +1391,7 @@ E_API e_engine* e_window_get_engine(const e_window* pWindow);
 E_API void* e_window_get_user_data(const e_window* pWindow);
 E_API e_window_vtable* e_window_get_vtable(const e_window* pWindow);
 E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_object_type type);
-E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event* pEvent);
+E_API e_result e_window_default_event_handler(e_window* pWindow, e_event* pEvent);
 E_API e_result e_window_capture_cursor(e_window* pWindow);
 E_API e_result e_window_release_cursor(e_window* pWindow);
 E_API e_result e_window_set_cursor_position(e_window* pWindow, int cursorPosX, int cursorPosY);
@@ -2058,47 +2069,10 @@ typedef struct e_client_vtable e_client_vtable;
 typedef struct e_client_config e_client_config;
 typedef struct e_client        e_client;
 
-typedef struct
-{
-    e_event_type type;
-    struct
-    {
-        struct
-        {
-            e_window* pWindow;
-        } windowClose;
-        struct
-        {
-            e_window* pWindow;
-            int x;
-            int y;
-        } windowSize, windowMove;
-        struct
-        {
-            e_window* pWindow;
-            int x;
-            int y;
-        } cursorMove;
-        struct
-        {
-            e_window* pWindow;
-            int x;
-            int y;
-            int button;
-            unsigned int flags;
-        } cursorButtonDown, cursorButtonUp, cursorButtonDoubleClick;
-        struct
-        {
-            e_window* pWindow;
-            int delta;
-        } cursorWheel;
-    } data;
-} e_client_event;
-
 
 struct e_client_vtable
 {
-    e_result (* onEvent)(void* pUserData, e_client* pClient, e_client_event* pEvent);
+    e_result (* onEvent)(void* pUserData, e_client* pClient, e_event* pEvent);
     e_result (* onStep )(void* pUserData, e_client* pClient, double dt);
 };
 
@@ -2154,8 +2128,8 @@ E_API e_window* e_client_get_window(e_client* pClient);
 E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_uint32 sizeY);        /* Use this to tell the client that the window has been resized. */
 E_API e_bool32 e_client_get_window_size(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY);     /* Returns true if the window has been resized since the last step. pSizeX and pSizeY will always be filled with the correct window size, even when false has returned. */
 E_API e_input* e_client_get_input(e_client* pClient);
-E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent);           /* You will usually want to call this in response to all events from the client. If you don't, you'll need to implement certain functionality yourself. See the implementation for details. */
-E_API e_result e_client_update_input_from_event(e_client* pClient, const e_client_event* pEvent);
+E_API e_result e_client_default_event_handler(e_client* pClient, e_event* pEvent);           /* You will usually want to call this in response to all events from the client. If you don't, you'll need to implement certain functionality yourself. See the implementation for details. */
+E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event* pEvent);
 E_API e_result e_client_step(e_client* pClient, double dt);
 E_API e_result e_client_step_input(e_client* pClient);
 E_API e_bool32 e_client_has_cursor_moved(e_client* pClient);

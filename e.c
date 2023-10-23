@@ -257,7 +257,7 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 
 
 
-static e_result e_window_handle_event(e_window* pWindow, e_window_event* pEvent)
+static e_result e_window_handle_event(e_window* pWindow, e_event* pEvent)
 {
     e_result result;
 
@@ -277,11 +277,12 @@ static e_result e_window_handle_event(e_window* pWindow, e_window_event* pEvent)
     }
 }
 
-static e_window_event e_window_event_init(e_event_type type)
+static e_event e_window_event_init(e_event_type type, e_window* pWindow)
 {
-    e_window_event e;
+    e_event e;
 
     e.type = type;
+    e.data.any.pWindow = pWindow;
 
     return e;
 }
@@ -723,20 +724,20 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 {
     e_platform_window* pWindow = (e_platform_window*)GetWindowLongPtrW(hWnd, 0);
     if (pWindow != NULL) {
-        e_window_event e;
+        e_event e;
 
         switch (msg)
         {
             case WM_CLOSE:
             {
-                e = e_window_event_init(E_EVENT_CLOSE);
+                e = e_window_event_init(E_EVENT_CLOSE, pWindow->pOwnerWindow);
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
                 return 0;
             };
 
             case WM_SIZE:
             {
-                e = e_window_event_init(E_EVENT_SIZE);
+                e = e_window_event_init(E_EVENT_SIZE, pWindow->pOwnerWindow);
                 e.data.size.x = LOWORD(lParam);
                 e.data.size.y = HIWORD(lParam);
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
@@ -765,7 +766,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 
             case WM_MOVE:
             {
-                e = e_window_event_init(E_EVENT_MOVE);
+                e = e_window_event_init(E_EVENT_MOVE, pWindow->pOwnerWindow);
                 e.data.move.x = (short)LOWORD(lParam);
                 e.data.move.y = (short)HIWORD(lParam);
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
@@ -773,7 +774,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 
             case WM_MOUSEMOVE:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_MOVE);
+                e = e_window_event_init(E_EVENT_CURSOR_MOVE, pWindow->pOwnerWindow);
                 e.data.cursorMove.x = (short)LOWORD(lParam);
                 e.data.cursorMove.y = (short)HIWORD(lParam);
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
@@ -782,7 +783,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             /* Mouse buttons. */
             case WM_LBUTTONDOWN:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN, pWindow->pOwnerWindow);
                 e.data.cursorButtonDown.x = (short)LOWORD(lParam);
                 e.data.cursorButtonDown.y = (short)HIWORD(lParam);
                 e.data.cursorButtonDown.button = E_CURSOR_BUTTON_LEFT;
@@ -790,7 +791,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_RBUTTONDOWN:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN, pWindow->pOwnerWindow);
                 e.data.cursorButtonDown.x = (short)LOWORD(lParam);
                 e.data.cursorButtonDown.y = (short)HIWORD(lParam);
                 e.data.cursorButtonDown.button = E_CURSOR_BUTTON_RIGHT;
@@ -798,7 +799,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_MBUTTONDOWN:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN, pWindow->pOwnerWindow);
                 e.data.cursorButtonDown.x = (short)LOWORD(lParam);
                 e.data.cursorButtonDown.y = (short)HIWORD(lParam);
                 e.data.cursorButtonDown.button = E_CURSOR_BUTTON_MIDDLE;
@@ -806,7 +807,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_XBUTTONDOWN:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_DOWN, pWindow->pOwnerWindow);
                 e.data.cursorButtonDown.x = (short)LOWORD(lParam);
                 e.data.cursorButtonDown.y = (short)HIWORD(lParam);
                 e.data.cursorButtonDown.button = (HIWORD(wParam) == XBUTTON1) ? E_CURSOR_BUTTON_4 : E_CURSOR_BUTTON_5;
@@ -815,7 +816,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 
             case WM_LBUTTONUP:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP, pWindow->pOwnerWindow);
                 e.data.cursorButtonUp.x = (short)LOWORD(lParam);
                 e.data.cursorButtonUp.y = (short)HIWORD(lParam);
                 e.data.cursorButtonUp.button = E_CURSOR_BUTTON_LEFT;
@@ -823,7 +824,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_RBUTTONUP:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP, pWindow->pOwnerWindow);
                 e.data.cursorButtonUp.x = (short)LOWORD(lParam);
                 e.data.cursorButtonUp.y = (short)HIWORD(lParam);
                 e.data.cursorButtonUp.button = E_CURSOR_BUTTON_RIGHT;
@@ -831,7 +832,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_MBUTTONUP:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP, pWindow->pOwnerWindow);
                 e.data.cursorButtonUp.x = (short)LOWORD(lParam);
                 e.data.cursorButtonUp.y = (short)HIWORD(lParam);
                 e.data.cursorButtonUp.button = E_CURSOR_BUTTON_MIDDLE;
@@ -839,7 +840,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             } break;
             case WM_XBUTTONUP:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP);
+                e = e_window_event_init(E_EVENT_CURSOR_BUTTON_UP, pWindow->pOwnerWindow);
                 e.data.cursorButtonUp.x = (short)LOWORD(lParam);
                 e.data.cursorButtonUp.y = (short)HIWORD(lParam);
                 e.data.cursorButtonUp.button = (HIWORD(wParam) == XBUTTON1) ? E_CURSOR_BUTTON_4 : E_CURSOR_BUTTON_5;
@@ -849,7 +850,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
             /* Mouse wheel. */
             case WM_MOUSEWHEEL:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_WHEEL);
+                e = e_window_event_init(E_EVENT_CURSOR_WHEEL, pWindow->pOwnerWindow);
                 e.data.cursorWheel.delta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
@@ -865,7 +866,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                     if (pRawInput != NULL) {
                         if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, pRawInput, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
                             if (pRawInput->header.dwType == RIM_TYPEMOUSE) {
-                                e = e_window_event_init(E_EVENT_CURSOR_MOVE);
+                                e = e_window_event_init(E_EVENT_CURSOR_MOVE, pWindow->pOwnerWindow);
                                 e.data.cursorMove.x = pRawInput->data.mouse.lLastX;
                                 e.data.cursorMove.y = pRawInput->data.mouse.lLastY;
                                 e_window_handle_event(pWindow->pOwnerWindow, &e);
@@ -895,7 +896,7 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                         utf32 = utf16;
                     }
 
-                    e = e_window_event_init(E_EVENT_CHARACTER);
+                    e = e_window_event_init(E_EVENT_CHARACTER, pWindow->pOwnerWindow);
                     e.data.character.utf32        = (e_uint32)wParam;
                     e.data.character.isAutoRepeat = (lParam & (1 << 30)) != 0;
                     e_window_handle_event(pWindow->pOwnerWindow, &e);
@@ -1719,7 +1720,7 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
                 {
                     if (x11Event.xclient.message_type == e_gWMProtocolsAtom) {
                         if (x11Event.xclient.data.l[0] == (long)e_gWMDeleteWindowAtom) {
-                            e = e_window_event_init(E_EVENT_CLOSE);
+                            e = e_window_event_init(E_EVENT_CLOSE, pWindow);
                             e_window_handle_event(pWindow, &e);
                         }
                     } else if (x11Event.xclient.message_type == e_gWMQuitAtom) {
@@ -1741,7 +1742,7 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
                                 pPlatformWindow->sizeX = eventSizeX;
                                 pPlatformWindow->sizeY = eventSizeY;
 
-                                e = e_window_event_init(E_EVENT_SIZE);
+                                e = e_window_event_init(E_EVENT_SIZE, pWindow);
                                 e.data.size.x = eventSizeX;
                                 e.data.size.y = eventSizeY;
                                 e_window_handle_event(pWindow, &e);
@@ -9038,7 +9039,7 @@ E_API void* e_window_get_platform_object(const e_window* pWindow, e_platform_obj
     return e_platform_window_get_object(pWindow->pPlatformWindow, type);
 }
 
-E_API e_result e_window_default_event_handler(e_window* pWindow, e_window_event* pEvent)
+E_API e_result e_window_default_event_handler(e_window* pWindow, e_event* pEvent)
 {
     /* NOTE: This function must never return E_NOT_IMPLEMENTED. */
 
@@ -11595,7 +11596,7 @@ E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface)
 
 
 /* ==== BEG e_client.c ==== */
-static e_result e_client_handle_event(e_client* pClient, e_client_event* pEvent)
+static e_result e_client_handle_event(e_client* pClient, e_event* pEvent)
 {
     e_result result;
 
@@ -11615,101 +11616,11 @@ static e_result e_client_handle_event(e_client* pClient, e_client_event* pEvent)
     }
 }
 
-static e_client_event e_client_event_init(e_event_type type)
+static e_result e_client_window_event_callback(void* pUserData, e_window* pWindow, e_event* pEvent)
 {
-    e_client_event e;
+    e_client_handle_event((e_client*)pUserData, pEvent);
 
-    e.type = type;
-
-    return e;
-}
-
-static e_result e_client_window_event_callback(void* pUserData, e_window* pWindow, e_window_event* pEvent)
-{
-    e_client* pClient = (e_client*)pUserData;
-    e_client_event e;
-
-    switch (pEvent->type)
-    {
-        case E_EVENT_CLOSE:
-        {
-            e = e_client_event_init(E_EVENT_CLOSE);
-            e.data.windowClose.pWindow = pWindow;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_PAINT:
-        {
-        } break;
-
-        case E_EVENT_SIZE:
-        {
-            e = e_client_event_init(E_EVENT_SIZE);
-            e.data.windowSize.pWindow = pWindow;
-            e.data.windowSize.x = pEvent->data.size.x;
-            e.data.windowSize.y = pEvent->data.size.y;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_MOVE:
-        {
-            e = e_client_event_init(E_EVENT_MOVE);
-            e.data.windowMove.pWindow = pWindow;
-            e.data.windowMove.x = pEvent->data.move.x;
-            e.data.windowMove.y = pEvent->data.move.y;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_CURSOR_MOVE:
-        {
-            e = e_client_event_init(E_EVENT_CURSOR_MOVE);
-            e.data.cursorMove.pWindow = pWindow;
-            e.data.cursorMove.x = pEvent->data.cursorMove.x;
-            e.data.cursorMove.y = pEvent->data.cursorMove.y;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_CURSOR_BUTTON_DOWN:
-        {
-            e = e_client_event_init(E_EVENT_CURSOR_BUTTON_DOWN);
-            e.data.cursorButtonDown.pWindow = pWindow;
-            e.data.cursorButtonDown.x = pEvent->data.cursorButtonDown.x;
-            e.data.cursorButtonDown.y = pEvent->data.cursorButtonDown.y;
-            e.data.cursorButtonDown.button = pEvent->data.cursorButtonDown.button;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_CURSOR_BUTTON_UP:
-        {
-            e = e_client_event_init(E_EVENT_CURSOR_BUTTON_UP);
-            e.data.cursorButtonUp.pWindow = pWindow;
-            e.data.cursorButtonUp.x = pEvent->data.cursorButtonDown.x;
-            e.data.cursorButtonUp.y = pEvent->data.cursorButtonDown.y;
-            e.data.cursorButtonUp.button = pEvent->data.cursorButtonUp.button;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_CURSOR_BUTTON_DOUBLE_CLICK:
-        {
-            e = e_client_event_init(E_EVENT_CURSOR_BUTTON_DOUBLE_CLICK);
-            e.data.cursorButtonDoubleClick.pWindow = pWindow;
-            e.data.cursorButtonDoubleClick.x = pEvent->data.cursorButtonDown.x;
-            e.data.cursorButtonDoubleClick.y = pEvent->data.cursorButtonDown.y;
-            e.data.cursorButtonDoubleClick.button = pEvent->data.cursorButtonDoubleClick.button;
-            e_client_handle_event(pClient, &e);
-        } break;
-
-        case E_EVENT_CURSOR_WHEEL:
-        {
-            e = e_client_event_init(E_EVENT_CURSOR_WHEEL);
-            e.data.cursorWheel.pWindow = pWindow;
-            e.data.cursorWheel.delta = pEvent->data.cursorWheel.delta;
-            e_client_handle_event(pClient, &e);
-        } break;
-        
-        default: break;
-    }
-
+    /* Make sure the event is handled by the window system's default event handler. */
     return e_window_default_event_handler(pWindow, pEvent);
 }
 
@@ -12109,7 +12020,7 @@ E_API e_input* e_client_get_input(e_client* pClient)
     return pClient->pInput;
 }
 
-E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event* pEvent)
+E_API e_result e_client_default_event_handler(e_client* pClient, e_event* pEvent)
 {
     /* NOTE: This function must never return E_NOT_IMPLEMENTED. */
 
@@ -12136,7 +12047,7 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
         case E_EVENT_SIZE:
         {
             /* Tell the client that the window has been resized. */
-            e_client_on_window_resize(pClient, (e_uint32)pEvent->data.windowSize.x, (e_uint32)pEvent->data.windowSize.y);
+            e_client_on_window_resize(pClient, (e_uint32)pEvent->data.size.x, (e_uint32)pEvent->data.size.y);
 
             /*
             When the window is resized we need to also resize the surface. If we don't do this, the surface's
@@ -12154,7 +12065,7 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_client_event*
     return E_SUCCESS;
 }
 
-E_API e_result e_client_update_input_from_event(e_client* pClient, const e_client_event* pEvent)
+E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event* pEvent)
 {
     if (pClient == NULL || pEvent == NULL) {
         return E_INVALID_ARGS;
