@@ -464,6 +464,7 @@ struct e_platform_window
     HCURSOR hCurrentCursor;
     HCURSOR hOldCursor;
     e_bool32 isCursorHidden;
+    e_uint16 utf16Hi;   /* The high surrogate pair in a UTF-16 surrogate pair. Used with WM_CHAR. */
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -876,6 +877,30 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
                 }
             } break;
         #endif
+
+            case WM_CHAR:
+            {
+                /* This needs to capture surrogate pairs. */
+                e_uint16 utf16 = (e_uint16)wParam;
+                e_uint32 utf32;
+
+                if (utf16 >= 0xD800 && utf16 <= 0xDBFF) {
+                    pWindow->utf16Hi = utf16;
+                } else {
+                    if (utf16 >= 0xDC00 && utf16 <= 0xDFFF) {
+                        /* It's a low surrogate. Combine it with the high, and then post an event. */
+                        utf32 = 0x10000 + (((e_uint32)pWindow->utf16Hi - 0xD800) << 10) + ((e_uint32)utf16 - 0xDC00);
+                    } else {
+                        /* It's just a regular UTF-16 character. */
+                        utf32 = utf16;
+                    }
+
+                    e = e_window_event_init(E_WINDOW_EVENT_CHARACTER);
+                    e.data.character.utf32        = (e_uint32)wParam;
+                    e.data.character.isAutoRepeat = (lParam & (1 << 30)) != 0;
+                    e_window_handle_event(pWindow->pOwnerWindow, &e);
+                }
+            } break;
 
             default: break;
         }
