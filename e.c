@@ -4281,6 +4281,9 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     of the query so that everything is returned.
 
     Our iteration system does not include the "." and ".." directories, so they'll need to be skipped as well.
+
+    EDIT: It turns out that it appears that \\?\ can only be used for absolute paths. For now just not supporting
+    long file paths.
     */
 
     /* First thing is to append the directory path we originally specified. */
@@ -4307,12 +4310,18 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
         return NULL;
     }
 
+    /*
+    Disabling long file paths for now. See note above. Should probably check if the path is absolute, and if
+    so prepend "\\?\".
+    */
+#if 0
     /* Now we need to prepend the "\\?\" to the path. */
     query = c89str_prependn(query, &cstr89AllocationCallbacks, "\\\\?\\", 4);
     if (e_result_from_errno(c89str_result(query)) != E_SUCCESS) {
         c89str_delete(query, &cstr89AllocationCallbacks);
         return NULL;
     }
+#endif
 
     /*
     Before we can call FindFirstFileW() we need to convert the string to wide characters using
@@ -5408,6 +5417,124 @@ E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void*
 
     if (result != E_SUCCESS) {    
         return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, size_t* pFileCount)
+{
+    e_fs_iterator* pFileIterator;
+    char** ppFileNames;
+    size_t* pFileNameLengths;
+    size_t fileCount;
+    char* pData = NULL;     /* We do everything with a single allocation (resized with realloc()). This is a pointer to that allocation. */
+    size_t dataSize = 0;    /* The total size of the data buffer. */
+    size_t dataCap = 0;     /* The total allocation size of the data buffer. */
+    size_t totalFileNameLength = 0; /* The total length of all file names in the buffer. */
+    size_t iFile;
+    char* pRunningFileName;
+
+    if (pppFileNames == NULL || pFileCount == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *pppFileNames = NULL;
+    *pFileCount = 0;
+
+    if (pFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pDirectoryPath == NULL) {
+        pDirectoryPath = "";
+    }
+
+    /* We need to loop over each file in the directory and add it to the list. */
+    ppFileNames      = NULL;
+    pFileNameLengths = NULL;
+    fileCount        = 0;
+
+    for (pFileIterator = e_fs_first(pFS, pDirectoryPath, directoryPathLen, pAllocationCallbacks); pFileIterator != NULL; pFileIterator = e_fs_next(pFileIterator, pAllocationCallbacks)) {
+        const char* pName;
+        size_t nameLen;
+        size_t nameDataSize;
+
+        /* We need to skip over "." and ".." directories. */
+        if (c89str_strcmp(pFileIterator->pName, ".") == 0 || c89str_strcmp(pFileIterator->pName, "..") == 0) {
+            continue;
+        }
+
+        pName   = pFileIterator->pName;
+        nameLen = pFileIterator->nameLen;
+        
+        /*
+        Resize the buffer if necessary. We need room for the name, it's null terminator, and it's length (the length
+        is stored at the end of the buffer, and is processed as a post-processing step).
+        */
+        nameDataSize = sizeof(char*) + nameLen + 1 + sizeof(size_t);
+        if (dataSize + nameDataSize > dataCap) {
+            size_t newDataCap = dataCap * 2;
+            char* pNewData;
+
+            newDataCap = dataCap * 2;
+            if (newDataCap < dataSize + nameDataSize) {
+                newDataCap = dataSize + nameDataSize;
+            }
+
+            pNewData = (char*)e_realloc(pData, newDataCap, pAllocationCallbacks);
+            if (pNewData == NULL) {
+                e_free(pData, pAllocationCallbacks);
+                return E_OUT_OF_MEMORY;
+            }
+
+            pData = pNewData;
+            dataCap = newDataCap;
+        }
+
+        /* We need to copy the name into the buffer. We can use totalFileNameLength with fileCount to calculate the insertion position. */
+        c89str_strcpy(pData + totalFileNameLength + (fileCount * sizeof(char)), pName);
+
+        totalFileNameLength += nameLen;
+        fileCount += 1;
+        dataSize += nameDataSize;
+    }
+
+    /*
+    At this point we will have gathered all of the file names into a single buffer. Now we need to
+    do a post-processing step to set up the pointers.
+
+    The very top of the buffer will be an array of pointers to the file names. The first thing we
+    need to do is slide our file names down to make room for the pointer array.
+    */
+    E_MOVE_MEMORY(pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t)), pData, totalFileNameLength + (fileCount * sizeof(char)));
+
+    /*
+    At this point there should be room at the top of the buffer for our pointer array. We need to
+    now iterate over each of our file names and set up these pointers. They'll be null terminated
+    which is what we can use to determine where each one starts.
+    */
+    ppFileNames = (char**)pData;
+    pFileNameLengths = (size_t*)(pData + (fileCount * sizeof(char*)));
+    pRunningFileName = pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t));
+
+    for (iFile = 0; iFile < fileCount; iFile += 1) {
+        size_t fileNameLen = c89str_strlen(pRunningFileName);
+
+        ppFileNames[iFile] = pRunningFileName;
+        pFileNameLengths[iFile] = fileNameLen;
+
+        pRunningFileName += fileNameLen + 1;    /* +1 to get past null terminator. */
+    }
+
+    if (pppFileNames != NULL) {
+        *pppFileNames = ppFileNames;
+    }
+    if (ppFileNameLengths != NULL) {
+        *ppFileNameLengths = pFileNameLengths;
+    }
+    if (pFileCount != NULL) {
+        *pFileCount = fileCount;
     }
 
     return E_SUCCESS;
