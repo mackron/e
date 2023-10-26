@@ -978,6 +978,16 @@ E_API e_result e_log_postf(e_log* pLog, e_log_level level, const char* pFormat, 
 
 
 
+/* ==== BEG e_script.h ==== */
+typedef void e_script; /* This is actually a lua_State*. You can just cast this and plug it into any Lua API. */
+
+E_API e_result e_script_init(const e_allocation_callbacks* pAllocationCallbacks, e_script** ppScript);
+E_API void e_script_uninit(e_script* pScript, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_script_load(e_script* pScript, e_stream* pStream, const char* pName, e_log* pLog);
+E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
+/* ==== END e_script.h ==== */
+
+
 /* ==== BEG e_config_file.h ==== */
 typedef struct e_config_file e_config_file;
 

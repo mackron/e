@@ -7815,8 +7815,7 @@ E_API e_result e_log_postf(e_log* pLog, e_log_level level, const char* pFormat, 
 
 
 
-
-/* ==== BEG e_config_file.c ==== */
+/* ==== BEG e_script.h ==== */
 static e_result e_result_from_lua(int result)
 {
     switch (result)
@@ -7830,7 +7829,6 @@ static e_result e_result_from_lua(int result)
     /* Fall back to a generic error. */
     return E_ERROR;
 }
-
 
 static void* e_lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize)
 {
@@ -7848,7 +7846,6 @@ static void* e_lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize)
         return e_realloc(ptr, nsize, pAllocationCallbacks);
     }
 }
-
 
 typedef struct
 {
@@ -7877,7 +7874,94 @@ static const char* e_lua_read(lua_State* L, void* ud, size_t* size)
     return pState->buffer;
 }
 
+static lua_State* e_script_to_lua(e_script* pScript)
+{
+    return (lua_State*)pScript;
+}
 
+
+E_API e_result e_script_init(const e_allocation_callbacks* pAllocationCallbacks, e_script** ppScript)
+{
+    lua_State* pLuaState;
+
+    if (ppScript == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppScript = NULL;
+
+    pLuaState = lua_newstate(e_lua_alloc, (void*)pAllocationCallbacks);
+    if (pLuaState == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    *ppScript = pLuaState;
+    return E_SUCCESS;
+}
+
+E_API void e_script_uninit(e_script* pScript, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pScript == NULL) {
+        return;
+    }
+
+    /*
+    Lua stores a persistent copy of the allocation callback that we specified at initialization
+    time. Therefore there's no need to actually do anything with our allocation callbacks.
+    */
+    E_UNUSED(pAllocationCallbacks);
+
+    lua_close(e_script_to_lua(pScript));
+}
+
+E_API e_result e_script_load(e_script* pScript, e_stream* pStream, const char* pName, e_log* pLog)
+{
+    e_result result;
+    e_lua_read_state readState;
+
+    if (pScript == NULL || pStream == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    readState.pStream = pStream;
+
+    result = e_result_from_lua(lua_load(e_script_to_lua(pScript), e_lua_read, &readState, pName, NULL));
+    if (result == E_SUCCESS) {
+        result = e_result_from_lua(lua_pcall(e_script_to_lua(pScript), 0, LUA_MULTRET, 0));
+    }
+
+    if (result != E_SUCCESS) {
+        const char* pErrorString = lua_tostring(e_script_to_lua(pScript), lua_gettop(e_script_to_lua(pScript)));
+        if (pErrorString != NULL) {
+            e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Error loading config \"%s\": %s", pName, pErrorString);
+        }
+
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog)
+{
+    e_result result;
+    e_file* pFile;
+
+    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_script_load(pScript, e_fs_file_stream(pFile), pFilePath, pLog);
+    e_fs_close(pFile, pAllocationCallbacks);
+
+    return result;
+}
+/* ==== END e_script.h ==== */
+
+
+
+/* ==== BEG e_config_file.c ==== */
 E_API e_result e_config_file_init(const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile)
 {
     lua_State* pLua;
