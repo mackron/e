@@ -306,6 +306,8 @@ static e_result e_platform_window_set_cursor_position(e_platform_window* pWindow
 static e_result e_platform_window_get_cursor_position(e_platform_window* pWindow, int* pCursorPosX, int* pCursorPosY);
 static e_result e_platform_window_show_cursor(e_platform_window* pWindow);
 static e_result e_platform_window_hide_cursor(e_platform_window* pWindow);
+static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cursorPosX, int cursorPosY);
+static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow);
 
 typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
@@ -587,6 +589,10 @@ struct e_platform_window
     HCURSOR hCurrentCursor;
     HCURSOR hOldCursor;
     e_bool32 isCursorHidden;
+    e_bool32 isCursorPinned;
+    e_bool32 ignoreNextMouseMoveEvent;
+    int pinnedCursorPosX;
+    int pinnedCursorPosY;
     e_uint16 utf16Hi;   /* The high surrogate pair in a UTF-16 surrogate pair. Used with WM_CHAR. */
 };
 
@@ -841,6 +847,30 @@ static e_result e_platform_window_hide_cursor(e_platform_window* pWindow)
     return E_SUCCESS;
 }
 
+static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    POINT pt;
+   
+    pWindow->isCursorPinned = E_TRUE;
+    pWindow->pinnedCursorPosX = cursorPosX;
+    pWindow->pinnedCursorPosY = cursorPosY;
+
+    pt.x = cursorPosX;
+    pt.y = cursorPosY;
+    ClientToScreen(pWindow->hWnd, &pt);
+
+    pWindow->ignoreNextMouseMoveEvent = E_TRUE;
+    SetCursorPos(pt.x, pt.y);
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow)
+{
+    pWindow->isCursorPinned = E_FALSE;
+    return E_SUCCESS;
+}
+
 
 static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -896,10 +926,42 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 
             case WM_MOUSEMOVE:
             {
-                e = e_window_event_init(E_EVENT_CURSOR_MOVE, pWindow->pOwnerWindow);
-                e.data.cursorMove.x = (short)LOWORD(lParam);
-                e.data.cursorMove.y = (short)HIWORD(lParam);
-                e_window_handle_event(pWindow->pOwnerWindow, &e);
+                if (pWindow->ignoreNextMouseMoveEvent) {
+                    pWindow->ignoreNextMouseMoveEvent = E_FALSE;
+                } else {
+                    /* If the cursor is pinned we report delta movements. */
+                    int cursorPosX;
+                    int cursorPosY;
+
+                    if (pWindow->isCursorPinned) {
+                        POINT pt;
+
+                        cursorPosX = (short)LOWORD(lParam) - pWindow->pinnedCursorPosX;
+                        cursorPosY = (short)HIWORD(lParam) - pWindow->pinnedCursorPosY;
+
+                        /* Move the cursor back to it's pinned location. */
+                        pt.x = pWindow->pinnedCursorPosX;
+                        pt.y = pWindow->pinnedCursorPosY;
+                        ClientToScreen(pWindow->hWnd, &pt);
+
+                        /*
+                        I thought SetCursorPos() was supposed to send a WM_MOUSEMOVE event. When trying to ignore the next event
+                        I get jerky mouse movement. Need to investigate this one. I was expecting the SetCursorPos() call to send
+                        WM_MOUSEMOVE to the reverse of the delta movement thereby essentially resetting it, but that doesn't
+                        seem to be happening.
+                        */
+                        /*pWindow->ignoreNextMouseMoveEvent = E_TRUE;*/
+                        SetCursorPos(pt.x, pt.y);
+                    } else {
+                        cursorPosX = (short)LOWORD(lParam);
+                        cursorPosY = (short)HIWORD(lParam);
+                    }
+
+                    e = e_window_event_init(E_EVENT_CURSOR_MOVE, pWindow->pOwnerWindow);
+                    e.data.cursorMove.x = (short)cursorPosX;
+                    e.data.cursorMove.y = (short)cursorPosY;
+                    e_window_handle_event(pWindow->pOwnerWindow, &e);
+                }
             } break;
 
             /* Mouse buttons. */
@@ -9450,6 +9512,24 @@ E_API e_result e_window_hide_cursor(e_window* pWindow)
 
     return e_platform_window_hide_cursor(pWindow->pPlatformWindow);
 }
+
+E_API e_result e_window_pin_cursor(e_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_pin_cursor(pWindow->pPlatformWindow, cursorPosX, cursorPosY);
+}
+
+E_API e_result e_window_unpin_cursor(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_unpin_cursor(pWindow->pPlatformWindow);
+}
 /* ==== END e_window.c ==== */
 
 
@@ -9502,7 +9582,6 @@ E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_
 {
     e_result result;
     e_input_alloc_layout layout;
-    size_t iCursor;
 
     E_UNUSED(pAllocationCallbacks);
 
@@ -9519,12 +9598,10 @@ E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_
 
     E_ZERO_MEMORY(pInput, layout.size);
 
-    for (iCursor = 0; iCursor < E_MAX_CURSORS; iCursor += 1) {
-        pInput->prevAbsoluteCursorPosX[iCursor]    = MAX_INT;
-        pInput->prevAbsoluteCursorPosY[iCursor]    = MAX_INT;
-        pInput->currentAbsoluteCursorPosX[iCursor] = MAX_INT;
-        pInput->currentAbsoluteCursorPosY[iCursor] = MAX_INT;
-    }
+    pInput->prevAbsoluteCursorPosX    = MAX_INT;
+    pInput->prevAbsoluteCursorPosY    = MAX_INT;
+    pInput->currentAbsoluteCursorPosX = MAX_INT;
+    pInput->currentAbsoluteCursorPosY = MAX_INT;
 
     return E_SUCCESS;
 }
@@ -9582,23 +9659,20 @@ E_API void e_input_uninit(e_input* pInput, const e_allocation_callbacks* pAlloca
 
 E_API e_result e_input_step(e_input* pInput)
 {
-    size_t iCursor;
-
     /* This function normalizes the input data so that the next frame can get accurate input data for things like cursor deltas and whether or not the cursor have moved. */
     if (pInput == NULL) {
         return E_INVALID_ARGS;
     }
 
-    for (iCursor = 0; iCursor < E_MAX_CURSORS; iCursor += 1) {
-        pInput->prevAbsoluteCursorPosX[iCursor] = pInput->currentAbsoluteCursorPosX[iCursor];
-        pInput->prevAbsoluteCursorPosY[iCursor] = pInput->currentAbsoluteCursorPosY[iCursor];
+    pInput->prevAbsoluteCursorPosX = pInput->currentAbsoluteCursorPosX;
+    pInput->prevAbsoluteCursorPosY = pInput->currentAbsoluteCursorPosY;
 
-        /* Set the previous mouse button states. */
-        memcpy(pInput->prevCursorButtonStates[iCursor], pInput->cursorButtonStates[iCursor], sizeof(pInput->cursorButtonStates[iCursor]));
+    /* Set the previous mouse button states. */
+    memcpy(pInput->prevCursorButtonStates, pInput->cursorButtonStates, sizeof(pInput->cursorButtonStates));
 
-        // Reset mouse wheel deltas.
-        pInput->cursorWheelDelta[iCursor] = 0;
-    }
+    /* Reset mouse wheel deltas. */
+    pInput->cursorWheelDelta = 0;
+
 
     /* Keyboard input needs to be reset. */
     
@@ -9613,23 +9687,31 @@ E_API e_result e_input_step(e_input* pInput)
     return E_SUCCESS;
 }
 
-E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY)
+E_API e_result e_input_add_cursor_delta_position(e_input* pInput, int deltaX, int deltaY)
 {
     if (pInput == NULL) {
         return E_INVALID_ARGS;
     }
 
-    if (cursorIndex >= E_MAX_CURSORS) {
-        return E_INVALID_ARGS;
-    }
-
-    pInput->currentAbsoluteCursorPosX[cursorIndex] = posX;
-    pInput->currentAbsoluteCursorPosY[cursorIndex] = posY;
+    pInput->currentAbsoluteCursorPosX += deltaX;
+    pInput->currentAbsoluteCursorPosY += deltaY;
 
     return E_SUCCESS;
 }
 
-E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int* pPosX, int* pPosY)
+E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, int posX, int posY)
+{
+    if (pInput == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pInput->currentAbsoluteCursorPosX = posX;
+    pInput->currentAbsoluteCursorPosY = posY;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, int* pPosX, int* pPosY)
 {
     if (pPosX != NULL) {
         *pPosX = 0;
@@ -9638,126 +9720,122 @@ E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cu
         *pPosY = 0;
     }
 
-    if (pInput == NULL || pPosX == NULL || pPosY == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL || pPosX == NULL || pPosY == NULL) {
         return E_INVALID_ARGS;
     }
 
-    *pPosX = pInput->currentAbsoluteCursorPosX[cursorIndex];
-    *pPosY = pInput->currentAbsoluteCursorPosY[cursorIndex];
+    *pPosX = pInput->currentAbsoluteCursorPosX;
+    *pPosY = pInput->currentAbsoluteCursorPosY;
 
     return E_SUCCESS;
 }
 
-E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int prevCursorPosX, int prevCursorPosY)
+E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, int prevCursorPosX, int prevCursorPosY)
 {
     if (pInput == NULL) {
         return E_INVALID_ARGS;
     }
 
-    if (cursorIndex >= E_MAX_CURSORS) {
-        return E_INVALID_ARGS;
-    }
-
-    pInput->prevAbsoluteCursorPosX[cursorIndex] = prevCursorPosX;
-    pInput->prevAbsoluteCursorPosY[cursorIndex] = prevCursorPosY;
+    pInput->prevAbsoluteCursorPosX = prevCursorPosX;
+    pInput->prevAbsoluteCursorPosY = prevCursorPosY;
 
     return E_SUCCESS;
 }
 
-E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex)
+E_API e_bool32 e_input_has_cursor_moved(e_input* pInput)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return E_FALSE;
     }
 
-    return pInput->prevAbsoluteCursorPosX[cursorIndex] != pInput->currentAbsoluteCursorPosX[cursorIndex] ||
-           pInput->prevAbsoluteCursorPosY[cursorIndex] != pInput->currentAbsoluteCursorPosY[cursorIndex];
+    return pInput->prevAbsoluteCursorPosX != pInput->currentAbsoluteCursorPosX ||
+           pInput->prevAbsoluteCursorPosY != pInput->currentAbsoluteCursorPosY;
 }
 
-E_API void e_input_get_cursor_move_delta(e_input* pInput, e_uint32 cursorIndex, int* pDeltaX, int* pDeltaY)
+E_API void e_input_get_cursor_move_delta(e_input* pInput, int* pDeltaX, int* pDeltaY)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return;
     }
 
     if (pDeltaX != NULL) {
-        *pDeltaX = pInput->currentAbsoluteCursorPosX[cursorIndex] - pInput->prevAbsoluteCursorPosX[cursorIndex];
+        *pDeltaX = pInput->currentAbsoluteCursorPosX - pInput->prevAbsoluteCursorPosX;
     }
     if (pDeltaY != NULL) {
-        *pDeltaY = pInput->currentAbsoluteCursorPosY[cursorIndex] - pInput->prevAbsoluteCursorPosY[cursorIndex];
+        *pDeltaY = pInput->currentAbsoluteCursorPosY - pInput->prevAbsoluteCursorPosY;
     }
 }
 
-E_API int e_input_get_cursor_move_delta_x(e_input* pInput, e_uint32 cursorIndex)
+E_API int e_input_get_cursor_move_delta_x(e_input* pInput)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return 0;
     }
 
-    return pInput->currentAbsoluteCursorPosX[cursorIndex] - pInput->prevAbsoluteCursorPosX[cursorIndex];
+    return pInput->currentAbsoluteCursorPosX - pInput->prevAbsoluteCursorPosX;
 }
 
-E_API int e_input_get_cursor_move_delta_y(e_input* pInput, e_uint32 cursorIndex)
+E_API int e_input_get_cursor_move_delta_y(e_input* pInput)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return 0;
     }
 
-    return pInput->currentAbsoluteCursorPosY[cursorIndex] - pInput->prevAbsoluteCursorPosY[cursorIndex];
+    return pInput->currentAbsoluteCursorPosY - pInput->prevAbsoluteCursorPosY;
 }
 
-E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex, int state)
+E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 buttonIndex, int state)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+    if (pInput == NULL || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
         return;
     }
 
-    pInput->cursorButtonStates[cursorIndex][buttonIndex] = state;
+    pInput->cursorButtonStates[buttonIndex] = state;
 }
 
-E_API int e_input_get_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+E_API int e_input_get_cursor_button_state(e_input* pInput, e_uint32 buttonIndex)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+    if (pInput == NULL || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
         return 0;
     }
 
-    return pInput->cursorButtonStates[cursorIndex][buttonIndex];
+    return pInput->cursorButtonStates[buttonIndex];
 }
 
-E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 buttonIndex)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+    if (pInput == NULL || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
         return E_FALSE;
     }
 
-    return pInput->cursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_DOWN && pInput->prevCursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_UP;
+    return pInput->cursorButtonStates[buttonIndex] == E_BUTTON_STATE_DOWN && pInput->prevCursorButtonStates[buttonIndex] == E_BUTTON_STATE_UP;
 }
 
-E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex)
+E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 buttonIndex)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
+    if (pInput == NULL || buttonIndex >= E_MAX_CURSOR_BUTTONS) {
         return E_FALSE;
     }
 
-    return pInput->cursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_UP && pInput->prevCursorButtonStates[cursorIndex][buttonIndex] == E_BUTTON_STATE_DOWN;
+    return pInput->cursorButtonStates[buttonIndex] == E_BUTTON_STATE_UP && pInput->prevCursorButtonStates[buttonIndex] == E_BUTTON_STATE_DOWN;
 }
 
-E_API void e_input_set_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex, int delta)
+E_API void e_input_set_cursor_wheel_delta(e_input* pInput, int delta)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return;
     }
 
-    pInput->cursorWheelDelta[cursorIndex] = delta;
+    pInput->cursorWheelDelta = delta;
 }
 
-E_API int e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex)
+E_API int e_input_get_cursor_wheel_delta(e_input* pInput)
 {
-    if (pInput == NULL || cursorIndex >= E_MAX_CURSORS) {
+    if (pInput == NULL) {
         return 0;
     }
 
-    return pInput->cursorWheelDelta[cursorIndex];
+    return pInput->cursorWheelDelta;
 }
 
 E_API void e_input_set_key_down(e_input* pInput, e_uint32 key)
@@ -12609,22 +12687,26 @@ E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event
     {
         case E_EVENT_CURSOR_MOVE:
         {
-            e_input_set_absolute_cursor_position(pClient->pInput, 0, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+            if (pClient->isCursorPinned) {
+                e_input_add_cursor_delta_position(pClient->pInput, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+            } else {
+                e_input_set_absolute_cursor_position(pClient->pInput, pEvent->data.cursorMove.x, pEvent->data.cursorMove.y);
+            }
         } break;
 
         case E_EVENT_CURSOR_BUTTON_DOWN:
         {
-            e_input_set_cursor_button_state(pClient->pInput, 0, pEvent->data.cursorButtonDown.button, E_BUTTON_STATE_DOWN);
+            e_input_set_cursor_button_state(pClient->pInput, pEvent->data.cursorButtonDown.button, E_BUTTON_STATE_DOWN);
         } break;
 
         case E_EVENT_CURSOR_BUTTON_UP:
         {
-            e_input_set_cursor_button_state(pClient->pInput, 0, pEvent->data.cursorButtonUp.button, E_BUTTON_STATE_UP);
+            e_input_set_cursor_button_state(pClient->pInput, pEvent->data.cursorButtonUp.button, E_BUTTON_STATE_UP);
         } break;
 
         case E_EVENT_CURSOR_WHEEL:
         {
-            e_input_set_cursor_wheel_delta(pClient->pInput, 0, pEvent->data.cursorWheel.delta);
+            e_input_set_cursor_wheel_delta(pClient->pInput, pEvent->data.cursorWheel.delta);
         } break;
 
         case E_EVENT_KEY_DOWN:
@@ -12695,17 +12777,10 @@ E_API e_result e_client_step(e_client* pClient, double dt)
 
     /* After stepping the input, if we have a pinned mouse cursor we'll want to position it back to it's location. */
     if (pClient->isCursorPinned) {
-        /*
-        When the mouse is pinned we need to update the previous and current cursor positions to match the pinned
-        position or else the cursor offset will just reverse itself each frame.
-        */
-        e_input_set_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
-        e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
-
-        //printf("Mouse Pinned: %d %d\n", pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
-        e_window_set_cursor_position(pClient->pWindow, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+        /* When the cursor is pinned make sure the absolute position is reset back to 0. */
+        e_input_set_absolute_cursor_position(pClient->pInput, 0, 0);
+        e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, 0);
     }
-
 
     if (result != E_SUCCESS) {
         return result;
@@ -12721,12 +12796,12 @@ E_API e_result e_client_step_input(e_client* pClient)
 
 E_API e_bool32 e_client_has_cursor_moved(e_client* pClient)
 {
-    return e_input_has_cursor_moved(e_client_get_input(pClient), 0);
+    return e_input_has_cursor_moved(e_client_get_input(pClient));
 }
 
 E_API e_result e_client_get_absolute_cursor_position(e_client* pClient, int* pPosX, int* pPosY)
 {
-    return e_input_get_absolute_cursor_position(e_client_get_input(pClient), 0, pPosX, pPosY);
+    return e_input_get_absolute_cursor_position(e_client_get_input(pClient), pPosX, pPosY);
 }
 
 E_API e_result e_client_capture_cursor(e_client* pClient)
@@ -12754,13 +12829,17 @@ E_API e_result e_client_pin_cursor(e_client* pClient, int pinnedCursorPosX, int 
     }
 
     pClient->isCursorPinned = E_TRUE;
-    pClient->pinnedCursorPosX = pinnedCursorPosX;
-    pClient->pinnedCursorPosY = pinnedCursorPosY;
 
-    /* The position of the cursor needs to be updated. */
-    e_input_set_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
-    e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
-    e_window_set_cursor_position(pClient->pWindow, pClient->pinnedCursorPosX, pClient->pinnedCursorPosY);
+    /*
+    When the cursor is pinned the window system will report delta positions. We need to pretend that the previous
+    mouse position is at coordinates 0,0 so that calculating the "relative" mouse positions work properly based
+    on deltas.
+    */
+    e_input_set_absolute_cursor_position(pClient->pInput, 0, 0);
+    e_input_set_prev_absolute_cursor_position(pClient->pInput, 0, 0);
+
+    /* Now pin the cursor via the window system. From here on our the move position will be reported using deltas. */
+    e_window_pin_cursor(pClient->pWindow, pinnedCursorPosX, pinnedCursorPosY);
 
     return E_SUCCESS;
 }
@@ -12772,6 +12851,7 @@ E_API e_result e_client_unpin_cursor(e_client* pClient)
     }
 
     pClient->isCursorPinned = E_FALSE;
+    e_window_unpin_cursor(pClient->pWindow);
 
     return E_SUCCESS;
 }

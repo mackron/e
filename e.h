@@ -1415,6 +1415,8 @@ E_API e_result e_window_set_cursor_position(e_window* pWindow, int cursorPosX, i
 E_API e_result e_window_get_cursor_position(e_window* pWindow, int* pCursorPosX, int* pCursorPosY);
 E_API e_result e_window_show_cursor(e_window* pWindow);
 E_API e_result e_window_hide_cursor(e_window* pWindow);
+E_API e_result e_window_pin_cursor(e_window* pWindow, int cursorPosX, int cursorPosY);
+E_API e_result e_window_unpin_cursor(e_window* pWindow);
 /* ==== END e_window.h ==== */
 
 
@@ -1805,10 +1807,6 @@ E_INLINE e_quatf e_quatf_lookat(e_vec3f eye, e_vec3f target, e_vec3f up)
 
 
 /* === BEG e_input.h === */
-#ifndef E_MAX_CURSORS
-#define E_MAX_CURSORS 4
-#endif
-
 #ifndef E_MAX_CURSOR_BUTTONS
 #define E_MAX_CURSOR_BUTTONS    8
 #endif
@@ -1845,13 +1843,13 @@ typedef struct
 
 struct e_input
 {
-    int prevAbsoluteCursorPosX[E_MAX_CURSORS];
-    int prevAbsoluteCursorPosY[E_MAX_CURSORS];
-    int currentAbsoluteCursorPosX[E_MAX_CURSORS];
-    int currentAbsoluteCursorPosY[E_MAX_CURSORS];
-    int cursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
-    int prevCursorButtonStates[E_MAX_CURSORS][E_MAX_CURSOR_BUTTONS];
-    int cursorWheelDelta[E_MAX_CURSORS];
+    int prevAbsoluteCursorPosX;
+    int prevAbsoluteCursorPosY;
+    int currentAbsoluteCursorPosX;
+    int currentAbsoluteCursorPosY;
+    int cursorButtonStates[E_MAX_CURSOR_BUTTONS];
+    int prevCursorButtonStates[E_MAX_CURSOR_BUTTONS];
+    int cursorWheelDelta;
     e_uint32 keysDown[E_MAX_KEYS_DOWN];
     e_uint32 keysDownCount;
     e_uint32 prevKeysDown[E_MAX_KEYS_DOWN];
@@ -1869,19 +1867,20 @@ E_API e_result e_input_init_preallocated(const e_input_config* pConfig, const e_
 E_API e_result e_input_init(const e_input_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_input** ppInput);
 E_API void e_input_uninit(e_input* pInput, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_input_step(e_input* pInput);   /* This should be called at the *end* of your frame. It will clear the state of the input system for things like mouse wheel deltas. */
-E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int posX, int posY);
-E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int* pPosX, int* pPosY);
-E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, e_uint32 cursorIndex, int prevCursorPosX, int prevCursorPosY);
-E_API e_bool32 e_input_has_cursor_moved(e_input* pInput, e_uint32 cursorIndex);
-E_API void e_input_get_cursor_move_delta(e_input* pInput, e_uint32 cursorIndex, int* pDeltaX, int* pDeltaY);
-E_API int  e_input_get_cursor_move_delta_x(e_input* pInput, e_uint32 cursorIndex);
-E_API int  e_input_get_cursor_move_delta_y(e_input* pInput, e_uint32 cursorIndex);
-E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex, int state);
-E_API int  e_input_get_cursor_button_state(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
-E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
-E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 cursorIndex, e_uint32 buttonIndex);
-E_API void e_input_set_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex, int delta);
-E_API int  e_input_get_cursor_wheel_delta(e_input* pInput, e_uint32 cursorIndex);
+E_API e_result e_input_add_cursor_delta_position(e_input* pInput, int posX, int posY);
+E_API e_result e_input_set_absolute_cursor_position(e_input* pInput, int deltaX, int deltaY);
+E_API e_result e_input_get_absolute_cursor_position(e_input* pInput, int* pPosX, int* pPosY);
+E_API e_result e_input_set_prev_absolute_cursor_position(e_input* pInput, int prevCursorPosX, int prevCursorPosY);
+E_API e_bool32 e_input_has_cursor_moved(e_input* pInput);
+E_API void e_input_get_cursor_move_delta(e_input* pInput, int* pDeltaX, int* pDeltaY);
+E_API int  e_input_get_cursor_move_delta_x(e_input* pInput);
+E_API int  e_input_get_cursor_move_delta_y(e_input* pInput);
+E_API void e_input_set_cursor_button_state(e_input* pInput, e_uint32 buttonIndex, int state);
+E_API int  e_input_get_cursor_button_state(e_input* pInput, e_uint32 buttonIndex);
+E_API e_bool32 e_input_was_cursor_button_pressed(e_input* pInput, e_uint32 buttonIndex);
+E_API e_bool32 e_input_was_cursor_button_released(e_input* pInput, e_uint32 buttonIndex);
+E_API void e_input_set_cursor_wheel_delta(e_input* pInput, int delta);
+E_API int  e_input_get_cursor_wheel_delta(e_input* pInput);
 E_API void e_input_set_key_down(e_input* pInput, e_uint32 key);
 E_API void e_input_set_key_up(e_input* pInput, e_uint32 key);
 E_API e_bool32 e_input_was_key_pressed(e_input* pInput, e_uint32 key);
@@ -2157,8 +2156,6 @@ struct e_client
     e_graphics_surface* pGraphicsSurface;
     e_input* pInput;
     e_bool32 isCursorPinned;
-    int pinnedCursorPosX;
-    int pinnedCursorPosY;
     const char* pConfigSection;
     e_allocation_callbacks allocationCallbacks;
     e_bool32 freeOnUninit;
