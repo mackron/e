@@ -5484,6 +5484,13 @@ E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void*
     return E_SUCCESS;
 }
 
+
+static int e_qsort_strcmp(void* pUserData, const void* pA, const void* pB)
+{
+    (void)pUserData;
+    return c89str_strcmp(*(const char**)pA, *(const char**)pB);
+}
+
 E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, size_t* pFileCount)
 {
     e_fs_iterator* pFileIterator;
@@ -5562,6 +5569,11 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
         dataSize += nameDataSize;
     }
 
+    if (pData == NULL) {
+        /* There are no files in the directory. */
+        return E_SUCCESS;
+    }
+
     /*
     At this point we will have gathered all of the file names into a single buffer. Now we need to
     do a post-processing step to set up the pointers.
@@ -5583,10 +5595,27 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
     for (iFile = 0; iFile < fileCount; iFile += 1) {
         size_t fileNameLen = c89str_strlen(pRunningFileName);
 
+        E_ASSERT(ppFileNames != NULL);
         ppFileNames[iFile] = pRunningFileName;
         pFileNameLengths[iFile] = fileNameLen;
 
         pRunningFileName += fileNameLen + 1;    /* +1 to get past null terminator. */
+    }
+
+    /* Use e_qsort() to sort by name. */
+    e_qsort_s(ppFileNames, fileCount, sizeof(char*), e_qsort_strcmp, NULL);
+
+    /* Remove any duplicates. */
+    for (iFile = 0; iFile < fileCount-1; ) {
+        if (c89str_strcmp(ppFileNames[iFile], ppFileNames[iFile+1]) == 0) {
+            /* Duplicate. */
+            E_MOVE_MEMORY(ppFileNames      + iFile, ppFileNames      + iFile + 1, (fileCount - iFile - 1) * sizeof(char*));
+            E_MOVE_MEMORY(pFileNameLengths + iFile, pFileNameLengths + iFile + 1, (fileCount - iFile - 1) * sizeof(size_t));
+
+            fileCount -= 1;
+        } else {
+            iFile += 1;
+        }
     }
 
     if (pppFileNames != NULL) {

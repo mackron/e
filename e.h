@@ -862,6 +862,9 @@ E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void*
 Helper function for gathering the file names in a directory. Returned names will be relative to the
 specified directory. Free pppFileNames with e_free(). Do not free ppFileNameLengths. Returned
 strings will be null terminated.
+
+String will be sorted by name. Duplicates will be removed (duplicates will be possible when multiple
+base paths are specified).
 */
 E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, size_t* pFileCount);
 /* ==== END e_fs.h ==== */
