@@ -8569,7 +8569,11 @@ static e_result e_load_image_stb(void* pUserData, e_stream* pStream, const e_all
     *pSizeX = (e_uint32)x;
     *pSizeY = (e_uint32)y;
 
-    if (n == 3) {
+    if (n == 1) {
+        *pFormat = E_FORMAT_R8_UNORM;
+    } else if (n == 2) {
+        *pFormat = E_FORMAT_R8G8_UNORM;
+    } else if (n == 3) {
         *pFormat = E_FORMAT_R8G8B8_UNORM;
     } else if (n == 4) {
         *pFormat = E_FORMAT_R8G8B8A8_UNORM;

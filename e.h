@@ -256,9 +256,11 @@ typedef enum
     E_FORMAT_R32G32_FLOAT,
     E_FORMAT_R32G32B32_FLOAT,
     E_FORMAT_R32G32B32A32_FLOAT,
+    E_FORMAT_R8_UNORM,
+    E_FORMAT_R8G8_UNORM,
     E_FORMAT_R8G8B8_UNORM,
     E_FORMAT_R8G8B8A8_UNORM,
-    E_FORMAT_D24_UNORM_S8_UINT,
+    E_FORMAT_D24_UNORM_S8_UINT
 } e_format;
 
 
@@ -1546,7 +1548,7 @@ E_INLINE e_vec4f e_mat4f_mul_vec4(e_mat4f m, e_vec4f v)
 }
 
 E_INLINE e_mat4f e_mat4f_translate(e_vec4f translation) { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, 1, 0, 0), e_vec4f_4f(0, 0, 1, 0), e_vec4f_4f(translation.x, translation.y, translation.z, 1)); }
-E_INLINE e_mat4f mat4_scale(e_vec4f scale)              { return e_mat4f_init(e_vec4f_4f(scale.x, 0, 0, 0), e_vec4f_4f(0, scale.y, 0, 0), e_vec4f_4f(0, 0, scale.z, 0), e_vec4f_4f(0, 0, 0, scale.w)); }
+E_INLINE e_mat4f e_mat4f_scale(e_vec4f scale)           { return e_mat4f_init(e_vec4f_4f(scale.x, 0, 0, 0), e_vec4f_4f(0, scale.y, 0, 0), e_vec4f_4f(0, 0, scale.z, 0), e_vec4f_4f(0, 0, 0, scale.w)); }
 
 E_INLINE e_mat4f e_mat4f_rotate(float angleInRadians, e_vec3f axis)
 {
