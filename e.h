@@ -1422,6 +1422,7 @@ E_API e_result e_window_show_cursor(e_window* pWindow);
 E_API e_result e_window_hide_cursor(e_window* pWindow);
 E_API e_result e_window_pin_cursor(e_window* pWindow, int cursorPosX, int cursorPosY);
 E_API e_result e_window_unpin_cursor(e_window* pWindow);
+E_API e_result e_window_post_close_event(e_window* pWindow);
 /* ==== END e_window.h ==== */
 
 
@@ -2177,6 +2178,7 @@ E_API e_result e_client_on_window_resize(e_client* pClient, e_uint32 sizeX, e_ui
 E_API e_bool32 e_client_get_window_size(e_client* pClient, e_uint32* pSizeX, e_uint32* pSizeY);     /* Returns true if the window has been resized since the last step. pSizeX and pSizeY will always be filled with the correct window size, even when false has returned. */
 E_API e_input* e_client_get_input(e_client* pClient);
 E_API e_result e_client_default_event_handler(e_client* pClient, e_event* pEvent);           /* You will usually want to call this in response to all events from the client. If you don't, you'll need to implement certain functionality yourself. See the implementation for details. */
+E_API e_result e_client_post_close_event(e_client* pClient);                                 /* Posts a close event to the client. */
 E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event* pEvent);
 E_API e_result e_client_step(e_client* pClient, double dt);
 E_API e_result e_client_step_input(e_client* pClient);

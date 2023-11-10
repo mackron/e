@@ -308,6 +308,7 @@ static e_result e_platform_window_show_cursor(e_platform_window* pWindow);
 static e_result e_platform_window_hide_cursor(e_platform_window* pWindow);
 static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cursorPosX, int cursorPosY);
 static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow);
+static e_result e_platform_window_post_close_event(e_platform_window* pWindow);
 
 typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
@@ -868,6 +869,12 @@ static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cur
 static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow)
 {
     pWindow->isCursorPinned = E_FALSE;
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_post_close_event(e_platform_window* pWindow)
+{
+    PostMessageW(pWindow->hWnd, WM_CLOSE, 0, 0);
     return E_SUCCESS;
 }
 
@@ -9563,6 +9570,15 @@ E_API e_result e_window_unpin_cursor(e_window* pWindow)
 
     return e_platform_window_unpin_cursor(pWindow->pPlatformWindow);
 }
+
+E_API e_result e_window_post_close_event(e_window* pWindow)
+{
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_post_close_event(pWindow->pPlatformWindow);
+}
 /* ==== END e_window.c ==== */
 
 
@@ -12708,6 +12724,11 @@ E_API e_result e_client_default_event_handler(e_client* pClient, e_event* pEvent
     }
 
     return E_SUCCESS;
+}
+
+E_API e_result e_client_post_close_event(e_client* pClient)
+{
+    return e_window_post_close_event(e_client_get_window(pClient));
 }
 
 E_API e_result e_client_update_input_from_event(e_client* pClient, const e_event* pEvent)
