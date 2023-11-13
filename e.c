@@ -87,17 +87,17 @@
 #define CGLTF_IMPLEMENTATION
 #include "external/cgltf/cgltf.h"
 
-#ifndef E_NO_STB_IMAGE_IMPLEMENTATION
 #ifndef E_NO_STB_IMAGE
+#ifndef E_NO_STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
-#include "external/stb/stb_image.h"
 #endif
+#include "external/stb/stb_image.h"
 #endif
 
 #ifndef E_NO_STB_TRUETYPE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "external/stb/stb_truetype.h"
 #endif
+#include "external/stb/stb_truetype.h"
 
 #define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
 #define E_DEFAULT_RESOLUTION_X      1280
