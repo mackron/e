@@ -94,6 +94,11 @@
 #include "external/stb/stb_image.h"
 #endif
 
+#ifndef E_NO_STB_RECT_PACK_IMPLEMENTATION
+#define STB_RECT_PACK_IMPLEMENTATION
+#endif
+#include "external/stb/stb_rect_pack.h"
+
 #ifndef E_NO_STB_TRUETYPE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
 #endif
