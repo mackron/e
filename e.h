@@ -264,6 +264,23 @@ typedef enum
 } e_format;
 
 
+typedef struct
+{
+    int left;
+    int top;
+    int right;
+    int bottom;
+} e_recti;
+
+typedef struct
+{
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} e_color;
+
+
 
 E_API const char* e_result_description(e_result result);
 
@@ -1072,6 +1089,102 @@ E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphInd
 
 
 
+/* ==== BEG e_ui.h ==== */
+typedef struct e_ui e_ui;
+
+typedef enum
+{
+    E_UI_EVENT_NONE,
+    E_UI_EVENT_GET_STYLE
+} e_ui_event_type;
+
+typedef enum
+{
+    /* Child Direction. This controls how children will be laid out. */
+    E_UI_LAYOUT_DIRECTION_TOP_TO_BOTTOM = 0x00000001,
+    E_UI_LAYOUT_DIRECTION_BOTTOM_TO_TOP = 0x00000002,
+    E_UI_LAYOUT_DIRECTION_LEFT_TO_RIGHT = 0x00000004,
+    E_UI_LAYOUT_DIRECTION_RIGHT_TO_LEFT = 0x00000008,
+    E_UI_LAYOUT_DIRECTION_HORIZONTAL    = E_UI_LAYOUT_DIRECTION_LEFT_TO_RIGHT,
+    E_UI_LAYOUT_DIRECTION_VERTICAL      = E_UI_LAYOUT_DIRECTION_TOP_TO_BOTTOM,
+    E_UI_LAYOUT_DIRECTION_DEFAULT       = E_UI_LAYOUT_DIRECTION_TOP_TO_BOTTOM,
+
+    /* Child Alignment. */
+    E_UI_LAYOUT_ALIGNMENT_TOP           = 0x00000010,
+    E_UI_LAYOUT_ALIGNMENT_BOTTOM        = 0x00000020,
+    E_UI_LAYOUT_ALIGNMENT_LEFT          = 0x00000040,
+    E_UI_LAYOUT_ALIGNMENT_RIGHT         = 0x00000080,
+    E_UI_LAYOUT_ALIGNMENT_CENTER_V      = 0x00000100,
+    E_UI_LAYOUT_ALIGNMENT_CENTER_H      = 0x00000200,
+    E_UI_LAYOUT_ALIGNMENT_DEFAULT       = E_UI_LAYOUT_ALIGNMENT_TOP | E_UI_LAYOUT_ALIGNMENT_LEFT,
+
+    /* Child Wrapping. */
+    E_UI_LAYOUT_WRAP_MODE_NONE          = 0x00000400,
+    E_UI_LAYOUT_WRAP_MODE_WRAP          = 0x00000800,
+    E_UI_LAYOUT_WRAP_MODE_DEFAULT       = E_UI_LAYOUT_WRAP_MODE_NONE,
+
+    /* Self Sizing. */
+    E_UI_LAYOUT_SIZING_MODE_FIT_CONTENT = 0x00001000,   /* Fit to the size of the content. */
+    E_UI_LAYOUT_SIZING_MODE_FILL        = 0x00002000,   /* Fill any remaining space. */
+    E_UI_LAYOUT_SIZING_MODE_RATIO       = 0x00004000,
+    E_UI_LAYOUT_SIZING_MODE_FIXED       = 0x00008000,
+    E_UI_LAYOUT_SIZING_MODE_DEFAULT     = E_UI_LAYOUT_SIZING_MODE_FIT_CONTENT,
+
+    /* Self Positioning. */
+    E_UI_LAYOUT_POSITIONING_AUTO        = 0x00010000,   /* The control is positioned based on layout rules. */
+    E_UI_LAYOUT_POSITIONING_FREE        = 0x00020000,   /* The control is positioned freely. */
+    E_UI_LAYOUT_POSITIONING_DEFAULT     = E_UI_LAYOUT_POSITIONING_AUTO,
+
+    /* Default */
+    E_UI_LAYOUT_DEFAULT                 = E_UI_LAYOUT_DIRECTION_DEFAULT | E_UI_LAYOUT_ALIGNMENT_DEFAULT | E_UI_LAYOUT_WRAP_MODE_DEFAULT | E_UI_LAYOUT_SIZING_MODE_DEFAULT | E_UI_LAYOUT_POSITIONING_DEFAULT
+} e_ui_layout_flags;
+
+typedef struct
+{
+    e_ui_layout_flags layoutFlags;
+    int spacing;    /* The spacing between children. */
+    e_color bgColor;
+    e_color fgColor;
+    e_color borderColor;
+    e_recti borderSize;
+    e_recti padding;
+    e_recti margin;
+} e_ui_style;
+
+typedef struct
+{
+    e_ui* pUI;
+    e_ui_event_type type;
+    union
+    {
+        struct
+        {
+            e_ui_style style;
+        } getStyle;
+    } data;
+} e_ui_event;
+
+typedef e_result (* e_ui_callback)(e_ui_event* pEvent);
+
+struct e_ui
+{
+    e_ui_callback callback;
+    void* pUserData;
+    e_ui* pParent;
+    e_ui* pFirstChild;
+    e_ui* pLastChild;
+    e_ui* pPrevSibling;
+    e_ui* pNextSibling;
+};
+
+E_API e_result e_ui_init(e_ui* pUI, e_ui_callback callback, void* pUserData);
+E_API void e_ui_uninit(e_ui* pUI);
+E_API void e_ui_invalidate(e_ui* pUI);  /* Invalidates the UI and all of its children. This tells the UI system that the layout has changed and that the control needs to be redrawn. Can be called once at a base level control. */
+
+/* ==== END e_ui.h ==== */
+
+
+
 /* ==== BEG e_engine.h ==== */
 typedef enum
 {
@@ -1284,6 +1397,7 @@ typedef struct e_window_event  e_window_event;
 typedef struct e_window_vtable e_window_vtable;
 typedef struct e_window_config e_window_config;
 typedef struct e_window        e_window;
+typedef struct e_event         e_event;
 
 struct e_event
 {
