@@ -879,13 +879,14 @@ E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void*
 
 /*
 Helper function for gathering the file names in a directory. Returned names will be relative to the
-specified directory. Free pppFileNames with e_free(). Do not free ppFileNameLengths. Returned
-strings will be null terminated.
+specified directory. Free pppFileNames with e_free(). Do not free ppFileNameLengths or ppFileInfos.
 
-String will be sorted by name. Duplicates will be removed (duplicates will be possible when multiple
+Returned strings will be null terminated.
+
+Strings will be sorted by name. Duplicates will be removed (duplicates will be possible when multiple
 base paths are specified).
 */
-E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, size_t* pFileCount);
+E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, e_file_info** ppFileInfos, size_t* pFileCount);
 /* ==== END e_fs.h ==== */
 
 
@@ -1090,12 +1091,24 @@ E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphInd
 
 
 /* ==== BEG e_ui.h ==== */
-typedef struct e_ui e_ui;
+typedef struct e_ui          e_ui;
+typedef struct e_ui_renderer e_ui_renderer;
 
 typedef enum
 {
     E_UI_EVENT_NONE,
-    E_UI_EVENT_GET_STYLE
+
+    /* Data Retrieval. */
+    E_UI_EVENT_GET_STYLE,
+    E_UI_EVENT_GET_POSITION,
+    E_UI_EVENT_GET_SIZE,
+
+    /* Operations. */
+    E_UI_EVENT_UPDATE,  /* Update the UI. */
+    E_UI_EVENT_RENDER,  /* Render the UI. */
+
+    /* User Input. */
+    E_UI_EVENT_MOUSE_DOWN
 } e_ui_event_type;
 
 typedef enum
@@ -1126,8 +1139,8 @@ typedef enum
     /* Self Sizing. */
     E_UI_LAYOUT_SIZING_MODE_FIT_CONTENT = 0x00001000,   /* Fit to the size of the content. */
     E_UI_LAYOUT_SIZING_MODE_FILL        = 0x00002000,   /* Fill any remaining space. */
-    E_UI_LAYOUT_SIZING_MODE_RATIO       = 0x00004000,
-    E_UI_LAYOUT_SIZING_MODE_FIXED       = 0x00008000,
+    E_UI_LAYOUT_SIZING_MODE_RATIO       = 0x00004000,   /* Fill a percentage of the parent. */
+    E_UI_LAYOUT_SIZING_MODE_FIXED       = 0x00008000,   /* Fixed sized. */
     E_UI_LAYOUT_SIZING_MODE_DEFAULT     = E_UI_LAYOUT_SIZING_MODE_FIT_CONTENT,
 
     /* Self Positioning. */
@@ -1161,10 +1174,36 @@ typedef struct
         {
             e_ui_style style;
         } getStyle;
+        struct
+        {
+            int posX;
+            int posY;
+        } getPosition;
+        struct
+        {
+            int sizeX;
+            int sizeY;
+        } getSize;
+
+        struct
+        {
+            double dt;
+        } update;
+        struct
+        {
+            void* pRenderState;
+        } render;
     } data;
 } e_ui_event;
 
 typedef e_result (* e_ui_callback)(e_ui_event* pEvent);
+
+struct e_ui_renderer
+{
+    void* pUserData;
+    e_result (* rect)(void* pUserData, const e_recti rect, const e_color color);
+    e_result (* text)(void* pUserData, const char* pText, const e_recti rect, const e_color color);
+};
 
 struct e_ui
 {
@@ -1175,12 +1214,19 @@ struct e_ui
     e_ui* pLastChild;
     e_ui* pPrevSibling;
     e_ui* pNextSibling;
+
+    /* The evaluated position and size. These are used for layout. Will be recalculated when a control is invalidated. */
+    int evaluatedPosX;
+    int evaluatedPosY;
+    int evaluatedSizeX;
+    int evaluatedSizeY;
 };
 
 E_API e_result e_ui_init(e_ui* pUI, e_ui_callback callback, void* pUserData);
 E_API void e_ui_uninit(e_ui* pUI);
-E_API void e_ui_invalidate(e_ui* pUI);  /* Invalidates the UI and all of its children. This tells the UI system that the layout has changed and that the control needs to be redrawn. Can be called once at a base level control. */
-
+E_API void e_ui_invalidate(e_ui* pUI);                          /* Invalidates the UI and all of its children. This tells the UI system that the layout has changed and that the control needs to be redrawn. Can be called once at a base level control. */
+E_API void e_ui_update(e_ui* pUI, double dt);                   /* This will step through the UI and update the layout and process any animations. */
+E_API void e_ui_render(e_ui* pUI, e_ui_renderer* pRenderer);    /* This will render the UI. You should call this once on a top level UI. */
 /* ==== END e_ui.h ==== */
 
 
@@ -1215,6 +1261,7 @@ struct e_engine_config
     e_log* pLog;
     e_fs_vtable* pFSVTable;
     void* pFSVTableUserData;
+    const char* pConfigFilePath;
 };
 
 E_API e_engine_config e_engine_config_init(int argc, const char** argv, unsigned int flags, e_engine_vtable* pVTable, void* pVTableUserData);

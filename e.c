@@ -104,7 +104,10 @@
 #endif
 #include "external/stb/stb_truetype.h"
 
+#ifndef E_DEFAULT_CONFIF_FILE_PATH
 #define E_DEFAULT_CONFIG_FILE_PATH  "config.lua"
+#endif
+
 #define E_DEFAULT_RESOLUTION_X      1280
 #define E_DEFAULT_RESOLUTION_Y      720
 
@@ -5501,17 +5504,12 @@ E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void*
 }
 
 
-static int e_qsort_strcmp(void* pUserData, const void* pA, const void* pB)
-{
-    (void)pUserData;
-    return c89str_strcmp(*(const char**)pA, *(const char**)pB);
-}
-
-E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, size_t* pFileCount)
+E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, e_file_info** ppFileInfos, size_t* pFileCount)
 {
     e_fs_iterator* pFileIterator;
     char** ppFileNames;
     size_t* pFileNameLengths;
+    e_file_info* pFileInfos;
     size_t fileCount;
     char* pData = NULL;     /* We do everything with a single allocation (resized with realloc()). This is a pointer to that allocation. */
     size_t dataSize = 0;    /* The total size of the data buffer. */
@@ -5538,12 +5536,22 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
     /* We need to loop over each file in the directory and add it to the list. */
     ppFileNames      = NULL;
     pFileNameLengths = NULL;
+    pFileInfos       = NULL;
     fileCount        = 0;
+
+    /*
+    We allocate a single buffer to store all of the info. It's structured such that the file paths are at the front, then an array of
+    char* pointers, then an array of size_t lengths, and then an array of e_file_info structures.
+
+    The buffer is structure like the following:
+
+        [char* pointers] [size_t lengths] [e_file_info] [file names]
+    */
 
     for (pFileIterator = e_fs_first(pFS, pDirectoryPath, directoryPathLen, pAllocationCallbacks); pFileIterator != NULL; pFileIterator = e_fs_next(pFileIterator, pAllocationCallbacks)) {
         const char* pName;
         size_t nameLen;
-        size_t nameDataSize;
+        size_t nameAndInfoDataSize;
 
         /* We need to skip over "." and ".." directories. */
         if (c89str_strcmp(pFileIterator->pName, ".") == 0 || c89str_strcmp(pFileIterator->pName, "..") == 0) {
@@ -5553,18 +5561,15 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
         pName   = pFileIterator->pName;
         nameLen = pFileIterator->nameLen;
         
-        /*
-        Resize the buffer if necessary. We need room for the name, it's null terminator, and it's length (the length
-        is stored at the end of the buffer, and is processed as a post-processing step).
-        */
-        nameDataSize = sizeof(char*) + nameLen + 1 + sizeof(size_t);
-        if (dataSize + nameDataSize > dataCap) {
+        /* Resize the buffer if necessary. We need room for the name, it's null terminator, it's length, and the file info. */
+        nameAndInfoDataSize = sizeof(char*) + nameLen + 1 + sizeof(size_t) + sizeof(e_file_info);
+        if (pData == NULL || dataSize + nameAndInfoDataSize > dataCap) {
             size_t newDataCap = dataCap * 2;
             char* pNewData;
 
             newDataCap = dataCap * 2;
-            if (newDataCap < dataSize + nameDataSize) {
-                newDataCap = dataSize + nameDataSize;
+            if (newDataCap < dataSize + nameAndInfoDataSize) {
+                newDataCap = dataSize + nameAndInfoDataSize;
             }
 
             pNewData = (char*)e_realloc(pData, newDataCap, pAllocationCallbacks);
@@ -5577,12 +5582,56 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
             dataCap = newDataCap;
         }
 
+        /*
+        The actual file name content is stored at the end of the buffer. The first thing to do is move that down to the end so we
+        don't overwrite anything.
+        */
+        E_MOVE_MEMORY(
+            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))),
+            pData + ((fileCount  ) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))),
+            totalFileNameLength + (fileCount * sizeof(char))
+        );
+
         /* We need to copy the name into the buffer. We can use totalFileNameLength with fileCount to calculate the insertion position. */
-        c89str_strcpy(pData + totalFileNameLength + (fileCount * sizeof(char)), pName);
+        c89str_strcpy(pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))) + totalFileNameLength + (fileCount * sizeof(char)), pName);
+
+
+        /*
+        With the name copied over we can now insert the file info. This is a similar process - we need to move the
+        existing items down, and then insert the new one. 
+        */
+        E_MOVE_MEMORY(
+            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t))),
+            pData + ((fileCount  ) * (sizeof(char*) + sizeof(size_t))),
+            fileCount * sizeof(e_file_info)
+        );
+
+        /* We need to insert the file info. */
+        E_COPY_MEMORY(
+            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t))) + (fileCount * sizeof(e_file_info)),
+            &pFileIterator->info,
+            sizeof(e_file_info)
+        );
+
+
+        /* Now the same for the size array. */
+        E_MOVE_MEMORY(
+            pData + ((fileCount+1) * sizeof(char*)),
+            pData + ((fileCount  ) * sizeof(char*)),
+            fileCount * sizeof(size_t)
+        );
+
+        /* We need to insert the size. */
+        E_COPY_MEMORY(
+            pData + ((fileCount+1) * sizeof(char*)) + (fileCount * sizeof(size_t)),
+            &nameLen,
+            sizeof(size_t)
+        );
+
 
         totalFileNameLength += nameLen;
         fileCount += 1;
-        dataSize += nameDataSize;
+        dataSize += nameAndInfoDataSize;
     }
 
     if (pData == NULL) {
@@ -5590,36 +5639,47 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
         return E_SUCCESS;
     }
 
-    /*
-    At this point we will have gathered all of the file names into a single buffer. Now we need to
-    do a post-processing step to set up the pointers.
+    /* We now need to do a second pass to set up our char* pointers. */
+    ppFileNames      = (char**      )(pData);
+    pFileNameLengths = (size_t*     )(pData + (fileCount * sizeof(char*)));
+    pFileInfos       = (e_file_info*)(pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t)));
+    pRunningFileName = pData + (fileCount * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info)));
 
-    The very top of the buffer will be an array of pointers to the file names. The first thing we
-    need to do is slide our file names down to make room for the pointer array.
-    */
-    E_MOVE_MEMORY(pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t)), pData, totalFileNameLength + (fileCount * sizeof(char)));
-
-    /*
-    At this point there should be room at the top of the buffer for our pointer array. We need to
-    now iterate over each of our file names and set up these pointers. They'll be null terminated
-    which is what we can use to determine where each one starts.
-    */
-    ppFileNames = (char**)pData;
-    pFileNameLengths = (size_t*)(pData + (fileCount * sizeof(char*)));
-    pRunningFileName = pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t));
-
+    E_ASSERT(ppFileNames != NULL);
     for (iFile = 0; iFile < fileCount; iFile += 1) {
-        size_t fileNameLen = c89str_strlen(pRunningFileName);
-
-        E_ASSERT(ppFileNames != NULL);
         ppFileNames[iFile] = pRunningFileName;
-        pFileNameLengths[iFile] = fileNameLen;
-
-        pRunningFileName += fileNameLen + 1;    /* +1 to get past null terminator. */
+        pRunningFileName += pFileNameLengths[iFile] + 1;    /* +1 to get past null terminator. */
     }
 
-    /* Use e_qsort() to sort by name. */
-    e_qsort_s(ppFileNames, fileCount, sizeof(char*), e_qsort_strcmp, NULL);
+
+    /*
+    Now we need to sort our arrays by name. We cannot use e_qsort() because we need to sort multiple arrays.
+
+    TODO: Make this a quick sort.
+    */
+    for (iFile = 0; iFile < fileCount; iFile += 1) {
+        size_t jFile;
+        for (jFile = iFile+1; jFile < fileCount; jFile += 1) {
+            if (c89str_strcmp(ppFileNames[iFile], ppFileNames[jFile]) > 0) {
+                char* pTempName;
+                size_t tempNameLen;
+                e_file_info tempFileInfo;
+
+                pTempName = ppFileNames[iFile];
+                ppFileNames[iFile] = ppFileNames[jFile];
+                ppFileNames[jFile] = pTempName;
+
+                tempNameLen = pFileNameLengths[iFile];
+                pFileNameLengths[iFile] = pFileNameLengths[jFile];
+                pFileNameLengths[jFile] = tempNameLen;
+
+                tempFileInfo = pFileInfos[iFile];
+                pFileInfos[iFile] = pFileInfos[jFile];
+                pFileInfos[jFile] = tempFileInfo;
+            }
+        }
+    }
+
 
     /* Remove any duplicates. */
     for (iFile = 0; iFile < fileCount-1; ) {
@@ -5627,6 +5687,7 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
             /* Duplicate. */
             E_MOVE_MEMORY(ppFileNames      + iFile, ppFileNames      + iFile + 1, (fileCount - iFile - 1) * sizeof(char*));
             E_MOVE_MEMORY(pFileNameLengths + iFile, pFileNameLengths + iFile + 1, (fileCount - iFile - 1) * sizeof(size_t));
+            E_MOVE_MEMORY(pFileInfos       + iFile, pFileInfos       + iFile + 1, (fileCount - iFile - 1) * sizeof(e_file_info));
 
             fileCount -= 1;
         } else {
@@ -5639,6 +5700,9 @@ E_API e_result e_fs_gather_file_names_in_directory(e_fs* pFS, const char* pDirec
     }
     if (ppFileNameLengths != NULL) {
         *ppFileNameLengths = pFileNameLengths;
+    }
+    if (ppFileInfos != NULL) {
+        *ppFileInfos = pFileInfos;
     }
     if (pFileCount != NULL) {
         *pFileCount = fileCount;
@@ -8959,6 +9023,7 @@ E_API e_engine_config e_engine_config_init(int argc, const char** argv, unsigned
     config.flags           = flags;
     config.pVTable         = pVTable;
     config.pVTableUserData = pVTableUserData;
+    config.pConfigFilePath = E_DEFAULT_CONFIG_FILE_PATH;
 
     return config;
 }
@@ -9085,9 +9150,9 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     We'll try loading a default config from the working directory. This is not a critical error if
     it fails, but we'll post a warning about it.
     */
-    result = e_config_file_load_file(&pEngine->configFile, &pEngine->fs, E_DEFAULT_CONFIG_FILE_PATH, pAllocationCallbacks, pEngine->pLog);
+    result = e_config_file_load_file(&pEngine->configFile, &pEngine->fs, pConfig->pConfigFilePath, pAllocationCallbacks, pEngine->pLog);
     if (result != E_SUCCESS) {
-        e_log_postf(pEngine->pLog, E_LOG_LEVEL_WARNING, "Failed to load default config file '%s'.", E_DEFAULT_CONFIG_FILE_PATH);
+        e_log_postf(pEngine->pLog, E_LOG_LEVEL_WARNING, "Failed to load default config file '%s'.", pConfig->pConfigFilePath);
     }
 
 
