@@ -1290,6 +1290,7 @@ E_API void e_engine_uninit(e_engine* pEngine, const e_allocation_callbacks* pAll
 E_API e_log* e_engine_get_log(e_engine* pEngine);
 E_API e_result e_engine_run(e_engine* pEngine);
 E_API e_result e_engine_exit(e_engine* pEngine, int exitCode);  /* Exits the main loop. */
+E_API e_result e_engine_set_blocking_mode(e_engine* pEngine, e_bool32 blocking);    /* Sets the blocking mode of the main loop. */
 E_API e_fs* e_engine_get_file_system(e_engine* pEngine);
 static E_INLINE e_fs* e_engine_get_fs(e_engine* pEngine) { return e_engine_get_file_system(pEngine); }
 E_API e_config_file* e_engine_get_config_file(e_engine* pEngine);

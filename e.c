@@ -325,6 +325,8 @@ static e_result e_platform_window_post_close_event(e_platform_window* pWindow);
 typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
 static e_result e_platform_exit_main_loop(int exitCode);
+static e_result e_platform_wake_main_loop(void);    /* This is used to wake the main loop from a blocking state. You should never normally need to use this. */
+static e_result e_platform_set_main_loop_blocking(e_bool32 blocking);
 
 
 #if defined(E_WIN32)
@@ -1129,31 +1131,20 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 }
 
 
+static e_bool32 e_gUseBlockingMainLoop = E_FALSE;
 
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData)
 {
     int exitCode = 0;
     MSG msg;
-    e_bool32 blocking = E_FALSE;
 
     E_ASSERT(pExitCode != NULL);
     E_ASSERT(iterationCallback != NULL);
 
-    /*
-    Need to think about how to handle the main loop here.
-
-    When a game is running, the loop needs to run at full speed. However, when only an editor is
-    running, we don't want to do that because otherwise a CPU core will be constantly pinned at
-    100% usage.
-
-    Might need some kind of mechanism so allow switching between blocking and non-blocking.
-    */
-    blocking = E_FALSE;
-
     for (;;) {
         BOOL result;
 
-        if (blocking) {
+        if (e_gUseBlockingMainLoop) {
             result = GetMessageA(&msg, NULL, 0, 0);
             if (result == -1) {
                 *pExitCode = -1;
@@ -1199,6 +1190,25 @@ static e_result e_platform_exit_main_loop(int exitCode)
 {
     PostQuitMessage(exitCode);
     return E_SUCCESS;
+}
+
+static e_result e_platform_wake_main_loop(void)
+{
+    PostMessageW(NULL, WM_NULL, 0, 0);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_set_main_loop_blocking(e_bool32 blocking)
+{
+    /* Very minor optimization. Don't do anything if the blocking mode is not changing. This saves us from posting a message to the main loop. */
+    if (e_gUseBlockingMainLoop == blocking) {
+        return E_SUCCESS;
+    }
+
+    e_gUseBlockingMainLoop = blocking;
+    
+    /* The loop needs to be woken up in case it's currently blocking. */
+    return e_platform_wake_main_loop();
 }
 #endif  /* E_WIN32 */
 
@@ -9312,6 +9322,16 @@ E_API e_result e_engine_exit(e_engine* pEngine, int exitCode)
     }
 
     return e_platform_exit_main_loop(exitCode);
+}
+
+E_API e_result e_engine_set_blocking_mode(e_engine* pEngine, e_bool32 blocking)
+{
+    if (pEngine == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_set_main_loop_blocking(blocking);
+
 }
 
 E_API e_fs* e_engine_get_file_system(e_engine* pEngine)
