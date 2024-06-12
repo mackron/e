@@ -264,7 +264,203 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 }
 
 
+#define e_round_up_to_nearest_4(value)  ((value +  3) & ~3)
+#define e_round_up_to_nearest_16(value) ((value + 15) & ~15)
 
+
+/* Default allocation callbacks. */
+static void* e_malloc_default(size_t sz, void* pUserData)
+{
+    E_UNUSED(pUserData);
+    return E_MALLOC(sz);
+}
+
+static void* e_realloc_default(void* p, size_t sz, void* pUserData)
+{
+    E_UNUSED(pUserData);
+    return E_REALLOC(p, sz);
+}
+
+static void e_free_default(void* p, void* pUserData)
+{
+    E_UNUSED(pUserData);
+    E_FREE(p);
+}
+
+
+static e_allocation_callbacks e_allocation_callbacks_init_default()
+{
+    e_allocation_callbacks allocationCallbacks;
+
+    allocationCallbacks.pUserData = NULL;
+    allocationCallbacks.onMalloc  = e_malloc_default;
+    allocationCallbacks.onRealloc = e_realloc_default;
+    allocationCallbacks.onFree    = e_free_default;
+
+    return allocationCallbacks;
+}
+
+static e_allocation_callbacks e_allocation_callbacks_init_copy(const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pAllocationCallbacks != NULL) {
+        return *pAllocationCallbacks;
+    } else {
+        return e_allocation_callbacks_init_default();
+    }
+}
+
+static c89str_allocation_callbacks e_allocation_callbacks_to_c89str(const e_allocation_callbacks* pAllocationCallbacks)
+{
+    c89str_allocation_callbacks allocationCallbacks;
+
+    if (pAllocationCallbacks != NULL) {
+        allocationCallbacks.pUserData = pAllocationCallbacks->pUserData;
+        allocationCallbacks.onMalloc  = pAllocationCallbacks->onMalloc;
+        allocationCallbacks.onRealloc = pAllocationCallbacks->onRealloc;
+        allocationCallbacks.onFree    = pAllocationCallbacks->onFree;
+    } else {
+        allocationCallbacks.pUserData = NULL;
+        allocationCallbacks.onMalloc  = e_malloc_default;
+        allocationCallbacks.onRealloc = e_realloc_default;
+        allocationCallbacks.onFree    = e_free_default;
+    }
+
+    return allocationCallbacks;
+}
+
+
+
+E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pAllocationCallbacks != NULL) {
+        if (pAllocationCallbacks->onMalloc != NULL) {
+            return pAllocationCallbacks->onMalloc(sz, pAllocationCallbacks->pUserData);
+        } else {
+            return NULL;    /* Do not fall back to the default implementation. */
+        }
+    } else {
+        return e_malloc_default(sz, NULL);
+    }
+}
+
+E_API void* e_calloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    void* p = e_malloc(sz, pAllocationCallbacks);
+    if (p != NULL) {
+        E_ZERO_MEMORY(p, sz);
+    }
+
+    return p;
+}
+
+E_API void* e_realloc(void* p, size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (pAllocationCallbacks != NULL) {
+        if (pAllocationCallbacks->onRealloc != NULL) {
+            return pAllocationCallbacks->onRealloc(p, sz, pAllocationCallbacks->pUserData);
+        } else {
+            return NULL;    /* Do not fall back to the default implementation. */
+        }
+    } else {
+        return e_realloc_default(p, sz, NULL);
+    }
+}
+
+E_API void e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (p == NULL) {
+        return;
+    }
+
+    if (pAllocationCallbacks != NULL) {
+        if (pAllocationCallbacks->onFree != NULL) {
+            pAllocationCallbacks->onFree(p, pAllocationCallbacks->pUserData);
+        } else {
+            return; /* Do no fall back to the default implementation. */
+        }
+    } else {
+        e_free_default(p, NULL);
+    }
+}
+
+
+
+#define E_ALIGNED_MALLOC_HEADER_SIZE    sizeof(void*) + sizeof(e_uintptr)
+
+E_API void* e_aligned_malloc(size_t sz, size_t alignment, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    size_t extraBytes;
+    void* pUnaligned;
+    void* pAligned;
+
+    if (alignment == 0) {
+        return 0;
+    }
+
+    extraBytes = alignment-1 + E_ALIGNED_MALLOC_HEADER_SIZE;
+
+    pUnaligned = e_malloc(sz + extraBytes, pAllocationCallbacks);
+    if (pUnaligned == NULL) {
+        return NULL;
+    }
+
+    pAligned = (void*)(((e_uintptr)pUnaligned + extraBytes) & ~((e_uintptr)(alignment-1)));
+    ((void**)pAligned)[-1] = pUnaligned;
+    ((void**)pAligned)[-2] = (void*)sz;     /* For e_aligned_realloc(). */
+
+    return pAligned;
+}
+
+/* e_aligned_realloc() must be called with a pointer that was created with either e_aligned_malloc() or e_aligned_realloc(). */
+E_API void* e_aligned_realloc(void* p, size_t sz, size_t alignment, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    void* pOldUnaligned;
+    void* pOldAligned;
+    void* pNewUnaligned;
+    void* pNewAligned;
+    size_t extraBytes;
+
+    if (p == NULL) {
+        return e_aligned_malloc(sz, alignment, pAllocationCallbacks);
+    }
+    
+    if (alignment == 0) {
+        return 0;
+    }
+
+    pOldAligned   = p;
+    pOldUnaligned = ((void**)p)[-1];
+
+    extraBytes = alignment-1 + E_ALIGNED_MALLOC_HEADER_SIZE;
+
+    pNewUnaligned = e_realloc(pOldUnaligned, sz + extraBytes, pAllocationCallbacks);
+    if (pNewUnaligned == NULL) {
+        return NULL;
+    }
+
+    /* Getting here means the allocation is different. We'll need to move the memory down a bit to make it aligned. */
+    pNewAligned = (void*)(((e_uintptr)pNewUnaligned + extraBytes) & ~((e_uintptr)(alignment-1)));
+    ((void**)pNewAligned)[-1] = pNewUnaligned;
+    ((void**)pNewAligned)[-2] = (void*)sz;
+
+    /* Move the memory down so it starts at the aligned position. No need to do this if the old and new pointers are the same. */
+    if (pNewUnaligned != pOldUnaligned) {
+        void* pDst = pNewAligned;
+        void* pSrc = (unsigned char*)pNewUnaligned + E_ALIGNED_MALLOC_HEADER_SIZE + ((e_uintptr)pOldAligned - ((e_uintptr)pOldUnaligned + E_ALIGNED_MALLOC_HEADER_SIZE));
+        E_MOVE_MEMORY(pDst, pSrc, sz);
+    }
+
+    return pNewAligned;
+}
+
+E_API void e_aligned_free(void* p, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    if (p == NULL) {
+        return;
+    }
+
+    e_free(((void**)p)[-1], pAllocationCallbacks);
+}
 
 
 
@@ -321,6 +517,7 @@ static e_result e_platform_window_hide_cursor(e_platform_window* pWindow);
 static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cursorPosX, int cursorPosY);
 static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow);
 static e_result e_platform_window_post_close_event(e_platform_window* pWindow);
+static e_result e_platform_window_next_buffer(e_platform_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer);
 
 typedef e_result (* e_platform_main_loop_iteration_callback)(void* pUserData);
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData);
@@ -599,7 +796,15 @@ struct e_platform_window
 {
     e_window* pOwnerWindow;
     HWND hWnd;
-    HDC hDC;    /* Can use GetDC() instead, but in my experience that has tended to be extremely slow. */
+    HDC hDC;                    /* Can use GetDC() instead, but in my experience that has tended to be extremely slow. */
+    HDC hBufferDC;              /* We need a separate HDC for software rendering. hBufferDIB will be permanently selected into hBufferDC. hBufferDC will be used with StretchBlt(). */
+    HANDLE hBufferDIB;          /* For software rendering. We'll use this with StretchBlt() to output the buffer to the screen. */
+    void* pBufferDIBData;       /* The underlying buffer containing the data of hBufferDIB. */
+    void* pBufferDIBDataIntermediary;   /* This is an aligned intermediary buffer for when pBufferDIBData does not meet our alignment requirements. */
+    unsigned int bufferSizeX;
+    unsigned int bufferSizeY;
+    int clientSizeX;            /* So we don't have to use GetClientRect() in each call to e_platform_window_next_buffer(). */
+    int clientSizeY;
     HCURSOR hDefaultCursor;
     HCURSOR hCurrentCursor;
     HCURSOR hOldCursor;
@@ -608,7 +813,7 @@ struct e_platform_window
     e_bool32 ignoreNextMouseMoveEvent;
     int pinnedCursorPosX;
     int pinnedCursorPosY;
-    e_uint16 utf16Hi;   /* The high surrogate pair in a UTF-16 surrogate pair. Used with WM_CHAR. */
+    e_uint16 utf16Hi;           /* The high surrogate pair in a UTF-16 surrogate pair. Used with WM_CHAR. */
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -721,6 +926,18 @@ static e_result e_platform_window_uninit(e_platform_window* pWindow, const e_all
     E_UNUSED(pAllocationCallbacks);
 
     DestroyWindow(pWindow->hWnd);
+
+    if (pWindow->hBufferDC != NULL) {
+        DeleteDC(pWindow->hBufferDC);
+    }
+
+    if (pWindow->hBufferDIB != NULL) {
+        DeleteObject(pWindow->hBufferDIB);
+    }
+
+    if (pWindow->pBufferDIBDataIntermediary != NULL) {
+        e_aligned_free(pWindow->pBufferDIBDataIntermediary, NULL);
+    }
 
     return E_SUCCESS;
 }
@@ -892,6 +1109,157 @@ static e_result e_platform_window_post_close_event(e_platform_window* pWindow)
     return E_SUCCESS;
 }
 
+static e_result e_platform_window_next_buffer(e_platform_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer)
+{
+    E_ASSERT(pWindow != NULL);
+    E_ASSERT(pBuffer != NULL);
+
+    /* If we have a DIB, present it. */
+    if (pWindow->hBufferDIB) {
+        unsigned int x;
+        unsigned int y;
+
+        if (pWindow->pBufferDIBDataIntermediary == NULL) {
+            /* Fast path. We need only convert from 0xAABBGGRR (e) to 0xAARRGGBB (GDI). We can assume a clean alignment. */
+            e_uint32* pBuffer32 = (e_uint32*)pWindow->pBufferDIBData;
+
+            for (y = 0; y < pWindow->bufferSizeY; y += 1) {
+                for (x = 0; x < pWindow->bufferSizeX; x += 4) {
+                    pBuffer32[0] = (pBuffer32[0] & 0xFF00FF00) | ((pBuffer32[0] & 0x00FF0000) >> 16) | ((pBuffer32[0] & 0x000000FF) << 16);
+                    pBuffer32[1] = (pBuffer32[1] & 0xFF00FF00) | ((pBuffer32[1] & 0x00FF0000) >> 16) | ((pBuffer32[1] & 0x000000FF) << 16);
+                    pBuffer32[2] = (pBuffer32[2] & 0xFF00FF00) | ((pBuffer32[2] & 0x00FF0000) >> 16) | ((pBuffer32[2] & 0x000000FF) << 16);
+                    pBuffer32[3] = (pBuffer32[3] & 0xFF00FF00) | ((pBuffer32[3] & 0x00FF0000) >> 16) | ((pBuffer32[3] & 0x000000FF) << 16);
+                    pBuffer32 += 4;
+                }
+            }
+        } else {
+            /*
+            Slow path. Here we need to copy of the contents of the intermediary buffer to the DIB buffer. We'll
+            also shuffle the color components in the same pass.
+            */
+            e_uint32* pSrc = (e_uint32*)pWindow->pBufferDIBDataIntermediary;
+            e_uint32* pDst = (e_uint32*)pWindow->pBufferDIBData;
+
+            for (y = 0; y < pWindow->bufferSizeY; y += 1) {
+                for (x = 0; x < pWindow->bufferSizeX; x += 1) {
+                    pDst[x] = (pSrc[x] & 0xFF00FF00) | ((pSrc[x] & 0x00FF0000) >> 16) | ((pSrc[x] & 0x000000FF) << 16);
+                }
+
+                pSrc += e_round_up_to_nearest_4(pWindow->bufferSizeX);
+                pDst += pWindow->bufferSizeX;
+            }
+        }
+
+        /* Getting here means we have a buffer and we can now present it using StretchBlt(). */
+        StretchBlt(pWindow->hDC, 0, 0, pWindow->clientSizeX, pWindow->clientSizeY, pWindow->hBufferDC, 0, 0, pWindow->bufferSizeX, pWindow->bufferSizeY, SRCCOPY);
+
+        /*
+        MSDN suggests we should use GdiFlush() to ensure GDI is done with our buffer before trying to use
+        it again.
+        */
+        //GdiFlush();
+    }
+
+
+    /*
+    If the size of the buffer has changed, recreate it. We can do this by simply deleting everything and resetting
+    it back to null, and then just fall through to the section below which will do the recreation.
+    */
+    if (pWindow->bufferSizeX != bufferSizeX || pWindow->bufferSizeY != bufferSizeY) {
+        if (pWindow->hBufferDC != NULL) {
+            DeleteDC(pWindow->hBufferDC);
+            pWindow->hBufferDC = NULL;
+        }
+
+        if (pWindow->hBufferDIB != NULL) {
+            DeleteObject(pWindow->hBufferDIB);
+            pWindow->hBufferDIB  = NULL;
+            pWindow->bufferSizeX = 0;
+            pWindow->bufferSizeY = 0;
+        }
+
+        if (pWindow->pBufferDIBDataIntermediary != NULL) {
+            e_aligned_free(pWindow->pBufferDIBDataIntermediary, NULL);
+            pWindow->pBufferDIBDataIntermediary = NULL;
+        }
+    }
+
+
+    /* If we don't have a DIB, create one. */
+    if (pWindow->hBufferDIB == NULL) {
+        /*
+        Getting here means it's our first time calling this function and we need to create a new buffer. Note that
+        the first time we call this function we do not do any buffer presentation because there is no valid back
+        buffer to actually present. Therefore we'll be returning early from this branch.
+
+        We need to use CreateDIBSection() here. Our alignment requirements are as follows:
+
+            1) 16 bytes alignment
+            2) The row stride in bytes must be a multiple of 16
+
+        If any of these two requirements are not met, we'll need to make use of our own self-managed intermediary
+        buffer which meets the requirements.
+
+        Although it's not formally documented, in practice CreateDIBSection() should return a buffer that is aligned
+        to 16 bytes. If it does not, we'll fall back to our intermediary buffer.
+
+        For the second requirement, we need only check if the width is a multiple 4, and if not, we'll need to use
+        the intermediary.
+        */
+        BITMAPINFO bi;
+        
+        /* The first thing we do is create the DIB. */
+        E_ZERO_OBJECT(&bi);
+        bi.bmiHeader.biSize        =  sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth       =  bufferSizeX;
+        bi.bmiHeader.biHeight      = -(int)bufferSizeY;
+        bi.bmiHeader.biPlanes      =  1;
+        bi.bmiHeader.biBitCount    =  32;
+        bi.bmiHeader.biCompression =  BI_RGB;
+
+        pWindow->hBufferDIB = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &pWindow->pBufferDIBData, NULL, 0);
+        if (pWindow->hBufferDIB == NULL) {
+            return E_ERROR; /* Failed to create the DIB section. */
+        }
+
+        /* Now we need to determine if we need to use an intermediary buffer. */
+        if (((e_uintptr)pWindow->pBufferDIBData & 15) != 0 ||   /* <-- 16 bytes alignment. */
+            ((bufferSizeX & 0x03) != 0))                        /* <-- Width must be a multiple of 4. */
+        {
+            /* Getting here means we do not meet the necessary alignment requirements and we need to use an intermediary buffer which does. */
+            pWindow->pBufferDIBDataIntermediary = e_aligned_malloc((e_round_up_to_nearest_16(bufferSizeX * 4) * bufferSizeY), 16, NULL);
+            if (pWindow->pBufferDIBDataIntermediary == NULL) {
+                DeleteObject(pWindow->hBufferDIB);
+                pWindow->hBufferDIB = NULL;
+
+                return E_OUT_OF_MEMORY;
+            }
+        }
+
+        pWindow->hBufferDC = CreateCompatibleDC(NULL);
+        if (pWindow->hBufferDC == NULL) {
+            DeleteObject(pWindow->hBufferDIB);
+            pWindow->hBufferDIB = NULL;
+
+            e_aligned_free(pWindow->pBufferDIBDataIntermediary, NULL);
+            pWindow->pBufferDIBDataIntermediary = NULL;
+
+            return E_ERROR; /* Failed to create compatible DC. */
+        }
+
+        SelectObject(pWindow->hBufferDC, pWindow->hBufferDIB);
+
+        pWindow->bufferSizeX = bufferSizeX;
+        pWindow->bufferSizeY = bufferSizeY;
+    }
+
+    pBuffer->sizeX = pWindow->bufferSizeX;
+    pBuffer->sizeY = pWindow->bufferSizeY;
+    pBuffer->pData = (pWindow->pBufferDIBDataIntermediary != NULL) ? pWindow->pBufferDIBDataIntermediary : pWindow->pBufferDIBData;
+
+    return E_SUCCESS;
+}
+
 
 static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -910,9 +1278,12 @@ static LRESULT e_platform_default_window_proc_win32(HWND hWnd, UINT msg, WPARAM 
 
             case WM_SIZE:
             {
+                pWindow->clientSizeX = LOWORD(lParam);
+                pWindow->clientSizeY = HIWORD(lParam);
+
                 e = e_window_event_init(E_EVENT_SIZE, pWindow->pOwnerWindow);
-                e.data.size.x = LOWORD(lParam);
-                e.data.size.y = HIWORD(lParam);
+                e.data.size.x = pWindow->clientSizeX;
+                e.data.size.y = pWindow->clientSizeY;
                 e_window_handle_event(pWindow->pOwnerWindow, &e);
             } break;
 
@@ -2221,202 +2592,6 @@ E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes)
 
 
 
-
-/* Default allocation callbacks. */
-static void* e_malloc_default(size_t sz, void* pUserData)
-{
-    E_UNUSED(pUserData);
-    return E_MALLOC(sz);
-}
-
-static void* e_realloc_default(void* p, size_t sz, void* pUserData)
-{
-    E_UNUSED(pUserData);
-    return E_REALLOC(p, sz);
-}
-
-static void e_free_default(void* p, void* pUserData)
-{
-    E_UNUSED(pUserData);
-    E_FREE(p);
-}
-
-
-static e_allocation_callbacks e_allocation_callbacks_init_default()
-{
-    e_allocation_callbacks allocationCallbacks;
-
-    allocationCallbacks.pUserData = NULL;
-    allocationCallbacks.onMalloc  = e_malloc_default;
-    allocationCallbacks.onRealloc = e_realloc_default;
-    allocationCallbacks.onFree    = e_free_default;
-
-    return allocationCallbacks;
-}
-
-static e_allocation_callbacks e_allocation_callbacks_init_copy(const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pAllocationCallbacks != NULL) {
-        return *pAllocationCallbacks;
-    } else {
-        return e_allocation_callbacks_init_default();
-    }
-}
-
-static c89str_allocation_callbacks e_allocation_callbacks_to_c89str(const e_allocation_callbacks* pAllocationCallbacks)
-{
-    c89str_allocation_callbacks allocationCallbacks;
-
-    if (pAllocationCallbacks != NULL) {
-        allocationCallbacks.pUserData = pAllocationCallbacks->pUserData;
-        allocationCallbacks.onMalloc  = pAllocationCallbacks->onMalloc;
-        allocationCallbacks.onRealloc = pAllocationCallbacks->onRealloc;
-        allocationCallbacks.onFree    = pAllocationCallbacks->onFree;
-    } else {
-        allocationCallbacks.pUserData = NULL;
-        allocationCallbacks.onMalloc  = e_malloc_default;
-        allocationCallbacks.onRealloc = e_realloc_default;
-        allocationCallbacks.onFree    = e_free_default;
-    }
-
-    return allocationCallbacks;
-}
-
-
-
-E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pAllocationCallbacks != NULL) {
-        if (pAllocationCallbacks->onMalloc != NULL) {
-            return pAllocationCallbacks->onMalloc(sz, pAllocationCallbacks->pUserData);
-        } else {
-            return NULL;    /* Do not fall back to the default implementation. */
-        }
-    } else {
-        return e_malloc_default(sz, NULL);
-    }
-}
-
-E_API void* e_calloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    void* p = e_malloc(sz, pAllocationCallbacks);
-    if (p != NULL) {
-        E_ZERO_MEMORY(p, sz);
-    }
-
-    return p;
-}
-
-E_API void* e_realloc(void* p, size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pAllocationCallbacks != NULL) {
-        if (pAllocationCallbacks->onRealloc != NULL) {
-            return pAllocationCallbacks->onRealloc(p, sz, pAllocationCallbacks->pUserData);
-        } else {
-            return NULL;    /* Do not fall back to the default implementation. */
-        }
-    } else {
-        return e_realloc_default(p, sz, NULL);
-    }
-}
-
-E_API void e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (p == NULL) {
-        return;
-    }
-
-    if (pAllocationCallbacks != NULL) {
-        if (pAllocationCallbacks->onFree != NULL) {
-            pAllocationCallbacks->onFree(p, pAllocationCallbacks->pUserData);
-        } else {
-            return; /* Do no fall back to the default implementation. */
-        }
-    } else {
-        e_free_default(p, NULL);
-    }
-}
-
-
-
-#define E_ALIGNED_MALLOC_HEADER_SIZE    sizeof(void*) + sizeof(e_uintptr)
-
-E_API void* e_aligned_malloc(size_t sz, size_t alignment, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    size_t extraBytes;
-    void* pUnaligned;
-    void* pAligned;
-
-    if (alignment == 0) {
-        return 0;
-    }
-
-    extraBytes = alignment-1 + E_ALIGNED_MALLOC_HEADER_SIZE;
-
-    pUnaligned = e_malloc(sz + extraBytes, pAllocationCallbacks);
-    if (pUnaligned == NULL) {
-        return NULL;
-    }
-
-    pAligned = (void*)(((e_uintptr)pUnaligned + extraBytes) & ~((e_uintptr)(alignment-1)));
-    ((void**)pAligned)[-1] = pUnaligned;
-    ((void**)pAligned)[-2] = (void*)sz;     /* For e_aligned_realloc(). */
-
-    return pAligned;
-}
-
-/* e_aligned_realloc() must be called with a pointer that was created with either e_aligned_malloc() or e_aligned_realloc(). */
-E_API void* e_aligned_realloc(void* p, size_t sz, size_t alignment, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    void* pOldUnaligned;
-    void* pOldAligned;
-    void* pNewUnaligned;
-    void* pNewAligned;
-    size_t extraBytes;
-
-    if (p == NULL) {
-        return e_aligned_malloc(sz, alignment, pAllocationCallbacks);
-    }
-    
-    if (alignment == 0) {
-        return 0;
-    }
-
-    pOldAligned   = p;
-    pOldUnaligned = ((void**)p)[-1];
-
-    extraBytes = alignment-1 + E_ALIGNED_MALLOC_HEADER_SIZE;
-
-    pNewUnaligned = e_realloc(pOldUnaligned, sz + extraBytes, pAllocationCallbacks);
-    if (pNewUnaligned == NULL) {
-        return NULL;
-    }
-
-    /* Getting here means the allocation is different. We'll need to move the memory down a bit to make it aligned. */
-    pNewAligned = (void*)(((e_uintptr)pNewUnaligned + extraBytes) & ~((e_uintptr)(alignment-1)));
-    ((void**)pNewAligned)[-1] = pNewUnaligned;
-    ((void**)pNewAligned)[-2] = (void*)sz;
-
-    /* Move the memory down so it starts at the aligned position. No need to do this if the old and new pointers are the same. */
-    if (pNewUnaligned != pOldUnaligned) {
-        void* pDst = pNewAligned;
-        void* pSrc = (unsigned char*)pNewUnaligned + E_ALIGNED_MALLOC_HEADER_SIZE + ((e_uintptr)pOldAligned - ((e_uintptr)pOldUnaligned + E_ALIGNED_MALLOC_HEADER_SIZE));
-        E_MOVE_MEMORY(pDst, pSrc, sz);
-    }
-
-    return pNewAligned;
-}
-
-E_API void e_aligned_free(void* p, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (p == NULL) {
-        return;
-    }
-
-    e_free(((void**)p)[-1], pAllocationCallbacks);
-}
-
-
 /* ==== BEG e_misc.c ==== */
 static E_INLINE void e_swap(void* a, void* b, size_t sz)
 {
@@ -2473,17 +2648,21 @@ E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, s
     size_t iEnd;
     size_t iMid;
 
-    iStart = 0;
-    iEnd = count;
+    if (count == 0) {
+        return NULL;
+    }
 
-    while (iStart < iEnd) {
+    iStart = 0;
+    iEnd = count - 1;
+
+    while (iStart <= iEnd) {
         int compareResult;
 
-        iMid = (iStart + iEnd) / 2;
+        iMid = iStart + (iEnd - iStart) / 2;
 
         compareResult = compareProc(pUserData, pKey, (char*)pList + (iMid * stride));
         if (compareResult < 0) {
-            iEnd = iMid;
+            iEnd = iMid - 1;
         } else if (compareResult > 0) {
             iStart = iMid + 1;
         } else {
@@ -9404,6 +9583,16 @@ E_API void* e_engine_get_vkapi(const e_engine* pEngine)
 
 
 /* ==== BEG e_window.c ==== */
+E_API unsigned int e_window_buffer_stride(const e_window_buffer* pBuffer)
+{
+    if (pBuffer == NULL) {
+        return 0;
+    }
+
+    return e_round_up_to_nearest_16(pBuffer->sizeX * 4);
+}
+
+
 E_API e_window_config e_window_config_init(e_engine* pEngine, const char* pTitle, int posX, int posY, unsigned int sizeX, unsigned int sizeY, unsigned int flags, e_window_vtable* pVTable, void* pVTableUserData)
 {
     e_window_config config;
@@ -9672,6 +9861,21 @@ E_API e_result e_window_post_close_event(e_window* pWindow)
     }
 
     return e_platform_window_post_close_event(pWindow->pPlatformWindow);
+}
+
+E_API e_result e_window_next_buffer(e_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer)
+{
+    if (pBuffer == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ZERO_OBJECT(pBuffer);
+
+    if (pWindow == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_platform_window_next_buffer(pWindow->pPlatformWindow, bufferSizeX, bufferSizeY, pBuffer);
 }
 /* ==== END e_window.c ==== */
 

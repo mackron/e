@@ -119,7 +119,7 @@ do stuff. This is where you'd probably step your clients.
     #define E_32BIT
 #endif
 
-#if defined(MA_USE_STDINT)
+#if defined(E_USE_STDINT)
     #include <stdint.h>
     typedef int8_t                  e_int8;
     typedef uint8_t                 e_uint8;
@@ -279,6 +279,21 @@ typedef struct
     unsigned char b;
     unsigned char a;
 } e_color;
+
+static E_INLINE e_color e_rgba(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+{
+    e_color c;
+    c.r = r;
+    c.g = g;
+    c.b = b;
+    c.a = a;
+    return c;
+}
+
+static E_INLINE e_uint32 e_color_to_uint32(e_color c)
+{
+    return ((unsigned int)c.a << 24) | ((unsigned int)c.b << 16) | ((unsigned int)c.g << 8) | (unsigned int)c.r;
+}
 
 
 
@@ -1445,7 +1460,17 @@ typedef struct e_window_event  e_window_event;
 typedef struct e_window_vtable e_window_vtable;
 typedef struct e_window_config e_window_config;
 typedef struct e_window        e_window;
+typedef struct e_window_buffer e_window_buffer; /* For software rendering. */
 typedef struct e_event         e_event;
+
+struct e_window_buffer
+{
+    unsigned int sizeX;
+    unsigned int sizeY;
+    void* pData;            /* Always 0xAABBGGRR. Always aligned to 16-bytes. Each row will be padded to a multiple of 16 bytes. Linear layout. Use e_window_buffer_stride() to get the row stride in bytes. */
+};
+
+E_API unsigned int e_window_buffer_stride(const e_window_buffer* pBuffer);
 
 struct e_event
 {
@@ -1585,6 +1610,7 @@ E_API e_result e_window_hide_cursor(e_window* pWindow);
 E_API e_result e_window_pin_cursor(e_window* pWindow, int cursorPosX, int cursorPosY);
 E_API e_result e_window_unpin_cursor(e_window* pWindow);
 E_API e_result e_window_post_close_event(e_window* pWindow);
+E_API e_result e_window_next_buffer(e_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer);   /* For software rendering. Swaps buffers, returns information about the new back buffer. */
 /* ==== END e_window.h ==== */
 
 

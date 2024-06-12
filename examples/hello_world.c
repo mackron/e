@@ -38,7 +38,7 @@ int main(int argc, char** argv)
 
 
     /* Need an engine first. */
-    engineConfig = e_engine_config_init(argc, argv, 0, &g_engineVTable);
+    engineConfig = e_engine_config_init(argc, argv, 0, &g_engineVTable, NULL);
     
     result = e_engine_init(&engineConfig, NULL, &g_pEngine);
     if (result != E_SUCCESS) {
