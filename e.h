@@ -513,7 +513,7 @@ extern e_pfn_freeaddrinfo   e_net_freeaddrinfo;
 #define e_sockaddr_in6      sockaddr_in6
 #define e_fd_set            fd_set
 
-typedef SOCKET              E_SOCKET;
+typedef int                 E_SOCKET;
 #define E_INVALID_SOCKET    INVALID_SOCKET
 
 #define E_AF_UNSPEC         AF_UNSPEC
