@@ -1456,7 +1456,6 @@ typedef enum
 
 typedef struct e_platform_window e_platform_window; /* Platform-specific window object. This is defined in the implementation on a per-platform basis. */
 
-typedef struct e_window_event  e_window_event;
 typedef struct e_window_vtable e_window_vtable;
 typedef struct e_window_config e_window_config;
 typedef struct e_window        e_window;

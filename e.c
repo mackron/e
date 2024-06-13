@@ -10,6 +10,11 @@
 
 #include <stdio.h>  /* For printing to stdout. */
 
+#if defined(_WIN32)
+#else
+#include <fcntl.h>
+#endif
+
 
 /* No Vulkan with Emscripten. */
 #if defined(E_EMSCRIPTEN)
@@ -1705,7 +1710,7 @@ typedef struct e_XVisualInfo
     e_VisualID visualid;
     int screen;
     int depth;
-    int class;
+    int _class;
     unsigned long red_mask;
     unsigned long green_mask;
     unsigned long blue_mask;
@@ -1948,10 +1953,10 @@ static e_pfn_glXChooseVisual e_glXChooseVisual;
 /* Xlib */
 typedef e_Display* (* e_pfn_XOpenDisplay        )(const char* pDisplayName);
 typedef int        (* e_pfn_XCloseDisplay       )(e_Display* pDisplay);
-typedef int        (* e_pfn_XMatchVisualInfo    )(e_Display* pDisplay, int screen, int depth, int class, e_XVisualInfo* pVisualInfo);
+typedef int        (* e_pfn_XMatchVisualInfo    )(e_Display* pDisplay, int screen, int depth, int _class, e_XVisualInfo* pVisualInfo);
 typedef e_Colormap (* e_pfn_XCreateColormap     )(e_Display* pDisplay, e_Window w, e_Visual* pVisual, int alloc);
 typedef int        (* e_pfn_XFreeColormap       )(e_Display* pDisplay, e_Colormap colormap);
-typedef e_Window   (* e_pfn_XCreateWindow       )(e_Display* pDisplay, e_Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int class, e_Visual* pVisual, unsigned long valuemask, e_XSetWindowAttributes* pAttributes);
+typedef e_Window   (* e_pfn_XCreateWindow       )(e_Display* pDisplay, e_Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int _class, e_Visual* pVisual, unsigned long valuemask, e_XSetWindowAttributes* pAttributes);
 typedef int        (* e_pfn_XDestroyWindow      )(e_Display* pDisplay, e_Window w);
 typedef int        (* e_pfn_XMapWindow          )(e_Display* pDisplay, e_Window w);
 typedef int        (* e_pfn_XStoreName          )(e_Display* pDisplay, e_Window w, const char* pWindowName);
@@ -2285,7 +2290,7 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
     blocking = E_FALSE;
 
     for (;;) {
-        e_window_event e;
+        e_event e;
         e_XEvent x11Event;
         e_bool32 hasEvent = E_FALSE;
         e_bool32 receivedQuitMessage = E_FALSE;
