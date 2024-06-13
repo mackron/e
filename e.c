@@ -2404,6 +2404,22 @@ static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow)
     return E_SUCCESS;
 }
 
+static e_result e_platform_window_post_close_event(e_platform_window* pWindow)
+{
+    e_XEvent x11Event;
+
+    E_ZERO_OBJECT(&x11Event);
+    x11Event.xclient.type         = e_ClientMessage;
+    x11Event.xclient.window       = pWindow->window;
+    x11Event.xclient.message_type = e_gWMProtocolsAtom;
+    x11Event.xclient.format       = 32;
+    x11Event.xclient.data.l[0]    = (long)e_gWMDeleteWindowAtom;
+
+    e_XSendEvent(e_gDisplay, x11Event.xclient.window, E_FALSE, e_NoEventMask, (e_XEvent*)&x11Event);
+
+    return E_SUCCESS;
+}
+
 
 static e_bool32 e_gUseBlockingMainLoop = E_FALSE;
 
