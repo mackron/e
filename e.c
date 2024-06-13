@@ -2279,15 +2279,13 @@ static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned 
     return E_SUCCESS;
 }
 
+
+static e_bool32 e_gUseBlockingMainLoop = E_FALSE;
+
 static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iteration_callback iterationCallback, void* pUserData)
 {
-    e_bool32 blocking = E_FALSE;
-
     E_ASSERT(pExitCode != NULL);
     E_ASSERT(iterationCallback != NULL);
-
-    /* Like Win32, we need to come up with some kind of mechanism for choosing when to use a blocking loop versus non-blocking. */
-    blocking = E_FALSE;
 
     for (;;) {
         e_event e;
@@ -2296,7 +2294,7 @@ static e_result e_platform_main_loop(int* pExitCode, e_platform_main_loop_iterat
         e_bool32 receivedQuitMessage = E_FALSE;
 
         /* Check for events. */
-        if (blocking) {
+        if (e_gUseBlockingMainLoop) {
             e_XNextEvent(e_gDisplay, &x11Event);
             hasEvent = E_TRUE;
         } else {
@@ -2387,6 +2385,36 @@ static e_result e_platform_exit_main_loop(int exitCode)
     }
 
     return E_SUCCESS;
+}
+
+static e_result e_platform_wake_main_loop(void)
+{
+    /* We might be using a blocking loop. We'll need to post an event to wake it up. */
+    e_XEvent x11Event;
+
+    E_ZERO_OBJECT(&x11Event);
+    x11Event.xclient.type         = e_ClientMessage;
+    x11Event.xclient.window       = e_XRootWindow(e_gDisplay, e_XDefaultScreen(e_gDisplay));
+    x11Event.xclient.message_type = e_None;
+    x11Event.xclient.format       = 32;
+    x11Event.xclient.data.l[0]    = 0;
+
+    e_XSendEvent(e_gDisplay, x11Event.xclient.window, E_FALSE, e_NoEventMask, (e_XEvent*)&x11Event);
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_set_main_loop_blocking(e_bool32 blocking)
+{
+    /* Very minor optimization. Don't do anything if the blocking mode is not changing. This saves us from posting a message to the main loop. */
+    if (e_gUseBlockingMainLoop == blocking) {
+        return E_SUCCESS;
+    }
+
+    e_gUseBlockingMainLoop = blocking;
+    
+    /* The loop needs to be woken up in case it's currently blocking. */
+    return e_platform_wake_main_loop();
 }
 #endif  /* E_POSIX */
 
@@ -5758,7 +5786,7 @@ E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryP
         /* Resize the buffer if necessary. We need room for the name, it's null terminator, it's length, and the file info. */
         nameAndInfoDataSize = sizeof(char*) + nameLen + 1 + sizeof(size_t) + sizeof(e_file_info);
         if (pData == NULL || dataSize + nameAndInfoDataSize > dataCap) {
-            size_t newDataCap = dataCap * 2;
+            size_t newDataCap;
             char* pNewData;
 
             newDataCap = dataCap * 2;
@@ -8586,7 +8614,7 @@ static e_result e_config_file_get_value(e_config_file* pConfigFile, const char* 
         /* For each component in the part. */
         while (pPart[offset] != '\0') {
             const char* pSegmentBeg = pPart + offset;
-            const char* pSegmentEnd = pSegmentBeg;
+            const char* pSegmentEnd;
             
             /* Find the end of the segment. */
             for (;;) {
