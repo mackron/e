@@ -1769,6 +1769,14 @@ typedef struct e_XWindowAttributes
     e_Screen* screen;
 } e_XWindowAttributes;
 
+typedef struct e_XColor
+{
+    unsigned long pixel;
+    unsigned short red, green, blue;
+    char flags;
+    char pad;
+} e_XColor;
+
 /* We need to declare our own version of XEvent. We only declare the sub-structures of the events we actually use. */
 typedef union e_XEvent
 {
@@ -1956,73 +1964,90 @@ static e_pfn_glXChooseVisual e_glXChooseVisual;
 #endif
 
 /* Xlib */
-typedef e_Display* (* e_pfn_XOpenDisplay        )(const char* pDisplayName);
-typedef int        (* e_pfn_XCloseDisplay       )(e_Display* pDisplay);
-typedef int        (* e_pfn_XMatchVisualInfo    )(e_Display* pDisplay, int screen, int depth, int _class, e_XVisualInfo* pVisualInfo);
-typedef e_Colormap (* e_pfn_XCreateColormap     )(e_Display* pDisplay, e_Window w, e_Visual* pVisual, int alloc);
-typedef int        (* e_pfn_XFreeColormap       )(e_Display* pDisplay, e_Colormap colormap);
-typedef e_Window   (* e_pfn_XCreateWindow       )(e_Display* pDisplay, e_Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int _class, e_Visual* pVisual, unsigned long valuemask, e_XSetWindowAttributes* pAttributes);
-typedef int        (* e_pfn_XDestroyWindow      )(e_Display* pDisplay, e_Window w);
-typedef int        (* e_pfn_XMapWindow          )(e_Display* pDisplay, e_Window w);
-typedef int        (* e_pfn_XStoreName          )(e_Display* pDisplay, e_Window w, const char* pWindowName);
-typedef int        (* e_pfn_XResizeWindow       )(e_Display* pDisplay, e_Window w, unsigned int width, unsigned int height);
-typedef int        (* e_pfn_XGetWindowAttributes)(e_Display* pDisplay, e_Window w, e_XWindowAttributes* pWindowAttributes);
-typedef int        (* e_pfn_XSaveContext        )(e_Display* pDisplay, e_XID rid, e_XContext context, const e_XPointer pPointer);
-typedef int        (* e_pfn_XDeleteContext      )(e_Display* pDisplay, e_XID rid, e_XContext context);
-typedef int        (* e_pfn_XFindContext        )(e_Display* pDisplay, e_XID rid, e_XContext context, e_XPointer* ppPointer);
-typedef int        (* e_pfn_XSetWMProtocols     )(e_Display* pDisplay, e_Window w, e_Atom* pProtocols, int count);
-typedef e_Atom     (* e_pfn_XInternAtom         )(e_Display* pDisplay, const char* pAtomName, e_bool32 onlyIfExists);
-typedef int        (* e_pfn_XPending            )(e_Display* pDisplay);
-typedef int        (* e_pfn_XNextEvent          )(e_Display* pDisplay, e_XEvent* pEvent);
-typedef int        (* e_pfn_XSendEvent          )(e_Display* pDisplay, e_Window w, e_bool32 propagate, long eventMask, e_XEvent* pEvent);
-typedef e_Window   (* e_pfn_XRootWindow         )(e_Display* pDisplay, int screenNumber);
-typedef int        (* e_pfn_XDefaultScreen      )(e_Display* pDisplay);
-typedef int        (* e_pfn_XDefaultDepth       )(e_Display* pDisplay, int screenNumber);
-typedef int        (* e_pfn_XGrabPointer        )(e_Display* pDisplay, e_Window grabWindow, e_Bool ownerEvents, unsigned int eventMask, int pointerMode, int keyboardMode, e_Window confineTo, e_Cursor cursor, e_Time time);
-typedef int        (* e_pfn_XUngrabPointer      )(e_Display* pDisplay, e_Time time);
-typedef int        (* e_pfn_XWarpPointer        )(e_Display* pDisplay, e_Window src_w, e_Window dest_w, int src_x, int src_y, unsigned int src_width, unsigned int src_height, int dest_x, int dest_y);
-typedef e_Bool     (* e_pfn_XQueryPointer       )(e_Display* pDisplay, e_Window w, e_Window* pRoot, e_Window* pChild, int* pRootX, int* pRootY, int* pWinX, int* pWinY, unsigned int* pKeysButtons);
-typedef int        (* e_pfn_XFree               )(void* pData);
+typedef e_Display* (* e_pfn_XOpenDisplay         )(const char* pDisplayName);
+typedef int        (* e_pfn_XCloseDisplay        )(e_Display* pDisplay);
+typedef int        (* e_pfn_XMatchVisualInfo     )(e_Display* pDisplay, int screen, int depth, int _class, e_XVisualInfo* pVisualInfo);
+typedef e_Colormap (* e_pfn_XCreateColormap      )(e_Display* pDisplay, e_Window w, e_Visual* pVisual, int alloc);
+typedef int        (* e_pfn_XFreeColormap        )(e_Display* pDisplay, e_Colormap colormap);
+typedef e_Window   (* e_pfn_XCreateWindow        )(e_Display* pDisplay, e_Window parent, int x, int y, unsigned int width, unsigned int height, unsigned int borderWidth, int depth, unsigned int _class, e_Visual* pVisual, unsigned long valuemask, e_XSetWindowAttributes* pAttributes);
+typedef int        (* e_pfn_XDestroyWindow       )(e_Display* pDisplay, e_Window w);
+typedef int        (* e_pfn_XMapWindow           )(e_Display* pDisplay, e_Window w);
+typedef int        (* e_pfn_XStoreName           )(e_Display* pDisplay, e_Window w, const char* pWindowName);
+typedef int        (* e_pfn_XResizeWindow        )(e_Display* pDisplay, e_Window w, unsigned int width, unsigned int height);
+typedef int        (* e_pfn_XGetWindowAttributes )(e_Display* pDisplay, e_Window w, e_XWindowAttributes* pWindowAttributes);
+typedef int        (* e_pfn_XSaveContext         )(e_Display* pDisplay, e_XID rid, e_XContext context, const e_XPointer pPointer);
+typedef int        (* e_pfn_XDeleteContext       )(e_Display* pDisplay, e_XID rid, e_XContext context);
+typedef int        (* e_pfn_XFindContext         )(e_Display* pDisplay, e_XID rid, e_XContext context, e_XPointer* ppPointer);
+typedef int        (* e_pfn_XSetWMProtocols      )(e_Display* pDisplay, e_Window w, e_Atom* pProtocols, int count);
+typedef e_Atom     (* e_pfn_XInternAtom          )(e_Display* pDisplay, const char* pAtomName, e_bool32 onlyIfExists);
+typedef int        (* e_pfn_XPending             )(e_Display* pDisplay);
+typedef int        (* e_pfn_XNextEvent           )(e_Display* pDisplay, e_XEvent* pEvent);
+typedef int        (* e_pfn_XSendEvent           )(e_Display* pDisplay, e_Window w, e_bool32 propagate, long eventMask, e_XEvent* pEvent);
+typedef e_Window   (* e_pfn_XRootWindow          )(e_Display* pDisplay, int screenNumber);
+typedef int        (* e_pfn_XDefaultScreen       )(e_Display* pDisplay);
+typedef int        (* e_pfn_XDefaultDepth        )(e_Display* pDisplay, int screenNumber);
+typedef int        (* e_pfn_XGrabPointer         )(e_Display* pDisplay, e_Window grabWindow, e_Bool ownerEvents, unsigned int eventMask, int pointerMode, int keyboardMode, e_Window confineTo, e_Cursor cursor, e_Time time);
+typedef int        (* e_pfn_XUngrabPointer       )(e_Display* pDisplay, e_Time time);
+typedef int        (* e_pfn_XWarpPointer         )(e_Display* pDisplay, e_Window src_w, e_Window dest_w, int src_x, int src_y, unsigned int src_width, unsigned int src_height, int dest_x, int dest_y);
+typedef e_Bool     (* e_pfn_XQueryPointer        )(e_Display* pDisplay, e_Window w, e_Window* pRoot, e_Window* pChild, int* pRootX, int* pRootY, int* pWinX, int* pWinY, unsigned int* pKeysButtons);
+typedef e_Pixmap   (* e_pfn_XCreateBitmapFromData)(e_Display* pDisplay, e_Window w, const char* pData, unsigned int width, unsigned int height);
+typedef int        (* e_pfn_XFreePixmap          )(e_Display* pDisplay, e_Pixmap pixmap);
+typedef e_Cursor   (* e_pfn_XCreatePixmapCursor  )(e_Display* pDisplay, e_Pixmap source, e_Pixmap mask, e_XColor* pForeground, e_XColor* pBackground, unsigned int x, unsigned int y);
+typedef int        (* e_pfn_XFreeCursor          )(e_Display* pDisplay, e_Cursor cursor);
+typedef int        (* e_pfn_XDefineCursor        )(e_Display* pDisplay, e_Window w, e_Cursor cursor);
+typedef int        (* e_pfn_XUndefineCursor      )(e_Display* pDisplay, e_Window w);
+typedef int        (* e_pfn_XFree                )(void* pData);
 
 static e_handle e_gXlibSO = NULL;
-static e_pfn_XOpenDisplay         e_XOpenDisplay;
-static e_pfn_XCloseDisplay        e_XCloseDisplay;
-static e_pfn_XMatchVisualInfo     e_XMatchVisualInfo;
-static e_pfn_XCreateColormap      e_XCreateColormap;
-static e_pfn_XFreeColormap        e_XFreeColormap;
-static e_pfn_XCreateWindow        e_XCreateWindow;
-static e_pfn_XDestroyWindow       e_XDestroyWindow;
-static e_pfn_XMapWindow           e_XMapWindow;
-static e_pfn_XStoreName           e_XStoreName;
-static e_pfn_XResizeWindow        e_XResizeWindow;
-static e_pfn_XGetWindowAttributes e_XGetWindowAttributes;
-static e_pfn_XSaveContext         e_XSaveContext;
-static e_pfn_XDeleteContext       e_XDeleteContext;
-static e_pfn_XFindContext         e_XFindContext;
-static e_pfn_XSetWMProtocols      e_XSetWMProtocols;
-static e_pfn_XInternAtom          e_XInternAtom;
-static e_pfn_XPending             e_XPending;
-static e_pfn_XNextEvent           e_XNextEvent;
-static e_pfn_XSendEvent           e_XSendEvent;
-static e_pfn_XRootWindow          e_XRootWindow;
-static e_pfn_XDefaultScreen       e_XDefaultScreen;
-static e_pfn_XDefaultDepth        e_XDefaultDepth;
-static e_pfn_XGrabPointer         e_XGrabPointer;
-static e_pfn_XUngrabPointer       e_XUngrabPointer;
-static e_pfn_XWarpPointer         e_XWarpPointer;
-static e_pfn_XQueryPointer        e_XQueryPointer;
-static e_pfn_XFree                e_XFree;
+static e_pfn_XOpenDisplay          e_XOpenDisplay;
+static e_pfn_XCloseDisplay         e_XCloseDisplay;
+static e_pfn_XMatchVisualInfo      e_XMatchVisualInfo;
+static e_pfn_XCreateColormap       e_XCreateColormap;
+static e_pfn_XFreeColormap         e_XFreeColormap;
+static e_pfn_XCreateWindow         e_XCreateWindow;
+static e_pfn_XDestroyWindow        e_XDestroyWindow;
+static e_pfn_XMapWindow            e_XMapWindow;
+static e_pfn_XStoreName            e_XStoreName;
+static e_pfn_XResizeWindow         e_XResizeWindow;
+static e_pfn_XGetWindowAttributes  e_XGetWindowAttributes;
+static e_pfn_XSaveContext          e_XSaveContext;
+static e_pfn_XDeleteContext        e_XDeleteContext;
+static e_pfn_XFindContext          e_XFindContext;
+static e_pfn_XSetWMProtocols       e_XSetWMProtocols;
+static e_pfn_XInternAtom           e_XInternAtom;
+static e_pfn_XPending              e_XPending;
+static e_pfn_XNextEvent            e_XNextEvent;
+static e_pfn_XSendEvent            e_XSendEvent;
+static e_pfn_XRootWindow           e_XRootWindow;
+static e_pfn_XDefaultScreen        e_XDefaultScreen;
+static e_pfn_XDefaultDepth         e_XDefaultDepth;
+static e_pfn_XGrabPointer          e_XGrabPointer;
+static e_pfn_XUngrabPointer        e_XUngrabPointer;
+static e_pfn_XWarpPointer          e_XWarpPointer;
+static e_pfn_XQueryPointer         e_XQueryPointer;
+static e_pfn_XCreateBitmapFromData e_XCreateBitmapFromData;
+static e_pfn_XFreePixmap           e_XFreePixmap;
+static e_pfn_XCreatePixmapCursor   e_XCreatePixmapCursor;
+static e_pfn_XFreeCursor           e_XFreeCursor;
+static e_pfn_XDefineCursor         e_XDefineCursor;
+static e_pfn_XUndefineCursor       e_XUndefineCursor;
+static e_pfn_XFree                 e_XFree;
 
 
 /* We're going to use a global Display object because it just makes everything so much simpler. */
 static e_Display* e_gDisplay = NULL;
-static e_Atom e_gWMProtocolsAtom    = 0;
-static e_Atom e_gWMDeleteWindowAtom = 0;
-static e_Atom e_gWMQuitAtom         = 0;
+static e_Atom e_gWMProtocolsAtom     = 0;
+static e_Atom e_gWMDeleteWindowAtom  = 0;
+static e_Atom e_gWMQuitAtom          = 0;
+static e_Pixmap e_gBlankCursorSource = 0;
+static e_Cursor e_gBlankCursor       = 0;
 
 static e_result e_platform_uninit(void)
 {
     /* Xlib */
+    e_XFreeCursor(e_gDisplay, e_gBlankCursor);
+    e_XFreePixmap(e_gDisplay, e_gBlankCursorSource);
+
     if (e_gDisplay != NULL) {
         e_XCloseDisplay(e_gDisplay);
     }
@@ -2092,33 +2117,39 @@ static e_result e_platform_init(void)
             return E_ERROR; /* Failed to load the Xlib library. */
         }
     
-        e_XOpenDisplay         = (e_pfn_XOpenDisplay        )e_dlsym(e_gXlibSO, "XOpenDisplay");
-        e_XCloseDisplay        = (e_pfn_XCloseDisplay       )e_dlsym(e_gXlibSO, "XCloseDisplay");
-        e_XMatchVisualInfo     = (e_pfn_XMatchVisualInfo    )e_dlsym(e_gXlibSO, "XMatchVisualInfo");
-        e_XCreateColormap      = (e_pfn_XCreateColormap     )e_dlsym(e_gXlibSO, "XCreateColormap");
-        e_XFreeColormap        = (e_pfn_XFreeColormap       )e_dlsym(e_gXlibSO, "XFreeColormap");
-        e_XCreateWindow        = (e_pfn_XCreateWindow       )e_dlsym(e_gXlibSO, "XCreateWindow");
-        e_XDestroyWindow       = (e_pfn_XDestroyWindow      )e_dlsym(e_gXlibSO, "XDestroyWindow");
-        e_XMapWindow           = (e_pfn_XMapWindow          )e_dlsym(e_gXlibSO, "XMapWindow");
-        e_XStoreName           = (e_pfn_XStoreName          )e_dlsym(e_gXlibSO, "XStoreName");
-        e_XResizeWindow        = (e_pfn_XResizeWindow       )e_dlsym(e_gXlibSO, "XResizeWindow");
-        e_XGetWindowAttributes = (e_pfn_XGetWindowAttributes)e_dlsym(e_gXlibSO, "XGetWindowAttributes");
-        e_XSaveContext         = (e_pfn_XSaveContext        )e_dlsym(e_gXlibSO, "XSaveContext");
-        e_XDeleteContext       = (e_pfn_XDeleteContext      )e_dlsym(e_gXlibSO, "XDeleteContext");
-        e_XFindContext         = (e_pfn_XFindContext        )e_dlsym(e_gXlibSO, "XFindContext");
-        e_XSetWMProtocols      = (e_pfn_XSetWMProtocols     )e_dlsym(e_gXlibSO, "XSetWMProtocols");
-        e_XInternAtom          = (e_pfn_XInternAtom         )e_dlsym(e_gXlibSO, "XInternAtom");
-        e_XPending             = (e_pfn_XPending            )e_dlsym(e_gXlibSO, "XPending");
-        e_XNextEvent           = (e_pfn_XNextEvent          )e_dlsym(e_gXlibSO, "XNextEvent");
-        e_XSendEvent           = (e_pfn_XSendEvent          )e_dlsym(e_gXlibSO, "XSendEvent");
-        e_XRootWindow          = (e_pfn_XRootWindow         )e_dlsym(e_gXlibSO, "XRootWindow");
-        e_XDefaultScreen       = (e_pfn_XDefaultScreen      )e_dlsym(e_gXlibSO, "XDefaultScreen");
-        e_XDefaultDepth        = (e_pfn_XDefaultDepth       )e_dlsym(e_gXlibSO, "XDefaultDepth");
-        e_XGrabPointer         = (e_pfn_XGrabPointer        )e_dlsym(e_gXlibSO, "XGrabPointer");
-        e_XUngrabPointer       = (e_pfn_XUngrabPointer      )e_dlsym(e_gXlibSO, "XUngrabPointer");
-        e_XWarpPointer         = (e_pfn_XWarpPointer        )e_dlsym(e_gXlibSO, "XWarpPointer");
-        e_XQueryPointer        = (e_pfn_XQueryPointer       )e_dlsym(e_gXlibSO, "XQueryPointer");
-        e_XFree                = (e_pfn_XFree               )e_dlsym(e_gXlibSO, "XFree");
+        e_XOpenDisplay          = (e_pfn_XOpenDisplay         )e_dlsym(e_gXlibSO, "XOpenDisplay");
+        e_XCloseDisplay         = (e_pfn_XCloseDisplay        )e_dlsym(e_gXlibSO, "XCloseDisplay");
+        e_XMatchVisualInfo      = (e_pfn_XMatchVisualInfo     )e_dlsym(e_gXlibSO, "XMatchVisualInfo");
+        e_XCreateColormap       = (e_pfn_XCreateColormap      )e_dlsym(e_gXlibSO, "XCreateColormap");
+        e_XFreeColormap         = (e_pfn_XFreeColormap        )e_dlsym(e_gXlibSO, "XFreeColormap");
+        e_XCreateWindow         = (e_pfn_XCreateWindow        )e_dlsym(e_gXlibSO, "XCreateWindow");
+        e_XDestroyWindow        = (e_pfn_XDestroyWindow       )e_dlsym(e_gXlibSO, "XDestroyWindow");
+        e_XMapWindow            = (e_pfn_XMapWindow           )e_dlsym(e_gXlibSO, "XMapWindow");
+        e_XStoreName            = (e_pfn_XStoreName           )e_dlsym(e_gXlibSO, "XStoreName");
+        e_XResizeWindow         = (e_pfn_XResizeWindow        )e_dlsym(e_gXlibSO, "XResizeWindow");
+        e_XGetWindowAttributes  = (e_pfn_XGetWindowAttributes )e_dlsym(e_gXlibSO, "XGetWindowAttributes");
+        e_XSaveContext          = (e_pfn_XSaveContext         )e_dlsym(e_gXlibSO, "XSaveContext");
+        e_XDeleteContext        = (e_pfn_XDeleteContext       )e_dlsym(e_gXlibSO, "XDeleteContext");
+        e_XFindContext          = (e_pfn_XFindContext         )e_dlsym(e_gXlibSO, "XFindContext");
+        e_XSetWMProtocols       = (e_pfn_XSetWMProtocols      )e_dlsym(e_gXlibSO, "XSetWMProtocols");
+        e_XInternAtom           = (e_pfn_XInternAtom          )e_dlsym(e_gXlibSO, "XInternAtom");
+        e_XPending              = (e_pfn_XPending             )e_dlsym(e_gXlibSO, "XPending");
+        e_XNextEvent            = (e_pfn_XNextEvent           )e_dlsym(e_gXlibSO, "XNextEvent");
+        e_XSendEvent            = (e_pfn_XSendEvent           )e_dlsym(e_gXlibSO, "XSendEvent");
+        e_XRootWindow           = (e_pfn_XRootWindow          )e_dlsym(e_gXlibSO, "XRootWindow");
+        e_XDefaultScreen        = (e_pfn_XDefaultScreen       )e_dlsym(e_gXlibSO, "XDefaultScreen");
+        e_XDefaultDepth         = (e_pfn_XDefaultDepth        )e_dlsym(e_gXlibSO, "XDefaultDepth");
+        e_XGrabPointer          = (e_pfn_XGrabPointer         )e_dlsym(e_gXlibSO, "XGrabPointer");
+        e_XUngrabPointer        = (e_pfn_XUngrabPointer       )e_dlsym(e_gXlibSO, "XUngrabPointer");
+        e_XWarpPointer          = (e_pfn_XWarpPointer         )e_dlsym(e_gXlibSO, "XWarpPointer");
+        e_XQueryPointer         = (e_pfn_XQueryPointer        )e_dlsym(e_gXlibSO, "XQueryPointer");
+        e_XCreateBitmapFromData = (e_pfn_XCreateBitmapFromData)e_dlsym(e_gXlibSO, "XCreateBitmapFromData");
+        e_XFreePixmap           = (e_pfn_XFreePixmap          )e_dlsym(e_gXlibSO, "XFreePixmap");
+        e_XCreatePixmapCursor   = (e_pfn_XCreatePixmapCursor  )e_dlsym(e_gXlibSO, "XCreatePixmapCursor");
+        e_XFreeCursor           = (e_pfn_XFreeCursor          )e_dlsym(e_gXlibSO, "XFreeCursor");
+        e_XDefineCursor         = (e_pfn_XDefineCursor        )e_dlsym(e_gXlibSO, "XDefineCursor");
+        e_XUndefineCursor       = (e_pfn_XUndefineCursor      )e_dlsym(e_gXlibSO, "XUndefineCursor");
+        e_XFree                 = (e_pfn_XFree                )e_dlsym(e_gXlibSO, "XFree");
 
         /* Create our display object. */
         e_gDisplay = e_XOpenDisplay(NULL);
@@ -2131,6 +2162,13 @@ static e_result e_platform_init(void)
         e_gWMProtocolsAtom    = e_XInternAtom(e_gDisplay, "WM_PROTOCOLS",     E_FALSE);
         e_gWMDeleteWindowAtom = e_XInternAtom(e_gDisplay, "WM_DELETE_WINDOW", E_FALSE);
         e_gWMQuitAtom         = e_XInternAtom(e_gDisplay, "WM_QUIT",          E_FALSE);
+
+        /* We need an invisible cursor. */
+        {
+            static char bits[] = {0, 0, 0, 0, 0, 0, 0, 0};
+            e_gBlankCursorSource = e_XCreateBitmapFromData(e_gDisplay, e_XRootWindow(e_gDisplay, e_XDefaultScreen(e_gDisplay)), bits, 1, 1);
+            e_gBlankCursor = e_XCreatePixmapCursor(e_gDisplay, e_gBlankCursorSource, e_gBlankCursorSource, NULL, NULL, 0, 0);
+        }
     }
 
     return E_SUCCESS;
@@ -2328,6 +2366,18 @@ static e_result e_platform_window_get_cursor_position(e_platform_window* pWindow
         return E_ERROR;
     }
 
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_show_cursor(e_platform_window* pWindow)
+{
+    e_XUndefineCursor(e_gDisplay, pWindow->window);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_hide_cursor(e_platform_window* pWindow)
+{
+    e_XDefineCursor(e_gDisplay, pWindow->window, e_gBlankCursor);
     return E_SUCCESS;
 }
 
