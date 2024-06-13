@@ -2166,8 +2166,14 @@ static e_result e_platform_init(void)
         /* We need an invisible cursor. */
         {
             static char bits[] = {0, 0, 0, 0, 0, 0, 0, 0};
+            e_XColor black;
+
+            black.red   = 0;
+            black.green = 0;
+            black.blue  = 0;
+
             e_gBlankCursorSource = e_XCreateBitmapFromData(e_gDisplay, e_XRootWindow(e_gDisplay, e_XDefaultScreen(e_gDisplay)), bits, 1, 1);
-            e_gBlankCursor = e_XCreatePixmapCursor(e_gDisplay, e_gBlankCursorSource, e_gBlankCursorSource, NULL, NULL, 0, 0);
+            e_gBlankCursor = e_XCreatePixmapCursor(e_gDisplay, e_gBlankCursorSource, e_gBlankCursorSource, &black, &black, 0, 0);
         }
     }
 
@@ -2418,6 +2424,17 @@ static e_result e_platform_window_post_close_event(e_platform_window* pWindow)
     e_XSendEvent(e_gDisplay, x11Event.xclient.window, E_FALSE, e_NoEventMask, (e_XEvent*)&x11Event);
 
     return E_SUCCESS;
+}
+
+static e_result e_platform_window_next_buffer(e_platform_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer)
+{
+    /* TODO: Implement me. */
+    (void)pWindow;
+    (void)bufferSizeX;
+    (void)bufferSizeY;
+    (void)pBuffer;
+
+    return E_NOT_IMPLEMENTED;
 }
 
 
