@@ -1684,6 +1684,11 @@ any potential collisions.
 #define e_TrueColor                 4
 #define e_DirectColor               5
 
+#define e_CurrentTime               0
+
+#define e_GrabModeSync              0
+#define e_GrabModeAsync             1
+
 typedef struct e_XDisplay           e_Display;
 typedef struct e_XScreen            e_Screen;
 typedef struct e_XVisual            e_Visual;
@@ -1973,6 +1978,8 @@ typedef int        (* e_pfn_XSendEvent          )(e_Display* pDisplay, e_Window 
 typedef e_Window   (* e_pfn_XRootWindow         )(e_Display* pDisplay, int screenNumber);
 typedef int        (* e_pfn_XDefaultScreen      )(e_Display* pDisplay);
 typedef int        (* e_pfn_XDefaultDepth       )(e_Display* pDisplay, int screenNumber);
+typedef int        (* e_pfn_XGrabPointer        )(e_Display* pDisplay, e_Window grabWindow, e_Bool ownerEvents, unsigned int eventMask, int pointerMode, int keyboardMode, e_Window confineTo, e_Cursor cursor, e_Time time);
+typedef int        (* e_pfn_XUngrabPointer      )(e_Display* pDisplay, e_Time time);
 typedef int        (* e_pfn_XFree               )(void* pData);
 
 static e_handle e_gXlibSO = NULL;
@@ -1998,6 +2005,8 @@ static e_pfn_XSendEvent           e_XSendEvent;
 static e_pfn_XRootWindow          e_XRootWindow;
 static e_pfn_XDefaultScreen       e_XDefaultScreen;
 static e_pfn_XDefaultDepth        e_XDefaultDepth;
+static e_pfn_XGrabPointer         e_XGrabPointer;
+static e_pfn_XUngrabPointer       e_XUngrabPointer;
 static e_pfn_XFree                e_XFree;
 
 
@@ -2276,6 +2285,20 @@ static e_result e_platform_window_set_size(e_platform_window* pWindow, unsigned 
 
     e_XResizeWindow(e_gDisplay, pWindow->window, sizeX, sizeY);
 
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_capture_cursor(e_platform_window* pWindow)
+{
+    e_XGrabPointer(e_gDisplay, pWindow->window, E_TRUE, e_ButtonPressMask | e_ButtonReleaseMask | e_PointerMotionMask, e_GrabModeAsync, e_GrabModeAsync, pWindow->window, e_None, e_CurrentTime);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_release_cursor(e_platform_window* pWindow)
+{
+    (void)pWindow;
+
+    e_XUngrabPointer(e_gDisplay, e_CurrentTime);
     return E_SUCCESS;
 }
 
