@@ -2196,6 +2196,11 @@ struct e_platform_window
     e_XVisualInfo* pGLVisualInfo; /* Will be NULL if OpenGL is not being used. */
     int sizeX;  /* The size will be updated in response to the ConfigureNotify event. */
     int sizeY;
+    e_bool32 isCursorHidden;
+    e_bool32 isCursorPinned;
+    e_bool32 ignoreNextMouseMoveEvent;
+    int pinnedCursorPosX;
+    int pinnedCursorPosY;
 };
 
 static size_t e_platform_window_sizeof(void)
@@ -2378,6 +2383,24 @@ static e_result e_platform_window_show_cursor(e_platform_window* pWindow)
 static e_result e_platform_window_hide_cursor(e_platform_window* pWindow)
 {
     e_XDefineCursor(e_gDisplay, pWindow->window, e_gBlankCursor);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_pin_cursor(e_platform_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    pWindow->isCursorPinned = E_TRUE;
+    pWindow->pinnedCursorPosX = cursorPosX;
+    pWindow->pinnedCursorPosY = cursorPosY;
+    pWindow->ignoreNextMouseMoveEvent = E_TRUE;
+
+    e_XWarpPointer(e_gDisplay, e_None, pWindow->window, 0, 0, 0, 0, cursorPosX, cursorPosY);
+
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_unpin_cursor(e_platform_window* pWindow)
+{
+    pWindow->isCursorPinned = E_FALSE;
     return E_SUCCESS;
 }
 
