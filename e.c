@@ -1980,6 +1980,8 @@ typedef int        (* e_pfn_XDefaultScreen      )(e_Display* pDisplay);
 typedef int        (* e_pfn_XDefaultDepth       )(e_Display* pDisplay, int screenNumber);
 typedef int        (* e_pfn_XGrabPointer        )(e_Display* pDisplay, e_Window grabWindow, e_Bool ownerEvents, unsigned int eventMask, int pointerMode, int keyboardMode, e_Window confineTo, e_Cursor cursor, e_Time time);
 typedef int        (* e_pfn_XUngrabPointer      )(e_Display* pDisplay, e_Time time);
+typedef int        (* e_pfn_XWarpPointer        )(e_Display* pDisplay, e_Window src_w, e_Window dest_w, int src_x, int src_y, unsigned int src_width, unsigned int src_height, int dest_x, int dest_y);
+typedef e_Bool     (* e_pfn_XQueryPointer       )(e_Display* pDisplay, e_Window w, e_Window* pRoot, e_Window* pChild, int* pRootX, int* pRootY, int* pWinX, int* pWinY, unsigned int* pKeysButtons);
 typedef int        (* e_pfn_XFree               )(void* pData);
 
 static e_handle e_gXlibSO = NULL;
@@ -2007,6 +2009,8 @@ static e_pfn_XDefaultScreen       e_XDefaultScreen;
 static e_pfn_XDefaultDepth        e_XDefaultDepth;
 static e_pfn_XGrabPointer         e_XGrabPointer;
 static e_pfn_XUngrabPointer       e_XUngrabPointer;
+static e_pfn_XWarpPointer         e_XWarpPointer;
+static e_pfn_XQueryPointer        e_XQueryPointer;
 static e_pfn_XFree                e_XFree;
 
 
@@ -2110,6 +2114,10 @@ static e_result e_platform_init(void)
         e_XRootWindow          = (e_pfn_XRootWindow         )e_dlsym(e_gXlibSO, "XRootWindow");
         e_XDefaultScreen       = (e_pfn_XDefaultScreen      )e_dlsym(e_gXlibSO, "XDefaultScreen");
         e_XDefaultDepth        = (e_pfn_XDefaultDepth       )e_dlsym(e_gXlibSO, "XDefaultDepth");
+        e_XGrabPointer         = (e_pfn_XGrabPointer        )e_dlsym(e_gXlibSO, "XGrabPointer");
+        e_XUngrabPointer       = (e_pfn_XUngrabPointer      )e_dlsym(e_gXlibSO, "XUngrabPointer");
+        e_XWarpPointer         = (e_pfn_XWarpPointer        )e_dlsym(e_gXlibSO, "XWarpPointer");
+        e_XQueryPointer        = (e_pfn_XQueryPointer       )e_dlsym(e_gXlibSO, "XQueryPointer");
         e_XFree                = (e_pfn_XFree               )e_dlsym(e_gXlibSO, "XFree");
 
         /* Create our display object. */
@@ -2299,6 +2307,27 @@ static e_result e_platform_window_release_cursor(e_platform_window* pWindow)
     (void)pWindow;
 
     e_XUngrabPointer(e_gDisplay, e_CurrentTime);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_set_cursor_position(e_platform_window* pWindow, int cursorPosX, int cursorPosY)
+{
+    e_XWarpPointer(e_gDisplay, e_None, pWindow->window, 0, 0, 0, 0, cursorPosX, cursorPosY);
+    return E_SUCCESS;
+}
+
+static e_result e_platform_window_get_cursor_position(e_platform_window* pWindow, int* pCursorPosX, int* pCursorPosY)
+{
+    e_Window rootWindow;
+    e_Window childWindow;
+    int rootX;
+    int rootY;
+    unsigned int mask;
+
+    if (e_XQueryPointer(e_gDisplay, pWindow->window, &rootWindow, &childWindow, &rootX, &rootY, pCursorPosX, pCursorPosY, &mask) == 0) {
+        return E_ERROR;
+    }
+
     return E_SUCCESS;
 }
 
