@@ -1956,12 +1956,10 @@ typedef union e_XEvent
 
 
 /* OpenGL */
-#if !defined(E_NO_OPENGL)
 typedef e_XVisualInfo* (* e_pfn_glXChooseVisual)(e_Display* pDisplay, int screen, int* pAttribList);
 
 static e_handle e_gOpenGLSO = NULL;
 static e_pfn_glXChooseVisual e_glXChooseVisual;
-#endif
 
 /* Xlib */
 typedef e_Display* (* e_pfn_XOpenDisplay         )(const char* pDisplayName);
@@ -2058,20 +2056,17 @@ static e_result e_platform_uninit(void)
     }
 
     /* OpenGL */
-#if !defined(E_NO_OPENGL)
     if (e_gOpenGLSO != NULL) {
         e_dlclose(e_gOpenGLSO);
         e_gOpenGLSO = NULL;
     }
-#endif
 
     return E_SUCCESS;
 }
 
 static e_result e_platform_init(void)
 {
-    /* OpenGL */
-    #if !defined(E_NO_OPENGL)
+    /* OpenGL. Allow this to continue initialization if libGL is not installed. */
     {
         const char* pOpenGLSONames[] = {
             "libGL.so.1",
@@ -2086,14 +2081,10 @@ static e_result e_platform_init(void)
             }
         }
 
-        if (e_gOpenGLSO == NULL) {
-            e_platform_uninit();
-            return E_ERROR; /* Failed to load the OpenGL library. */
+        if (e_gOpenGLSO != NULL) {
+            e_glXChooseVisual = (e_pfn_glXChooseVisual)e_dlsym(e_gOpenGLSO, "glXChooseVisual");
         }
-
-        e_glXChooseVisual = (e_pfn_glXChooseVisual)e_dlsym(e_gOpenGLSO, "glXChooseVisual");
     }
-    #endif
 
     /* TODO: Need to support different backends here. May want to support Wayland. Might need a compile time macro for this. */
 
@@ -2218,7 +2209,7 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
 {
     e_XSetWindowAttributes attr;
     e_XVisualInfo defaultVisualInfo;  /* Used when OpenGL is not being used. */
-    e_XVisualInfo* pVisualInfo = &defaultVisualInfo;
+    e_XVisualInfo* pVisualInfo = NULL;
 
     E_ASSERT(pWindow != NULL);
     E_UNUSED(pAllocationCallbacks);
@@ -2242,28 +2233,28 @@ static e_result e_platform_window_init_preallocated(const e_window_config* pConf
         pWindow->pGLVisualInfo = NULL;
     } else {
         /* OpenGL is being requested. The visual must be compatible. */
-    #if !defined(E_NO_OPENGL)
-        static int attribs[] = {
-            GLX_RGBA,
-            GLX_RED_SIZE,      8,
-            GLX_GREEN_SIZE,    8,
-            GLX_BLUE_SIZE,     8,
-            GLX_ALPHA_SIZE,    8,
-            GLX_DEPTH_SIZE,    24,
-            GLX_STENCIL_SIZE,  8,
-            GLX_DOUBLEBUFFER,
-            e_None, e_None
-        };
+        if (e_gOpenGLSO != NULL) {
+            static int attribs[] = {
+                GLX_RGBA,
+                GLX_RED_SIZE,      8,
+                GLX_GREEN_SIZE,    8,
+                GLX_BLUE_SIZE,     8,
+                GLX_ALPHA_SIZE,    8,
+                GLX_DEPTH_SIZE,    24,
+                GLX_STENCIL_SIZE,  8,
+                GLX_DOUBLEBUFFER,
+                e_None, e_None
+            };
 
-        pVisualInfo = e_glXChooseVisual(e_gDisplay, e_XDefaultScreen(e_gDisplay), attribs);
-        if (pVisualInfo == NULL) {
-            return E_ERROR; /* Failed to find a compatible visual. */
+            pVisualInfo = e_glXChooseVisual(e_gDisplay, e_XDefaultScreen(e_gDisplay), attribs);
+            if (pVisualInfo == NULL) {
+                return E_ERROR; /* Failed to find a compatible visual. */
+            }
+
+            pWindow->pGLVisualInfo = pVisualInfo;
+        } else {
+            return E_ERROR; /* OpenGL not available. */
         }
-
-        pWindow->pGLVisualInfo = pVisualInfo;
-    #else
-        return E_ERROR; /* OpenGL is disabled. */
-    #endif
     }
 
     /* Now that we have the visual we can create the colormap. */
