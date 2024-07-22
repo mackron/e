@@ -80,7 +80,7 @@
 #if defined(E_POSIX)
     #define LUA_USE_POSIX
 #endif
-#define LUA_USE_C89
+/*#define LUA_USE_C89*/ /* If we enable LUA_USE_C89 we will not get support for 64-bit integers. */
 #define LUA_IMPL
 #include "external/minilua/minilua.h"
 #if defined(_MSC_VER)
@@ -293,7 +293,7 @@ static void e_free_default(void* p, void* pUserData)
 }
 
 
-FS_API e_allocation_callbacks e_allocation_callbacks_init_default(void)
+E_API e_allocation_callbacks e_allocation_callbacks_init_default(void)
 {
     e_allocation_callbacks allocationCallbacks;
 
@@ -8886,7 +8886,7 @@ done:
     return E_SUCCESS;
 }
 
-E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue)
+static e_result e_config_file_get_lua_Integer(e_config_file* pConfigFile, const char* pSection, const char* pName, lua_Integer* pValue)
 {
     e_result result = E_SUCCESS;
     lua_State* pLua;
@@ -8928,6 +8928,27 @@ E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSe
     }
 
     if (pValue != NULL) {
+        *pValue = value;
+    }
+
+    return result;
+}
+
+E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue)
+{
+    e_result result = E_SUCCESS;
+    lua_Integer value;
+
+    if (pValue != NULL) {
+        *pValue = 0;
+    }
+
+    result = e_config_file_get_lua_Integer(pConfigFile, pSection, pName, &value);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (pValue != NULL) {
         *pValue = (int)value;
     }
 
@@ -8953,6 +8974,49 @@ E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pS
     }
 
     return E_SUCCESS;
+}
+
+E_API e_result e_config_file_get_int64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_int64* pValue)
+{
+    e_result result = E_SUCCESS;
+    lua_Integer value;
+
+    if (pValue != NULL) {
+        *pValue = 0;
+    }
+
+    result = e_config_file_get_lua_Integer(pConfigFile, pSection, pName, &value);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (pValue != NULL) {
+        *pValue = (e_int64)value;
+    }
+
+    return result;
+}
+
+E_API e_result e_config_file_get_uint64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_uint64* pValue)
+{
+    e_result result;
+    e_int64 value;
+
+    if (pValue != NULL) {
+        *pValue = 0;
+    }
+
+    result = e_config_file_get_int64(pConfigFile, pSection, pName, &value);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (pValue != NULL) {
+        *pValue = (e_uint64)value;
+    }
+
+    return E_SUCCESS;
+
 }
 /* ==== END e_config_file.c ==== */
 

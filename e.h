@@ -1044,6 +1044,8 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
 E_API e_result e_config_file_get_string(e_config_file* pConfigFile, const char* pSection, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, char** ppValue);   /* Free the returned string with e_free(). */
 E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue);
 E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pSection, const char* pName, unsigned int* pValue);
+E_API e_result e_config_file_get_int64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_int64* pValue);
+E_API e_result e_config_file_get_uint64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_uint64* pValue);
 /* ==== END e_config_file.h ==== */
 
 
