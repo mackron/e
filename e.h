@@ -329,6 +329,8 @@ typedef struct e_allocation_callbacks
     void  (* onFree)(void* p, void* pUserData);
 } e_allocation_callbacks;
 
+E_API e_allocation_callbacks e_allocation_callbacks_init_default(void);
+
 E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_calloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_realloc(void* p, size_t sz, const e_allocation_callbacks* pAllocationCallbacks);

@@ -293,7 +293,7 @@ static void e_free_default(void* p, void* pUserData)
 }
 
 
-static e_allocation_callbacks e_allocation_callbacks_init_default()
+FS_API e_allocation_callbacks e_allocation_callbacks_init_default(void)
 {
     e_allocation_callbacks allocationCallbacks;
 
