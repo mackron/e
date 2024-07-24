@@ -2855,7 +2855,7 @@ E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, s
 
 E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
 {
-    const size_t threshold = 0; /* TODO: Change this to something valid once we've properly tested our binary search implementation. */
+    const size_t threshold = 10;
 
     if (count < threshold) {
         return e_linear_search(pKey, pList, count, stride, compareProc, pUserData);
