@@ -2788,40 +2788,24 @@ static E_INLINE void e_swap(void* a, void* b, size_t sz)
     }
 }
 
-E_API void e_qsort_s(void* pBase, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
+E_API void e_sort(void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
 {
-    char* pLeft;
-    char* pRight;
-    char* pPivot;
+    /* Simple insert sort for now. Will improve on this later. */
+    size_t i;
+    size_t j;
 
-    if (count < 2) {
-        return;
-    }
+    for (i = 1; i < count; i += 1) {
+        for (j = i; j > 0; j -= 1) {
+            void* pA = (char*)pList + (j - 1) * stride;
+            void* pB = (char*)pList + j * stride;
 
-    pLeft  = (char*)pBase;
-    pRight = (char*)pBase + (count - 1) * stride;
-    pPivot = (char*)pBase + (count / 2) * stride;
+            if (compareProc(pUserData, pA, pB) <= 0) {
+                break;
+            }
 
-    while (pLeft < pRight) {
-        while (pLeft < pRight && compareProc(pUserData, pLeft, pPivot) < 0) {
-            pLeft += stride;
-        }
-
-        while (pLeft < pRight && compareProc(pUserData, pPivot, pRight) <= 0) {
-            pRight -= stride;
-        }
-        
-        if (pLeft < pRight) {
-            e_swap(pLeft, pRight, stride);
+            e_swap(pA, pB, stride);
         }
     }
-
-    if (compareProc(pUserData, pPivot, pLeft) <= 0) {
-        e_swap(pLeft, pPivot, stride);
-    }
-
-    e_qsort_s(pBase, (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
-    e_qsort_s(pLeft + stride, (count - 1) - (pLeft - (char*)pBase) / stride, stride, compareProc, pUserData);
 }
 
 E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData)
@@ -7126,7 +7110,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         check how the sorting looks before our explicit sort. If most real-world archives are already
         mostly sorted, it might be more efficient to just do a simple insertion sort.
         */
-        e_qsort_s(pZip->pIndex, pZip->fileCount, sizeof(e_zip_index), e_zip_qsort_compare, pZip);
+        e_sort(pZip->pIndex, pZip->fileCount, sizeof(e_zip_index), e_zip_qsort_compare, pZip);
 
         /* Testing. */
         #if 0
