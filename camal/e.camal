@@ -156,6 +156,14 @@ c89thread_types_h  = rename_c89thread_types(c89thread_types_h);
 c89thread_types_c := replace_namespace_c89thread(@(c89thread_h("/\* BEG c89thread_types.c \*/\R":"\R/\* END c89thread_types.c \*/")));
 c89thread_types_c  = rename_c89thread_types(c89thread_types_c);
 
+// Condition variables are not currently implemented in c89thread for Windows. For this reason I'm going to
+// not include them in the amalgamation.
+c89thread_types_h["/\* e_cond \*/" : "/\* e_semaphore \*/"] = "/* e_semaphore */";
+
+c89thread_types_c["\R/\* BEG e_cond_win32.c \*/" : "/\* END e_cond_win32.c \*/\R"] = "";
+c89thread_types_c["\R/\* BEG e_cond_pthread.c \*/" : "/\* END e_cond_pthread.c \*/\R"] = "";
+
+
 e_h("/\* BEG e_thread.h \*/\R":"\R/\* END e_thread.h \*/") = c89thread_types_h;
 e_c("/\* BEG e_thread.c \*/\R":"\R/\* END e_thread.c \*/") = c89thread_types_c;
     

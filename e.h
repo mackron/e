@@ -691,22 +691,6 @@ E_API e_result e_mutex_trylock(e_mutex* mutex);
 E_API e_result e_mutex_unlock(e_mutex* mutex);
 
 
-/* e_cond */
-#if defined(E_WIN32)
-/* Not implemented. */
-typedef void*            e_cond;
-#else
-typedef e_pthread_cond_t e_cond;
-#endif
-
-E_API e_result e_cond_init(e_cond* cnd);
-E_API void e_cond_destroy(e_cond* cnd);
-E_API e_result e_cond_signal(e_cond* cnd);
-E_API e_result e_cond_broadcast(e_cond* cnd);
-E_API e_result e_cond_wait(e_cond* cnd, e_mutex* mtx);
-E_API e_result e_cond_timedwait(e_cond* cnd, e_mutex* mtx, const struct timespec* time_point);
-
-
 /* e_semaphore */
 #if defined(E_WIN32)
 typedef e_handle e_semaphore;
