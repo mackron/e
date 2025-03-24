@@ -15,6 +15,14 @@ do stuff. This is where you'd probably step your clients.
 #ifndef e_h
 #define e_h
 
+#define E_STRINGIFY(x)     #x
+#define E_XSTRINGIFY(x)    E_STRINGIFY(x)
+
+#define E_VERSION_MAJOR    0
+#define E_VERSION_MINOR    0
+#define E_VERSION_PATCH    1
+#define E_VERSION_STRING   E_XSTRINGIFY(E_VERSION_MAJOR) "." E_XSTRINGIFY(E_VERSION_MINOR) "." E_XSTRINGIFY(E_VERSION_REVISION)
+
 #include <stddef.h> /* size_t */
 #include <stdarg.h> /* va_list */
 #include <math.h>
