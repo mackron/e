@@ -329,6 +329,8 @@ typedef struct e_allocation_callbacks
     void  (* onFree)(void* p, void* pUserData);
 } e_allocation_callbacks;
 
+E_API e_allocation_callbacks e_allocation_callbacks_init_default(void);
+
 E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_calloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_realloc(void* p, size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
@@ -337,7 +339,7 @@ E_API void  e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks);
 
 
 /* ==== BEG e_misc.h ==== */
-E_API void e_qsort_s(void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
+E_API void e_sort(void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 
 E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
@@ -1042,6 +1044,8 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
 E_API e_result e_config_file_get_string(e_config_file* pConfigFile, const char* pSection, const char* pName, const e_allocation_callbacks* pAllocationCallbacks, char** ppValue);   /* Free the returned string with e_free(). */
 E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSection, const char* pName, int* pValue);
 E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pSection, const char* pName, unsigned int* pValue);
+E_API e_result e_config_file_get_int64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_int64* pValue);
+E_API e_result e_config_file_get_uint64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_uint64* pValue);
 /* ==== END e_config_file.h ==== */
 
 
