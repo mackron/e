@@ -732,38 +732,6 @@ E_API e_result e_syncevent_signal(e_syncevent* evnt);
 
 
 
-/* BEG e_threading.h */
-#if 0
-typedef int (* e_thread_start_callback)(void* arg);
-
-typedef struct e_thread_config e_thread_config;
-typedef struct e_thread        e_thread;
-
-struct e_thread_config
-{
-    e_thread_start_callback func;
-    void* arg;
-};
-
-E_API e_thread_config e_thread_config_init(e_thread_start_callback func, void* arg);
-
-E_API e_result e_thread_init(const e_thread_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_thread** ppThread);
-E_API e_result e_thread_join(e_thread* pThread, int* pExitCode);
-
-
-typedef struct e_mutex e_mutex;
-
-E_API size_t e_mutex_alloc_size(void);
-E_API e_result e_mutex_init_preallocated(e_mutex* pMutex);
-E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, e_mutex** ppMutex);
-E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAllocationCallbacks);
-E_API void e_mutex_lock(e_mutex* pMutex);
-E_API void e_mutex_unlock(e_mutex* pMutex);
-#endif
-/* END e_threading.h */
-
-
-
 /* BEG e_stream.h */
 /*
 Streams.
