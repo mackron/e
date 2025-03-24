@@ -177,6 +177,8 @@ typedef unsigned int  e_bool32;
 typedef void* e_handle;
 typedef void* e_ptr;
 
+#define E_INT64_MAX ((e_int64)(((e_uint64)0x7FFFFFFF << 32) | 0xFFFFFFFF))
+
 typedef enum
 {
     /* Engine-specific non-error codes. */
@@ -603,11 +605,24 @@ E_API void e_mutex_unlock(e_mutex* pMutex);
 
 
 /* BEG e_stream.h */
-typedef enum
+/*
+Streams.
+
+The feeding of input and output data is done via a stream.
+
+To implement a custom stream, such as a memory stream, or a file stream, you need to extend from
+`e_stream` and implement `e_stream_vtable`. You can access your custom data by casting the
+`e_stream` to your custom type.
+
+The stream vtable can support both reading and writing, but it doesn't need to support both at
+the same time. If one is not supported, simply leave the relevant `read` or `write` callback as
+`NULL`, or have them return E_NOT_IMPLEMENTED.
+*/
+typedef enum e_seek_origin
 {
-    E_SEEK_ORIGIN_CURRENT,
-    E_SEEK_ORIGIN_START,
-    E_SEEK_ORIGIN_END
+    E_SEEK_SET = 0,
+    E_SEEK_CUR = 1,
+    E_SEEK_END = 2
 } e_seek_origin;
 
 typedef struct e_stream_vtable e_stream_vtable;
@@ -615,66 +630,113 @@ typedef struct e_stream        e_stream;
 
 struct e_stream_vtable
 {
-    e_result (* read )(void* pUserData, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-    e_result (* write)(void* pUserData, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-    e_result (* seek )(void* pUserData, e_int64 offset, e_seek_origin origin);
-    e_result (* tell )(void* pUserData, e_int64* pCursor);
+    e_result (* read                )(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead);
+    e_result (* write               )(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+    e_result (* seek                )(e_stream* pStream, e_int64 offset, e_seek_origin origin);
+    e_result (* tell                )(e_stream* pStream, e_int64* pCursor);
+    size_t   (* duplicate_alloc_size)(e_stream* pStream);                                 /* Optional. Returns the allocation size of the stream. When not defined, duplicating is disabled. */
+    e_result (* duplicate           )(e_stream* pStream, e_stream* pDuplicatedStream);    /* Optional. Duplicate the stream. */
+    void     (* uninit              )(e_stream* pStream);                                 /* Optional. Uninitialize the stream. */
 };
-
 
 struct e_stream
 {
     const e_stream_vtable* pVTable;
-    void* pVTableUserData;
 };
 
-E_API e_result e_stream_init(const e_stream_vtable* pVTable, void* pVTableUserData, e_stream* pStream);
+E_API e_result e_stream_init(const e_stream_vtable* pVTable, e_stream* pStream);
 E_API e_result e_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_stream_write(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
 E_API e_result e_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin origin);
 E_API e_result e_stream_tell(e_stream* pStream, e_int64* pCursor);
+E_API e_result e_stream_writef(e_stream* pStream, const char* fmt, ...) E_ATTRIBUTE_FORMAT(2, 3);
+E_API e_result e_stream_writef_ex(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, const char* fmt, ...) E_ATTRIBUTE_FORMAT(3, 4);
+E_API e_result e_stream_writefv(e_stream* pStream, const char* fmt, va_list args);
+E_API e_result e_stream_writefv_ex(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, const char* fmt, va_list args);
 
+/*
+Duplicates a stream.
 
+This will allocate the new stream on the heap. The caller is responsible for freeing the stream
+with `e_stream_delete_duplicate()` when it's no longer needed.
+*/
+E_API e_result e_stream_duplicate(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_stream** ppDuplicatedStream);
+
+/*
+Deletes a duplicated stream.
+
+Do not use this for a stream that was not duplicated with `e_stream_duplicate()`.
+*/
+E_API void e_stream_delete_duplicate(e_stream* pDuplicatedStream, const e_allocation_callbacks* pAllocationCallbacks);
+
+/*
+Helper functions for reading the entire contents of a stream, starting from the current cursor position. Free
+the returned pointer with e_free().
+
+The format (E_STREAM_DATA_FORMAT_TEXT or E_STREAM_DATA_FORMAT_BINARY) is used to determine whether or not a null terminator should be
+appended to the end of the data.
+
+For flexiblity in case the backend does not support cursor retrieval or positioning, the data will be read
+in fixed sized chunks.
+*/
+typedef enum e_stream_data_format
+{
+    E_STREAM_DATA_FORMAT_TEXT,
+    E_STREAM_DATA_FORMAT_BINARY
+} e_stream_data_format;
+
+E_API e_result e_stream_read_to_end(e_stream* pStream, e_stream_data_format format, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, size_t* pDataSize);
+/* END e_stream.h */
+
+/* BEG e_memory_stream.h */
 /*
 Memory streams support both reading and writing within the same stream. To only support read-only
 mode, use e_memory_stream_init_readonly(). With this you can pass in a standard data/size pair.
 
-If you need writing support, use e_memory_stream_init_write(). This takes a pointer to a pointer
-to the buffer. As the stream writes data, it will dynamically expand the buffer as required. This
-mode also supports reading.
+If you need writing support, use e_memory_stream_init_write(). When writing data, the stream will
+output to a buffer that is owned by the stream. When you need to access the data, do so by
+inspecting the pointer directly with `stream.write.pData` and `stream.write.dataSize`. This mode
+also supports reading.
 
 You can overwrite data by seeking to the required location and then just writing like normal. To
 append data, just seek to the end:
 
-    e_memory_stream_seek(pStream, 0, E_SEEK_ORIGIN_END);
+    e_memory_stream_seek(pStream, 0, E_SEEK_END);
 
-Write mode does not support initialization against an existing buffer. For example, you cannot
-allocate a buffer externally, and then plug it into a memory stream to append more data to it.
-The reason for this is that the memory stream cannot know if the original buffer is compatible
-for resizing.
-
-The memory stream need not be uninitialized. Simply destroy your `e_memory_stream` object when
-it's no longer needed. In write mode, the buffer you passed into the config will contain the
-data. Free this data with `e_free()` when it's no longer required.
+The memory stream need not be uninitialized in read-only mode. In write mode you can use
+`e_memory_stream_uninit()` to free the data. Alternatively you can just take ownership of the
+buffer and free it yourself with `e_free()`.
 
 Below is an example for write mode.
 
     ```c
-    void* pData;
-    size_t dataSize;
-
     e_memory_stream stream;
-    e_memory_stream_init_write(&pData, &dataSize, NULL, &stream);
+    e_memory_stream_init_write(NULL, &stream);
     
     // Write some data to the stream...
     e_memory_stream_write(&stream, pSomeData, someDataSize, NULL);
     
     // Do something with the data.
-    do_something_with_my_data(pData, dataSize);
-
-    // Free the data when it's no longer needed. I'll be stored in pData and dataSize.
-    e_free(pData, NULL);
+    do_something_with_my_data(stream.write.pData, stream.write.dataSize);
     ```
+
+To free the data, you can use `e_memory_stream_uninit()`, or you can take ownership of the data
+and free it yourself with `e_free()`:
+
+    ```c
+    e_memory_stream_uninit(&stream);
+    ```
+
+Or to take ownership:
+
+    ```c
+    size_t dataSize;
+    void* pData = e_memory_stream_take_ownership(&stream, &dataSize);
+    ```
+
+With the above, `pData` will be the pointer to the data and `dataSize` will be the size of the data
+and you will be responsible for deleting the buffer with `e_free()`.
+
 
 Read mode is simpler:
 
@@ -703,20 +765,27 @@ struct e_memory_stream
         const void* pData;
         size_t dataSize;
     } readonly;
+    struct
+    {
+        void* pData;        /* Will only be set in write mode. */
+        size_t dataSize;
+        size_t dataCap;
+    } write;
     size_t cursor;
-    size_t dataCap; /* Only used in write mode. Keeps track of the capacity of the *ppData buffer. */
     e_allocation_callbacks allocationCallbacks; /* This is copied from the allocation callbacks passed in from e_memory_stream_init(). Only used in write mode. */
 };
 
-E_API e_result e_memory_stream_init_write(void** ppData, size_t* pDataSize, const e_allocation_callbacks* pAllocationCallbacks, e_memory_stream* pStream);
+E_API e_result e_memory_stream_init_write(const e_allocation_callbacks* pAllocationCallbacks, e_memory_stream* pStream);
 E_API e_result e_memory_stream_init_readonly(const void* pData, size_t dataSize, e_memory_stream* pStream);
+E_API void e_memory_stream_uninit(e_memory_stream* pStream);    /* Only needed for write mode. This will free the internal pointer so make sure you've done what you need to do with it. */
 E_API e_result e_memory_stream_read(e_memory_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead);
 E_API e_result e_memory_stream_write(e_memory_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_seek_origin origin);
+E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, int origin);
 E_API e_result e_memory_stream_tell(e_memory_stream* pStream, size_t* pCursor);
 E_API e_result e_memory_stream_remove(e_memory_stream* pStream, size_t offset, size_t size);
 E_API e_result e_memory_stream_truncate(e_memory_stream* pStream);
-/* END e_stream.h */
+E_API void* e_memory_stream_take_ownership(e_memory_stream* pStream, size_t* pSize);  /* Takes ownership of the buffer. The caller is responsible for freeing the buffer with e_free(). Only valid in write mode. */
+/* END e_memory_stream.h */
 
 
 

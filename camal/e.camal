@@ -12,6 +12,49 @@ replace_namespace_fs :: function(src:string) string
         ["FS_"] <= "E_";
 }
 
-// Allocation callbacks.
+// Allocation Callbacks
 e_h("/\* BEG e_allocation_callbacks.h \*/\R":"\R/\* END e_allocation_callbacks.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_allocation_callbacks.h \*/\R":"\R/\* END fs_allocation_callbacks.h \*/")));
 e_c("/\* BEG e_allocation_callbacks.c \*/\R":"\R/\* END e_allocation_callbacks.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_allocation_callbacks.c \*/\R":"\R/\* END fs_allocation_callbacks.c \*/")));
+
+
+// Stream
+rename_fs_format :: function(src:string) string
+{
+    return @(src)
+        ["E_FORMAT_TEXT"]   <= "E_STREAM_DATA_FORMAT_TEXT"
+        ["E_FORMAT_BINARY"] <= "E_STREAM_DATA_FORMAT_BINARY"
+        ["e_format"]        <= "e_stream_data_format";
+}
+
+stream_h := replace_namespace_fs(@(fs_h("/\* BEG fs_stream.h \*/\R":"\R/\* END fs_stream.h \*/")));
+stream_c := replace_namespace_fs(@(fs_c("/\* BEG fs_stream.c \*/\R":"\R/\* END fs_stream.c \*/")));
+
+stream_h = rename_fs_format(stream_h);
+stream_c = rename_fs_format(stream_c);
+
+// Alignment fixes.
+stream_h
+    ["size_t    "] <= "size_t   "
+    ["void      "] <= "void     "
+    ["/\* Optional\. Duplicate the stream\. \*/"] <= " /* Optional. Duplicate the stream. */";
+
+// Clean up tags.
+stream_h
+    ["(?m)^\s*/\* BEG e_stream_vtable_duplicate \*/\R"] <= ""
+    ["(?m)^\s*/\* END e_stream_vtable_duplicate \*/\R"] <= ""
+    ["\R/\* BEG e_stream_writef.h \*/\R"] <= ""
+    ["\R/\* END e_stream_writef.h \*/\R"] <= ""
+    ["/\* BEG e_stream_duplicate.h \*/"] <= ""
+    ["/\* END e_stream_duplicate.h \*/"] <= ""
+    ["\R/\* BEG e_stream_helpers.h \*/\R"] <= ""
+    ["\R/\* END e_stream_helpers.h \*/$"] <= ""
+;
+
+// Write out.
+e_h("/\* BEG e_stream.h \*/\R":"\R/\* END e_stream.h \*/") = stream_h;
+e_c("/\* BEG e_stream.c \*/\R":"\R/\* END e_stream.c \*/") = stream_c;
+
+
+// Memory Stream
+e_h("/\* BEG e_memory_stream.h \*/\R":"\R/\* END e_memory_stream.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_memory_stream.h \*/\R":"\R/\* END fs_memory_stream.h \*/")));
+e_c("/\* BEG e_memory_stream.c \*/\R":"\R/\* END e_memory_stream.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_memory_stream.c \*/\R":"\R/\* END fs_memory_stream.c \*/")));

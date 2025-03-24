@@ -3330,108 +3330,138 @@ E_API void e_mutex_unlock(e_mutex* pMutex)
 
 
 /* BEG e_stream.c */
-E_API e_result e_stream_init(const e_stream_vtable* pVTable, void* pVTableUserData, e_stream* pStream)
+E_API e_result e_stream_init(const e_stream_vtable* pVTable, e_stream* pStream)
 {
     if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
 
-    E_ZERO_OBJECT(pStream);
+    pStream->pVTable = pVTable;
 
     if (pVTable == NULL) {
         return E_INVALID_ARGS;
     }
-
-    pStream->pVTable         = pVTable;
-    pStream->pVTableUserData = pVTableUserData;
 
     return E_SUCCESS;
 }
 
 E_API e_result e_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
 {
-    e_result result;
     size_t bytesRead;
+    e_result result;
 
     if (pBytesRead != NULL) {
         *pBytesRead = 0;
     }
 
-    if (pStream == NULL || pDst == NULL) {
+    if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
-
-    E_ASSERT(pStream->pVTable != NULL);
 
     if (pStream->pVTable->read == NULL) {
         return E_NOT_IMPLEMENTED;
     }
 
-    result = pStream->pVTable->read(pStream->pVTableUserData, pDst, bytesToRead, &bytesRead);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    /*
-    If the user did not specify an output variable for the number of bytes read it must mean they
-    are expecting the exact number of bytes requested, because otherwise how would they know how
-    to handle the case where less bytes are available than expected? Therefore, when NULL is passed
-    in for this parameter we're going to return an error if we were unable to read the specified
-    number of bytes.
-    */
-    if (pBytesRead == NULL) {
-        if (bytesRead != bytesToRead) {
-            return E_ERROR;
-        }
-    }
+    bytesRead = 0;
+    result = pStream->pVTable->read(pStream, pDst, bytesToRead, &bytesRead);
 
     if (pBytesRead != NULL) {
         *pBytesRead = bytesRead;
     }
 
-    return E_SUCCESS;
+    return result;
 }
 
 E_API e_result e_stream_write(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
 {
-    e_result result;
     size_t bytesWritten;
+    e_result result;
 
     if (pBytesWritten != NULL) {
         *pBytesWritten = 0;
     }
 
-    if (pStream == NULL || pSrc == NULL) {
+    if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
-
-    E_ASSERT(pStream->pVTable != NULL);
 
     if (pStream->pVTable->write == NULL) {
         return E_NOT_IMPLEMENTED;
     }
 
-    result = pStream->pVTable->write(pStream->pVTableUserData, pSrc, bytesToWrite, &bytesWritten);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    /*
-    As with reading, if the caller did not specify an output value for the number of bytes written
-    we must assume it's all or nothing and return an error if the number of bytes written does not
-    match the number of bytes requested to be written.
-    */
-    if (pBytesWritten == NULL) {
-        if (bytesWritten != bytesToWrite) {
-            return E_ERROR;
-        }
-    }
+    bytesWritten = 0;
+    result = pStream->pVTable->write(pStream, pSrc, bytesToWrite, &bytesWritten);
 
     if (pBytesWritten != NULL) {
         *pBytesWritten = bytesWritten;
     }
 
-    return E_SUCCESS;
+    return result;
+}
+
+E_API e_result e_stream_writef(e_stream* pStream, const char* fmt, ...)
+{
+    va_list args;
+    e_result result;
+
+    va_start(args, fmt);
+    result = e_stream_writefv(pStream, fmt, args);
+    va_end(args);
+
+    return result;
+}
+
+E_API e_result e_stream_writef_ex(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, const char* fmt, ...)
+{
+    va_list args;
+    e_result result;
+
+    va_start(args, fmt);
+    result = e_stream_writefv_ex(pStream, pAllocationCallbacks, fmt, args);
+    va_end(args);
+
+    return result;
+}
+
+E_API e_result e_stream_writefv(e_stream* pStream, const char* fmt, va_list args)
+{
+    return e_stream_writefv_ex(pStream, NULL, fmt, args);
+}
+
+E_API e_result e_stream_writefv_ex(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, const char* fmt, va_list args)
+{
+    e_result result;
+    int strLen;
+    char pStrStack[1024];
+
+    if (pStream == NULL || fmt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    strLen = e_vsnprintf(pStrStack, sizeof(pStrStack), fmt, args);
+    if (strLen < 0) {
+        return E_ERROR;    /* Encoding error. */
+    }
+
+    if (strLen < (int)sizeof(pStrStack)) {
+        /* Stack buffer is big enough. Output straight to the file. */
+        result = e_stream_write(pStream, pStrStack, strLen, NULL);
+    } else {
+        /* Stack buffer is not big enough. Allocate space on the heap. */
+        char* pStrHeap = NULL;
+
+        pStrHeap = (char*)e_malloc(strLen + 1, pAllocationCallbacks);
+        if (pStrHeap == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        e_vsnprintf(pStrHeap, strLen + 1, fmt, args);
+        result = e_stream_write(pStream, pStrHeap, strLen, NULL);
+
+        e_free(pStrHeap, pAllocationCallbacks);
+    }
+
+    return result;
 }
 
 E_API e_result e_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin origin)
@@ -3440,64 +3470,195 @@ E_API e_result e_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin or
         return E_INVALID_ARGS;
     }
 
-    E_ASSERT(pStream->pVTable != NULL);
-
     if (pStream->pVTable->seek == NULL) {
         return E_NOT_IMPLEMENTED;
     }
 
-    return pStream->pVTable->seek(pStream->pVTableUserData, offset, origin);
+    return pStream->pVTable->seek(pStream, offset, origin);
 }
 
 E_API e_result e_stream_tell(e_stream* pStream, e_int64* pCursor)
 {
     if (pCursor == NULL) {
-        return E_INVALID_ARGS;
+        return E_INVALID_ARGS;  /* It does not make sense to call this without a variable to receive the cursor position. */
     }
 
-    *pCursor = 0;
+    *pCursor = 0;   /* <-- In case an error happens later. */
 
     if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
 
-    E_ASSERT(pStream->pVTable != NULL);
-
     if (pStream->pVTable->tell == NULL) {
         return E_NOT_IMPLEMENTED;
     }
 
-    return pStream->pVTable->tell(pStream->pVTableUserData, pCursor);
+    return pStream->pVTable->tell(pStream, pCursor);
 }
 
-
-
-static e_result e_memory_stream_read_callback(void* pUserData, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+E_API e_result e_stream_duplicate(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_stream** ppDuplicatedStream)
 {
-    return e_memory_stream_read((e_memory_stream*)pUserData, pDst, bytesToRead, pBytesRead);
+    e_result result;
+    e_stream* pDuplicatedStream;
+
+    if (ppDuplicatedStream == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppDuplicatedStream = NULL;
+
+    if (pStream == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pStream->pVTable->duplicate_alloc_size == NULL || pStream->pVTable->duplicate == NULL) {
+        return E_NOT_IMPLEMENTED;
+    }
+
+    pDuplicatedStream = (e_stream*)e_calloc(pStream->pVTable->duplicate_alloc_size(pStream), pAllocationCallbacks);
+    if (pDuplicatedStream == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    result = e_stream_init(pStream->pVTable, pDuplicatedStream);
+    if (result != E_SUCCESS) {
+        e_free(pDuplicatedStream, pAllocationCallbacks);
+        return result;
+    }
+
+    result = pStream->pVTable->duplicate(pStream, pDuplicatedStream);
+    if (result != E_SUCCESS) {
+        e_free(pDuplicatedStream, pAllocationCallbacks);
+        return result;
+    }
+
+    *ppDuplicatedStream = pDuplicatedStream;
+
+    return E_SUCCESS;
 }
 
-static e_result e_memory_stream_write_callback(void* pUserData, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+E_API void e_stream_delete_duplicate(e_stream* pDuplicatedStream, const e_allocation_callbacks* pAllocationCallbacks)
 {
-    return e_memory_stream_write((e_memory_stream*)pUserData, pSrc, bytesToWrite, pBytesWritten);
+    if (pDuplicatedStream == NULL) {
+        return;
+    }
+
+    if (pDuplicatedStream->pVTable->uninit != NULL) {
+        pDuplicatedStream->pVTable->uninit(pDuplicatedStream);
+    }
+
+    e_free(pDuplicatedStream, pAllocationCallbacks);
 }
 
-static e_result e_memory_stream_seek_callback(void* pUserData, e_int64 offset, e_seek_origin origin)
+
+E_API e_result e_stream_read_to_end(e_stream* pStream, e_stream_data_format format, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, size_t* pDataSize)
 {
-    return e_memory_stream_seek((e_memory_stream*)pUserData, offset, origin);
+    e_result result = E_SUCCESS;
+    size_t dataSize = 0;
+    size_t dataCap  = 0;
+    void* pData = NULL;
+
+    if (ppData != NULL) {
+        *ppData = NULL;
+    }
+    if (pDataSize != NULL) {
+        *pDataSize = 0;
+    }
+
+    if (pStream == NULL || ppData == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* Read in a loop into a dynamically increasing buffer. */
+    for (;;) {
+        size_t chunkSize = 4096;
+        size_t bytesRead;
+
+        if (dataSize + chunkSize > dataCap) {
+            void* pNewData;
+            size_t newCap = dataCap * 2;
+            if (newCap == 0) {
+                newCap = chunkSize;
+            }
+
+            pNewData = e_realloc(pData, newCap, pAllocationCallbacks);
+            if (pNewData == NULL) {
+                e_free(pData, pAllocationCallbacks);
+                return E_OUT_OF_MEMORY;
+            }
+
+            pData = pNewData;
+            dataCap = newCap;
+        }
+
+        /* At this point there should be enough data in the buffer for the next chunk. */
+        result = e_stream_read(pStream, E_OFFSET_PTR(pData, dataSize), chunkSize, &bytesRead);
+        dataSize += bytesRead;
+
+        if (result != E_SUCCESS || bytesRead < chunkSize) {
+            break;
+        }
+    }
+
+    /* If we're opening in text mode, we need to append a null terminator. */
+    if (format == E_STREAM_DATA_FORMAT_TEXT) {
+        if (dataSize >= dataCap) {
+            void* pNewData;
+            pNewData = e_realloc(pData, dataSize + 1, pAllocationCallbacks);
+            if (pNewData == NULL) {
+                e_free(pData, pAllocationCallbacks);
+                return E_OUT_OF_MEMORY;
+            }
+
+            pData = pNewData;
+        }
+
+        ((char*)pData)[dataSize] = '\0';
+    }
+
+    *ppData = pData;
+
+    if (pDataSize != NULL) {
+        *pDataSize = dataSize;
+    }
+
+    /* Make sure the caller is aware of any errors. */
+    if (result != E_SUCCESS && result != E_AT_END) {
+        return result;
+    } else {
+        return E_SUCCESS;
+    }
+}
+/* END e_stream.c */
+
+
+/* BEG e_memory_stream.c */
+static e_result e_memory_stream_read_internal(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_memory_stream_read((e_memory_stream*)pStream, pDst, bytesToRead, pBytesRead);
 }
 
-static e_result e_memory_stream_tell_callback(void* pUserData, e_int64* pCursor)
+static e_result e_memory_stream_write_internal(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_memory_stream_write((e_memory_stream*)pStream, pSrc, bytesToWrite, pBytesWritten);
+}
+
+static e_result e_memory_stream_seek_internal(e_stream* pStream, e_int64 offset, e_seek_origin origin)
+{
+    return e_memory_stream_seek((e_memory_stream*)pStream, offset, origin);
+}
+
+static e_result e_memory_stream_tell_internal(e_stream* pStream, e_int64* pCursor)
 {
     e_result result;
     size_t cursor;
 
-    result = e_memory_stream_tell((e_memory_stream*)pUserData, &cursor);
+    result = e_memory_stream_tell((e_memory_stream*)pStream, &cursor);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    if (cursor > INT64_MAX) {    /* <-- INT64_MAX may not be defined on some compilers. Need to check this. Can easily define this ourselves. */
+    if (cursor > E_INT64_MAX) {    /* <-- INT64_MAX may not be defined on some compilers. Need to check this. Can easily define this ourselves. */
         return E_ERROR;
     }
 
@@ -3506,15 +3667,60 @@ static e_result e_memory_stream_tell_callback(void* pUserData, e_int64* pCursor)
     return E_SUCCESS;
 }
 
-static e_stream_vtable e_gMemoryStreamVTable =
+static size_t e_memory_stream_duplicate_alloc_size_internal(e_stream* pStream)
 {
-    e_memory_stream_read_callback,
-    e_memory_stream_write_callback,
-    e_memory_stream_seek_callback,
-    e_memory_stream_tell_callback
+    (void)pStream;
+    return sizeof(e_memory_stream);
+}
+
+static e_result e_memory_stream_duplicate_internal(e_stream* pStream, e_stream* pDuplicatedStream)
+{
+    e_memory_stream* pMemoryStream;
+
+    pMemoryStream = (e_memory_stream*)pStream;
+    E_ASSERT(pMemoryStream != NULL);
+
+    *pDuplicatedStream = *pStream;
+
+    /* Slightly special handling for write mode. Need to make a copy of the output buffer. */
+    if (pMemoryStream->write.pData != NULL) {
+        void* pNewData = e_malloc(pMemoryStream->write.dataCap, &pMemoryStream->allocationCallbacks);
+        if (pNewData == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        E_COPY_MEMORY(pNewData, pMemoryStream->write.pData, pMemoryStream->write.dataSize);
+
+        pMemoryStream->write.pData = pNewData;
+
+        pMemoryStream->ppData    = &pMemoryStream->write.pData;
+        pMemoryStream->pDataSize = &pMemoryStream->write.dataSize;
+    } else {
+        pMemoryStream->ppData    = (void**)&pMemoryStream->readonly.pData;
+        pMemoryStream->pDataSize = &pMemoryStream->readonly.dataSize;
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_memory_stream_uninit_internal(e_stream* pStream)
+{
+    e_memory_stream_uninit((e_memory_stream*)pStream);
+}
+
+static e_stream_vtable e_gStreamVTableMemory =
+{
+    e_memory_stream_read_internal,
+    e_memory_stream_write_internal,
+    e_memory_stream_seek_internal,
+    e_memory_stream_tell_internal,
+    e_memory_stream_duplicate_alloc_size_internal,
+    e_memory_stream_duplicate_internal,
+    e_memory_stream_uninit_internal
 };
 
-E_API e_result e_memory_stream_init_write(void** ppData, size_t* pDataSize, const e_allocation_callbacks* pAllocationCallbacks, e_memory_stream* pStream)
+
+E_API e_result e_memory_stream_init_write(const e_allocation_callbacks* pAllocationCallbacks, e_memory_stream* pStream)
 {
     e_result result;
 
@@ -3524,23 +3730,18 @@ E_API e_result e_memory_stream_init_write(void** ppData, size_t* pDataSize, cons
 
     E_ZERO_OBJECT(pStream);
 
-    if (ppData == NULL || pDataSize == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    result = e_stream_init(&e_gMemoryStreamVTable, pStream, &pStream->base);
+    result = e_stream_init(&e_gStreamVTableMemory, &pStream->base);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    pStream->ppData     = ppData;
-    pStream->pDataSize  = pDataSize;
-    pStream->cursor     = 0;
-    pStream->dataCap    = 0;
+    pStream->write.pData    = NULL;
+    pStream->write.dataSize = 0;
+    pStream->write.dataCap  = 0;
     pStream->allocationCallbacks = e_allocation_callbacks_init_copy(pAllocationCallbacks);
 
-    *pStream->ppData    = NULL;
-    *pStream->pDataSize = 0;
+    pStream->ppData    = &pStream->write.pData;
+    pStream->pDataSize = &pStream->write.dataSize;
 
     return E_SUCCESS;
 }
@@ -3559,7 +3760,7 @@ E_API e_result e_memory_stream_init_readonly(const void* pData, size_t dataSize,
         return E_INVALID_ARGS;
     }
 
-    result = e_stream_init(&e_gMemoryStreamVTable, pStream, &pStream->base);
+    result = e_stream_init(&e_gStreamVTableMemory, &pStream->base);
     if (result != E_SUCCESS) {
         return result;
     }
@@ -3569,10 +3770,19 @@ E_API e_result e_memory_stream_init_readonly(const void* pData, size_t dataSize,
 
     pStream->ppData    = (void**)&pStream->readonly.pData;
     pStream->pDataSize = &pStream->readonly.dataSize;
-    pStream->cursor    = 0;
-    pStream->dataCap   = 0;
 
     return E_SUCCESS;
+}
+
+E_API void e_memory_stream_uninit(e_memory_stream* pStream)
+{
+    if (pStream == NULL) {
+        return;
+    }
+
+    if (pStream->write.pData != NULL) {
+        e_free(pStream->write.pData, &pStream->allocationCallbacks);
+    }
 }
 
 E_API e_result e_memory_stream_read(e_memory_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
@@ -3629,22 +3839,22 @@ E_API e_result e_memory_stream_write(e_memory_stream* pStream, const void* pSrc,
     }
 
     newSize = *pStream->pDataSize + bytesToWrite;
-    if (newSize > pStream->dataCap) {
+    if (newSize > pStream->write.dataCap) {
         /* Need to resize. */
         void* pNewBuffer;
         size_t newCap;
 
-        newCap = E_MAX(newSize, pStream->dataCap * 2);
+        newCap = E_MAX(newSize, pStream->write.dataCap * 2);
         pNewBuffer = e_realloc(*pStream->ppData, newCap, &pStream->allocationCallbacks);
         if (pNewBuffer == NULL) {
             return E_OUT_OF_MEMORY;
         }
 
         *pStream->ppData = pNewBuffer;
-        pStream->dataCap = newCap;
+        pStream->write.dataCap = newCap;
     }
 
-    E_ASSERT(newSize <= pStream->dataCap);
+    E_ASSERT(newSize <= pStream->write.dataCap);
 
     E_COPY_MEMORY(E_OFFSET_PTR(*pStream->ppData, *pStream->pDataSize), pSrc, bytesToWrite);
     *pStream->pDataSize = newSize;
@@ -3656,13 +3866,13 @@ E_API e_result e_memory_stream_write(e_memory_stream* pStream, const void* pSrc,
     return E_SUCCESS;
 }
 
-E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_seek_origin origin)
+E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, int origin)
 {
     if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
 
-    if (E_ABS(offset) > E_SIZE_MAX) {
+    if ((e_uint64)E_ABS(offset) > E_SIZE_MAX) {
         return E_INVALID_ARGS;  /* Trying to seek too far. This will never happen on 64-bit builds. */
     }
 
@@ -3670,7 +3880,7 @@ E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_
     The seek binary - it works or it doesn't. There's no clamping to the end or anything like that. The
     seek point is either valid or invalid.
     */
-    if (origin == E_SEEK_ORIGIN_CURRENT) {
+    if (origin == E_SEEK_CUR) {
         if (offset > 0) {
             /* Moving forward. */
             size_t bytesRemaining = *pStream->pDataSize - pStream->cursor;
@@ -3681,14 +3891,14 @@ E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_
             pStream->cursor += (size_t)offset;
         } else {
             /* Moving backwards. */
-            size_t absoluteOffset = E_ABS(offset);
+            size_t absoluteOffset = (size_t)E_ABS(offset); /* Safe cast because it was checked above. */
             if (absoluteOffset > pStream->cursor) {
                 return E_BAD_SEEK;  /* Trying to seek prior to the start of the buffer. */
             }
 
             pStream->cursor -= absoluteOffset;
         }
-    } else if (origin == E_SEEK_ORIGIN_START) {
+    } else if (origin == E_SEEK_SET) {
         if (offset < 0) {
             return E_BAD_SEEK;  /* Trying to seek prior to the start of the buffer.. */
         }
@@ -3698,7 +3908,7 @@ E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_
         }
 
         pStream->cursor = (size_t)offset;
-    } else if (origin == E_SEEK_ORIGIN_END) {
+    } else if (origin == E_SEEK_END) {
         if (offset > 0) {
             return E_BAD_SEEK;  /* Trying to seek beyond the end of the buffer. */
         }
@@ -3773,7 +3983,28 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream)
 
     return e_memory_stream_remove(pStream, pStream->cursor, (*pStream->pDataSize - pStream->cursor));
 }
-/* END e_stream.c */
+
+E_API void* e_memory_stream_take_ownership(e_memory_stream* pStream, size_t* pSize)
+{
+    void* pData;
+
+    if (pStream == NULL) {
+        return NULL;
+    }
+
+    pData = *pStream->ppData;
+    if (pSize != NULL) {
+        *pSize = *pStream->pDataSize;
+    }
+
+    pStream->write.pData    = NULL;
+    pStream->write.dataSize = 0;
+    pStream->write.dataCap  = 0;
+
+    return pData;
+
+}
+/* END e_memory_stream.c */
 
 
 
@@ -4552,9 +4783,9 @@ static e_result e_fs_seek_default(void* pUserData, e_file* pFile, e_int64 offset
     E_ASSERT(pFile != NULL);
     E_UNUSED(pUserData);
 
-    if (origin == E_SEEK_ORIGIN_START) {
+    if (origin == E_SEEK_SET) {
         whence = SEEK_SET;
-    } else if (origin == E_SEEK_ORIGIN_END) {
+    } else if (origin == E_SEEK_END) {
         whence = SEEK_END;
     } else {
         whence = SEEK_CUR;
@@ -5066,24 +5297,24 @@ static e_fs_vtable e_gDefaultFSVTable =
 };
 
 
-static e_result e_file_stream_read(void* pUserData, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+static e_result e_file_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
 {
-    return e_fs_read((e_file*)pUserData, pDst, bytesToRead, pBytesRead);
+    return e_fs_read((e_file*)pStream, pDst, bytesToRead, pBytesRead);
 }
 
-static e_result e_file_stream_write(void* pUserData, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+static e_result e_file_stream_write(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
 {
-    return e_fs_write((e_file*)pUserData, pSrc, bytesToWrite, pBytesWritten);
+    return e_fs_write((e_file*)pStream, pSrc, bytesToWrite, pBytesWritten);
 }
 
-static e_result e_file_stream_seek(void* pUserData, e_int64 offset, e_seek_origin origin)
+static e_result e_file_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin origin)
 {
-    return e_fs_seek((e_file*)pUserData, offset, origin);
+    return e_fs_seek((e_file*)pStream, offset, origin);
 }
 
-static e_result e_file_stream_tell(void* pUserData, e_int64* pCursor)
+static e_result e_file_stream_tell(e_stream* pStream, e_int64* pCursor)
 {
-    return e_fs_tell((e_file*)pUserData, pCursor);
+    return e_fs_tell((e_file*)pStream, pCursor);
 }
 
 static e_stream_vtable e_gFileStreamVTable =
@@ -5091,7 +5322,10 @@ static e_stream_vtable e_gFileStreamVTable =
     e_file_stream_read,
     e_file_stream_write,
     e_file_stream_seek,
-    e_file_stream_tell
+    e_file_stream_tell,
+    NULL,
+    NULL,
+    NULL
 };
 
 
@@ -5466,7 +5700,7 @@ E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, int openMode, const e
     pFile->pVTableUserData = pVTableUserData;
 
     /* Files are streams which means they can be plugged into anything that takes a e_stream pointer. We need to get this set up now. */
-    result = e_stream_init(&e_gFileStreamVTable, pFile, &pFile->stream);
+    result = e_stream_init(&e_gFileStreamVTable, (e_stream*)pFile);
     if (result != E_SUCCESS) {
         e_fs_close(pFile, pAllocationCallbacks);
         return result;
@@ -6747,7 +6981,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
     the start of the EOCD and read from there. If this fails it probably means there's a comment in
     which case we'll go to byte -(22 + 65535) and scan from there.
     */
-    result = e_stream_seek(pStream, -22, E_SEEK_ORIGIN_END);
+    result = e_stream_seek(pStream, -22, E_SEEK_END);
     if (result != E_SUCCESS) {
         return result;  /* Failed to seek to our EOCD. This cannot be a valid Zip file. */
     }
@@ -6766,13 +7000,13 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         EOCD signature is sitting further up the file. The comment has a maximum if 65535
         characters, so we'll start searching from -(22 + 65535).
         */
-        result = e_stream_seek(pStream, -(22 + 65535), E_SEEK_ORIGIN_END);
+        result = e_stream_seek(pStream, -(22 + 65535), E_SEEK_END);
         if (result != E_SUCCESS) {
             /*
             We failed the seek, but it most likely means we were just trying to seek to far back in
             which case we can just fall back to a seek to position 0.
             */
-            result = e_stream_seek(pStream, 0, E_SEEK_ORIGIN_START);
+            result = e_stream_seek(pStream, 0, E_SEEK_SET);
             if (result != E_SUCCESS) {
                 return result;
             }
@@ -6825,7 +7059,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
                     */
                     eocdPositionFromEnd = -(22 + 65535) + (int)totalBytesScanned;   /* Safe cast to int. */
 
-                    result = e_stream_seek(pStream, eocdPositionFromEnd + 4, E_SEEK_ORIGIN_END);  /* +4 so go just past the signatures. */
+                    result = e_stream_seek(pStream, eocdPositionFromEnd + 4, E_SEEK_END);  /* +4 so go just past the signatures. */
                     if (result != E_SUCCESS) {
                         return result;
                     }
@@ -6854,7 +7088,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
 
     We're ignoring the disk properties. Split Zip files are not being supported here.
     */
-    result = e_stream_seek(pStream, 2 + 2 + 2, E_SEEK_ORIGIN_CURRENT);  /* Skip past disk stuff. */
+    result = e_stream_seek(pStream, 2 + 2 + 2, E_SEEK_CUR);  /* Skip past disk stuff. */
     if (result != E_SUCCESS) {
         return E_INVALID_FILE;
     }
@@ -6891,7 +7125,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         e_uint64 eocd64SizeInBytes;
         e_int64 eocd64OffsetInBytes;
 
-        result = e_stream_seek(pStream, eocdPositionFromEnd - 20, E_SEEK_ORIGIN_END);
+        result = e_stream_seek(pStream, eocdPositionFromEnd - 20, E_SEEK_END);
         if (result != E_SUCCESS) {
             return E_INVALID_FILE;
         }
@@ -6907,7 +7141,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         }
 
         /* We don't use the next 4 bytes so skip it. */
-        result = e_stream_seek(pStream, 4, E_SEEK_ORIGIN_CURRENT);
+        result = e_stream_seek(pStream, 4, E_SEEK_CUR);
         if (result != E_SUCCESS) {
             return E_INVALID_FILE;
         }
@@ -6922,7 +7156,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         The next 4 bytes contains the number of disks. We're not supporting split Zip files, so we
         don't need to care about this. Just seek straight to the EOCD64 record.
         */
-        result = e_stream_seek(pStream, eocd64OffsetInBytes, E_SEEK_ORIGIN_START);
+        result = e_stream_seek(pStream, eocd64OffsetInBytes, E_SEEK_SET);
         if (result != E_SUCCESS) {
             return E_INVALID_FILE;
         }
@@ -6950,7 +7184,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         }
 
         /* We can skip past everything up to the record count, which is 20 bytes. */
-        result = e_stream_seek(pStream, 20, E_SEEK_ORIGIN_CURRENT);
+        result = e_stream_seek(pStream, 20, E_SEEK_CUR);
         if (result != E_SUCCESS) {
             return E_INVALID_FILE;
         }
@@ -6990,7 +7224,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
     }
 
     /* We need to seek to the start of the central directory and read it's contents. */
-    result = e_stream_seek(pStream, cdOffset64, E_SEEK_ORIGIN_START);
+    result = e_stream_seek(pStream, cdOffset64, E_SEEK_SET);
     if (result != E_SUCCESS) {
         return E_INVALID_FILE;
     }
@@ -7055,7 +7289,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
             We need to seek to the next item. To do this we need to retrieve the lengths of the
             variable-length fields. These start from offset 28.
             */
-            result = e_memory_stream_seek(&cdStream, 28, E_SEEK_ORIGIN_CURRENT);
+            result = e_memory_stream_seek(&cdStream, 28, E_SEEK_CUR);
             if (result != E_SUCCESS) {
                 e_free(pZip->pHeap, pAllocationCallbacks);
                 return result;
@@ -7080,7 +7314,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
             }
 
             /* We have the necessary information we need to move past this record. */
-            result = e_memory_stream_seek(&cdStream, fileOffset + 46 + fileNameLen + extraLen + commentLen, E_SEEK_ORIGIN_START);
+            result = e_memory_stream_seek(&cdStream, fileOffset + 46 + fileNameLen + extraLen + commentLen, E_SEEK_SET);
             if (result != E_SUCCESS) {
                 e_free(pZip->pHeap, pAllocationCallbacks);
                 return result;
@@ -7353,7 +7587,7 @@ static e_result e_archive_open_zip(void* pUserData, e_fs* pFS, const char* pFile
 
         pArchiveStream = e_archive_stream(&pZip->archive);
 
-        result = e_stream_seek(pArchiveStream, pZipFile->info.fileOffset + 26, E_SEEK_ORIGIN_START);
+        result = e_stream_seek(pArchiveStream, pZipFile->info.fileOffset + 26, E_SEEK_SET);
         if (result != E_SUCCESS) {
             e_zip_unlock(pZip);
             return result;
@@ -7448,7 +7682,7 @@ static e_result e_archive_read_zip_store(e_zip_file* pZipFile, void* pDst, size_
             size_t bytesRemainingToRead = bytesToRead - bytesRead;
             size_t bytesToReadFromArchive;
 
-            result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + (pZipFile->absoluteCursorUncompressed + bytesRead), E_SEEK_ORIGIN_START);
+            result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + (pZipFile->absoluteCursorUncompressed + bytesRead), E_SEEK_SET);
             if (result != E_SUCCESS) {
                 e_zip_unlock(pZip);
                 return result;
@@ -7578,7 +7812,7 @@ static e_result e_archive_read_zip_deflate(e_zip_file* pZipFile, void* pDst, siz
                 e_zip_lock(pZip);
                 {
                     /* Make sure we're positioned correctly in the stream before we read. */
-                    result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + pZipFile->absoluteCursorCompressed, E_SEEK_ORIGIN_START);
+                    result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + pZipFile->absoluteCursorCompressed, E_SEEK_SET);
                     if (result != E_SUCCESS) {
                         e_zip_unlock(pZip);
                         return result;
@@ -7708,7 +7942,7 @@ static e_result e_archive_seek_zip(void* pUserData, e_file* pFile, e_int64 offse
     clear the cache. The next time we read, it'll see that the cache is empty which will trigger a
     fresh read of data from the archive stream.
     */
-    if (origin == E_SEEK_ORIGIN_CURRENT) {
+    if (origin == E_SEEK_CUR) {
         if (offset > 0) {
             newAbsoluteCursor = pZipFile->absoluteCursorUncompressed + (e_uint64)offset;
         } else {
@@ -7718,13 +7952,13 @@ static e_result e_archive_seek_zip(void* pUserData, e_file* pFile, e_int64 offse
 
             newAbsoluteCursor = pZipFile->absoluteCursorUncompressed - E_ABS(offset);
         }
-    } else if (origin == E_SEEK_ORIGIN_START) {
+    } else if (origin == E_SEEK_SET) {
         if (offset < 0) {
             return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
         }
 
         newAbsoluteCursor = (e_uint64)offset;
-    } else if (origin == E_SEEK_ORIGIN_END) {
+    } else if (origin == E_SEEK_END) {
         if (offset > 0) {
             return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
         }
@@ -9014,7 +9248,7 @@ static int e_stb_image_read(void* pUserData, char* pData, int size)
 
 static void e_stb_image_skip(void* pUserData, int n)
 {
-    e_stream_seek(((e_stb_image_callback_data*)pUserData)->pStream, n, E_SEEK_ORIGIN_CURRENT);
+    e_stream_seek(((e_stb_image_callback_data*)pUserData)->pStream, n, E_SEEK_CUR);
 }
 
 static int e_stb_image_eof(void* pUserData)
