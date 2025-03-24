@@ -2,8 +2,10 @@ e_h := <../e.h>;
 e_c := <../e.c>;
 
 // TODO: Update these paths to a local copy of fs later on once everything settles.
-fs_h :: <../../fs/fs.h>;
-fs_c :: <../../fs/fs.c>;
+fs_h        :: <../../fs/fs.h>;
+fs_c        :: <../../fs/fs.c>;
+c89thread_h :: <../../c89thread/c89thread.h>;
+c89thread_c :: <../../c89thread/c89thread.c>;
 
 replace_namespace_fs :: function(src:string) string
 {
@@ -58,3 +60,102 @@ e_c("/\* BEG e_stream.c \*/\R":"\R/\* END e_stream.c \*/") = stream_c;
 // Memory Stream
 e_h("/\* BEG e_memory_stream.h \*/\R":"\R/\* END e_memory_stream.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_memory_stream.h \*/\R":"\R/\* END fs_memory_stream.h \*/")));
 e_c("/\* BEG e_memory_stream.c \*/\R":"\R/\* END e_memory_stream.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_memory_stream.c \*/\R":"\R/\* END fs_memory_stream.c \*/")));
+
+
+
+// Threading
+replace_namespace_c89thread :: function(src:string) string
+{
+    return @(src)
+        ["C89THREAD_"] <= "E_"
+        ["c89thread_"] <= "e_";
+}
+
+
+c89thread_basic_types := replace_namespace_c89thread(@(c89thread_h("/\* BEG c89thread_basic_types.h \*/\R":"\R/\* END c89thread_basic_types.h \*/")))
+    ["e_uintptr   e_pthread_t"] <= "e_uintptr           e_pthread_t";
+
+// Remove the result codes enum. We'll be replacing these with our result codes.
+c89thread_basic_types["\R\Renum\R{\R    c89thrd_success" : "};"] = "";
+
+e_h("/\* BEG e_threading_header.h \*/\R":"\R/\* END e_threading_header.h \*/") = c89thread_basic_types;
+
+
+rename_c89thread_types :: function(src:string) string
+{
+    return @(src)
+        ["c89thrd_t\b"]               <= "e_thread"
+        ["c89thrd_start_t"]           <= "e_thread_start_callback"
+        ["c89thrd"]                   <= "e_thread"
+        ["int e_thread_create"]       <= "E_API e_result e_thread_create"
+        ["int e_thread_equal"]        <= "E_API e_bool32 e_thread_equal"
+        ["e_thread e_thread_current"] <= "E_API e_thread e_thread_current"
+        ["int e_thread_sleep"]        <= "E_API e_result e_thread_sleep"
+        ["void e_thread_yield"]       <= "E_API void e_thread_yield"
+        ["void e_thread_exit"]        <= "E_API void e_thread_exit"
+        ["int e_thread_detach"]       <= "E_API e_result e_thread_detach"
+        ["int e_thread_join"]         <= "E_API e_result e_thread_join"
+
+        ["c89mtx_t\b"]                <= "e_mutex"
+        ["c89mtx"]                    <= "e_mutex"
+        ["e_mutex_plain\b"]           <= "E_MUTEX_TYPE_PLAIN"
+        ["e_mutex_timed\b"]           <= "E_MUTEX_TYPE_TIMED"
+        ["e_mutex_recursive\b"]       <= "E_MUTEX_TYPE_RECURSIVE"
+        ["int e_mutex_init"]          <= "E_API e_result e_mutex_init"
+        ["void e_mutex_destroy"]      <= "E_API void e_mutex_destroy"
+        ["int e_mutex_lock"]          <= "E_API e_result e_mutex_lock"
+        ["int e_mutex_timedlock"]     <= "E_API e_result e_mutex_timedlock"
+        ["int e_mutex_trylock"]       <= "E_API e_result e_mutex_trylock"
+        ["int e_mutex_unlock"]        <= "E_API e_result e_mutex_unlock"
+
+        ["c89cnd_t\b"]                <= "e_cond"
+        ["c89cnd"]                    <= "e_cond"
+        ["int e_cond_init"]           <= "E_API e_result e_cond_init"
+        ["void e_cond_destroy"]       <= "E_API void e_cond_destroy"
+        ["int e_cond_signal"]         <= "E_API e_result e_cond_signal"
+        ["int e_cond_broadcast"]      <= "E_API e_result e_cond_broadcast"
+        ["int e_cond_wait"]           <= "E_API e_result e_cond_wait"
+        ["int e_cond_timedwait"]      <= "E_API e_result e_cond_timedwait"
+
+        ["c89sem_t\b"]                <= "e_semaphore"
+        ["c89sem"]                    <= "e_semaphore"
+        ["int e_semaphore_init"]      <= "E_API e_result e_semaphore_init"
+        ["void e_semaphore_destroy"]  <= "E_API void e_semaphore_destroy"
+        ["int e_semaphore_wait"]      <= "E_API e_result e_semaphore_wait"
+        ["int e_semaphore_timedwait"] <= "E_API e_result e_semaphore_timedwait"
+        ["int e_semaphore_post"]      <= "E_API e_result e_semaphore_post"
+
+        ["c89evnt_t\b"]               <= "e_syncevent"
+        ["c89evnt"]                   <= "e_syncevent"
+        ["int e_syncevent_init"]      <= "E_API e_result e_syncevent_init"
+        ["void e_syncevent_destroy"]  <= "E_API void e_syncevent_destroy"
+        ["int e_syncevent_wait"]      <= "E_API e_result e_syncevent_wait"
+        ["int e_syncevent_timedwait"] <= "E_API e_result e_syncevent_timedwait"
+        ["int e_syncevent_signal"]    <= "E_API e_result e_syncevent_signal"
+
+        // Result codes
+        ["e_thread_success"]          <= "E_SUCCESS"
+        ["e_thread_signal"]           <= "E_INTERRUPT"
+        ["e_thread_nomem"]            <= "E_OUT_OF_MEMORY"
+        ["e_thread_timedout"]         <= "E_TIMEOUT"
+        ["e_thread_busy"]             <= "E_BUSY"
+        ["e_thread_error"]            <= "E_INVALID_ARGS"
+
+        // Anything still using the "c89" namespace just replace with "e_".
+        ["c89"]                       <= "e_"
+
+        // Random cleanup.
+        ["void\*                    e_cond"] <= "void*            e_cond"   // An alignment fix which was annoying me.
+        [" \(not part of C11\)"]      <= ""
+    ;
+}
+
+c89thread_types_h := replace_namespace_c89thread(@(c89thread_h("/\* BEG c89thread_types.h \*/\R":"\R/\* END c89thread_types.h \*/")));
+c89thread_types_h  = rename_c89thread_types(c89thread_types_h);
+
+c89thread_types_c := replace_namespace_c89thread(@(c89thread_h("/\* BEG c89thread_types.c \*/\R":"\R/\* END c89thread_types.c \*/")));
+c89thread_types_c  = rename_c89thread_types(c89thread_types_c);
+
+e_h("/\* BEG e_thread.h \*/\R":"\R/\* END e_thread.h \*/") = c89thread_types_h;
+e_c("/\* BEG e_thread.c \*/\R":"\R/\* END e_thread.c \*/") = c89thread_types_c;
+    

@@ -165,8 +165,10 @@ do stuff. This is where you'd probably step your clients.
 
 #if E_SIZEOF_PTR == 8
     typedef unsigned long long e_uintptr;
+    typedef long long          e_intptr;
 #else
     typedef unsigned int       e_uintptr;
+    typedef int                e_intptr;
 #endif
 
 typedef unsigned char e_bool8;
@@ -573,7 +575,181 @@ E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 blocking);
 
 
 
+/* BEG e_threading_header.h */
+#if defined(E_POSIX)
+    #ifndef E_USE_PTHREAD
+    #define E_USE_PTHREAD
+    #endif
+
+    /*
+    This is, hopefully, a temporary measure to get compilation working with the -std=c89 switch on
+    GCC and Clang. Unfortunately without this we get errors about the following functions not being
+    declared:
+
+        pthread_mutexattr_settype()
+
+    I am not sure yet how a fallback would work for pthread_mutexattr_settype(). It may just be
+    that it's fundamentally not compatible without explicit pthread support which would make the
+    _XOPEN_SOURCE define mandatory. Needs further investigation.
+
+    In addition, pthread_mutex_timedlock() is only available since 2001 which is only enabled if
+    _XOPEN_SOURCE is defined to something >= 600. If this is not the case, a suboptimal fallback
+    will be used instead which calls pthread_mutex_trylock() in a loop, with a sleep after each
+    loop iteration. By setting _XOPEN_SOURCE here we reduce the likelyhood of users accidentally
+    falling back to the suboptimal fallback.
+
+    I'm setting this to the latest version here (700) just in case this file is included at the top
+    of a source file which later on depends on some POSIX functions from later revisions.
+    */
+    #ifndef _XOPEN_SOURCE
+    #define _XOPEN_SOURCE   700
+    #else
+        #if _XOPEN_SOURCE < 500
+        #error _XOPEN_SOURCE must be >= 500. c89thread is not usable.
+        #endif
+    #endif
+
+    #ifndef E_NO_PTHREAD_IN_HEADER
+        #include <pthread.h>
+        typedef pthread_t           e_pthread_t;
+        typedef pthread_mutex_t     e_pthread_mutex_t;
+        typedef pthread_cond_t      e_pthread_cond_t;
+    #else
+        typedef e_uintptr           e_pthread_t;
+        typedef union               e_pthread_mutex_t { char __data[40]; e_uint64 __alignment; } e_pthread_mutex_t;
+        typedef union               e_pthread_cond_t  { char __data[48]; e_uint64 __alignment; } e_pthread_cond_t;
+    #endif
+#endif
+
+#include <time.h>   /* For timespec. */
+
+#ifndef TIME_UTC
+#define TIME_UTC    1
+#endif
+
+#if (defined(_MSC_VER) && _MSC_VER < 1900) || defined(__DMC__)  /* 1900 = Visual Studio 2015 */
+struct timespec
+{
+    time_t tv_sec;
+    long tv_nsec;
+};
+#endif
+/* END e_threading_header.h */
+
+
+/* BEG e_thread.h */
+/* e_thread */
+#if defined(E_WIN32)
+typedef e_handle    e_thread;  /* HANDLE, CreateThread() */
+#else
+typedef e_pthread_t e_thread;
+#endif
+
+typedef int (* e_thread_start_callback)(void*);
+
+typedef struct
+{
+    void* pUserData;
+    void (* onEntry)(void* pUserData);
+    void (* onExit)(void* pUserData);
+} e_entry_exit_callbacks;
+
+E_API e_result e_thread_create_ex(e_thread* thr, e_thread_start_callback func, void* arg, const e_entry_exit_callbacks* pEntryExitCallbacks, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_thread_create(e_thread* thr, e_thread_start_callback func, void* arg);
+E_API e_bool32 e_thread_equal(e_thread lhs, e_thread rhs);
+E_API e_thread e_thread_current(void);
+E_API e_result e_thread_sleep(const struct timespec* duration, struct timespec* remaining);
+E_API void e_thread_yield(void);
+E_API void e_thread_exit(int res);
+E_API e_result e_thread_detach(e_thread thr);
+E_API e_result e_thread_join(e_thread thr, int* res);
+
+
+/* e_mutex */
+#if defined(E_WIN32)
+typedef struct
+{
+    e_handle handle;    /* HANDLE, CreateMutex(), CreateEvent() */
+    int type;
+} e_mutex;
+#else
+typedef e_pthread_mutex_t e_mutex;
+#endif
+
+enum
+{
+    E_MUTEX_TYPE_PLAIN     = 0x00000000,
+    E_MUTEX_TYPE_TIMED     = 0x00000001,
+    E_MUTEX_TYPE_RECURSIVE = 0x00000002
+};
+
+E_API e_result e_mutex_init(e_mutex* mutex, int type);
+E_API void e_mutex_destroy(e_mutex* mutex);
+E_API e_result e_mutex_lock(e_mutex* mutex);
+E_API e_result e_mutex_timedlock(e_mutex* mutex, const struct timespec* time_point);
+E_API e_result e_mutex_trylock(e_mutex* mutex);
+E_API e_result e_mutex_unlock(e_mutex* mutex);
+
+
+/* e_cond */
+#if defined(E_WIN32)
+/* Not implemented. */
+typedef void*            e_cond;
+#else
+typedef e_pthread_cond_t e_cond;
+#endif
+
+E_API e_result e_cond_init(e_cond* cnd);
+E_API void e_cond_destroy(e_cond* cnd);
+E_API e_result e_cond_signal(e_cond* cnd);
+E_API e_result e_cond_broadcast(e_cond* cnd);
+E_API e_result e_cond_wait(e_cond* cnd, e_mutex* mtx);
+E_API e_result e_cond_timedwait(e_cond* cnd, e_mutex* mtx, const struct timespec* time_point);
+
+
+/* e_semaphore */
+#if defined(E_WIN32)
+typedef e_handle e_semaphore;
+#else
+typedef struct
+{
+    int value;
+    int valueMax;
+    e_pthread_mutex_t lock;
+    e_pthread_cond_t cond;
+} e_semaphore;
+#endif
+
+E_API e_result e_semaphore_init(e_semaphore* sem, int value, int valueMax);
+E_API void e_semaphore_destroy(e_semaphore* sem);
+E_API e_result e_semaphore_wait(e_semaphore* sem);
+E_API e_result e_semaphore_timedwait(e_semaphore* sem, const struct timespec* time_point);
+E_API e_result e_semaphore_post(e_semaphore* sem);
+
+
+/* e_syncevent */
+#if defined(E_WIN32)
+typedef e_handle e_syncevent;
+#else
+typedef struct
+{
+    int value;
+    e_pthread_mutex_t lock;
+    e_pthread_cond_t cond;
+} e_syncevent;
+#endif
+
+E_API e_result e_syncevent_init(e_syncevent* evnt);
+E_API void e_syncevent_destroy(e_syncevent* evnt);
+E_API e_result e_syncevent_wait(e_syncevent* evnt);
+E_API e_result e_syncevent_timedwait(e_syncevent* evnt, const struct timespec* time_point);
+E_API e_result e_syncevent_signal(e_syncevent* evnt);
+/* END e_thread.h */
+
+
+
 /* BEG e_threading.h */
+#if 0
 typedef int (* e_thread_start_callback)(void* arg);
 
 typedef struct e_thread_config e_thread_config;
@@ -591,7 +767,6 @@ E_API e_result e_thread_init(const e_thread_config* pConfig, const e_allocation_
 E_API e_result e_thread_join(e_thread* pThread, int* pExitCode);
 
 
-
 typedef struct e_mutex e_mutex;
 
 E_API size_t e_mutex_alloc_size(void);
@@ -600,6 +775,7 @@ E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, 
 E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_mutex_lock(e_mutex* pMutex);
 E_API void e_mutex_unlock(e_mutex* pMutex);
+#endif
 /* END e_threading.h */
 
 
@@ -1080,7 +1256,7 @@ struct e_log
     e_log_callbacks* pCallbacks;
     size_t callbackCount;
     e_allocation_callbacks allocationCallbacks;    /* Need to store these persistently because e_log_postv() might need to allocate a buffer on the heap. */
-    e_mutex* pMutex;    /* For simplifying thread-safety for custom logging callbacks. */
+    e_mutex mutex;    /* For simplifying thread-safety for custom logging callbacks. */
 };
 
 E_API e_result e_log_init(const e_allocation_callbacks* pAllocationCallbacks, e_log** ppLog);

@@ -3150,8 +3150,1469 @@ E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 nonBlocking)
 /* END e_net.c */
 
 
+/* BEG e_thread.c */
+/* Win32 */
+#if defined(E_WIN32)
+#include <windows.h>
+#include <limits.h> /* For LONG_MAX */
+
+#ifndef E_MALLOC
+#define E_MALLOC(sz)        HeapAlloc(GetProcessHeap(), 0, (sz))
+#endif
+
+#ifndef E_REALLOC
+#define E_REALLOC(p, sz)    (((sz) > 0) ? ((p) ? HeapReAlloc(GetProcessHeap(), 0, (p), (sz)) : HeapAlloc(GetProcessHeap(), 0, (sz))) : ((VOID*)(size_t)(HeapFree(GetProcessHeap(), 0, (p)) & 0)))
+#endif
+
+#ifndef E_FREE
+#define E_FREE(p)           HeapFree(GetProcessHeap(), 0, (p))
+#endif
+
+static int e_thread_result_from_GetLastError(DWORD error)
+{
+    switch (error)
+    {
+        case ERROR_SUCCESS:             return E_SUCCESS;
+        case ERROR_NOT_ENOUGH_MEMORY:   return E_OUT_OF_MEMORY;
+        case ERROR_SEM_TIMEOUT:         return E_TIMEOUT;
+        case ERROR_BUSY:                return E_BUSY;
+        default: break;
+    }
+
+    return E_INVALID_ARGS;
+}
+
+
+static time_t e_timespec_to_milliseconds(const struct timespec ts)
+{
+    LONGLONG milliseconds;
+
+    milliseconds = ((ts.tv_sec * 1000) + (ts.tv_nsec / 1000000));
+    if ((ts.tv_nsec % 1000000) != 0) {
+        milliseconds += 1; /* We truncated a sub-millisecond amount of time. Add an extra millisecond to meet the minimum duration requirement. */
+    }
+
+    return (time_t)milliseconds;
+}
+
+static time_t e_timespec_diff_milliseconds(const struct timespec tsA, const struct timespec tsB)
+{
+    return (unsigned int)e_timespec_to_milliseconds(e_timespec_diff(tsA, tsB));
+}
+
+
+typedef struct
+{
+    e_thread_start_callback func;
+    void* arg;
+    e_entry_exit_callbacks entryExitCallbacks;
+    e_allocation_callbacks allocationCallbacks;
+    int usingCustomAllocator;
+} e_thread_start_data_win32;
+
+static unsigned long WINAPI e_thread_start_win32(void* pUserData)
+{
+    e_thread_start_data_win32* pStartData = (e_thread_start_data_win32*)pUserData;
+    e_entry_exit_callbacks entryExitCallbacks;
+    e_thread_start_callback func;
+    void* arg;
+    unsigned long result;
+
+    entryExitCallbacks = pStartData->entryExitCallbacks;
+    if (entryExitCallbacks.onEntry != NULL) {
+        entryExitCallbacks.onEntry(entryExitCallbacks.pUserData);
+    }
+
+    /* Make sure we make a copy of the start data here. That way we can free pStartData straight away (it was allocated in e_thread_create()). */
+    func = pStartData->func;
+    arg  = pStartData->arg;
+
+    /* We should free the data pointer before entering into the start function. That way when e_thread_exit() is called we don't leak. */
+    e_free(pStartData, (pStartData->usingCustomAllocator) ? NULL : &pStartData->allocationCallbacks);
+
+    result = (unsigned long)func(arg);
+
+    if (entryExitCallbacks.onExit != NULL) {
+        entryExitCallbacks.onExit(entryExitCallbacks.pUserData);
+    }
+
+    return result;
+}
+
+E_API e_result e_thread_create_ex(e_thread* thr, e_thread_start_callback func, void* arg, const e_entry_exit_callbacks* pEntryExitCallbacks, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    HANDLE hThread;
+    e_thread_start_data_win32* pData;    /* <-- Needs to be allocated on the heap to ensure the data doesn't get trashed before the thread is entered. */
+    DWORD threadID; /* Not used. Needed for passing into CreateThread(). Without this it'll fail on Windows 98. */
+
+    if (thr == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *thr = NULL;    /* Safety. */
+
+    if (func == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pData = (e_thread_start_data_win32*)e_malloc(sizeof(*pData), pAllocationCallbacks);   /* <-- This will be freed when e_thread_start_win32() is entered. */
+    if (pData == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pData->func = func;
+    pData->arg  = arg;
+
+    if (pEntryExitCallbacks != NULL) {
+        pData->entryExitCallbacks = *pEntryExitCallbacks;
+    } else {
+        pData->entryExitCallbacks.onEntry   = NULL;
+        pData->entryExitCallbacks.onExit    = NULL;
+        pData->entryExitCallbacks.pUserData = NULL;
+    }
+
+    if (pAllocationCallbacks != NULL) {
+        pData->allocationCallbacks  = *pAllocationCallbacks;
+        pData->usingCustomAllocator = 1;
+    } else {
+        pData->allocationCallbacks.onMalloc  = NULL;
+        pData->allocationCallbacks.onRealloc = NULL;
+        pData->allocationCallbacks.onFree    = NULL;
+        pData->allocationCallbacks.pUserData = NULL;
+        pData->usingCustomAllocator = 0;
+    }
+
+    hThread = CreateThread(NULL, 0, e_thread_start_win32, pData, 0, &threadID);
+    if (hThread == NULL) {
+        e_free(pData, pAllocationCallbacks);
+        return e_thread_result_from_GetLastError(GetLastError());
+    }
+
+    *thr = (e_thread)hThread;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_thread_create(e_thread* thr, e_thread_start_callback func, void* arg)
+{
+    return e_thread_create_ex(thr, func, arg, NULL, NULL);
+}
+
+E_API e_bool32 e_thread_equal(e_thread lhs, e_thread rhs)
+{
+    /*
+    Annoyingly, GetThreadId() is not defined for Windows XP. Need to conditionally enable this. I'm
+    not sure how to do this any other way, so I'm falling back to a simple handle comparison. I don't
+    think this is right, though. If anybody has any suggestions, let me know.
+
+    TODO: In e_thread_create_ex(), we're getting the threadID from CreateThread() but not using it.
+    Could we make use of that? When GetThreadId() is not available, maybe fall back to that?
+    */
+#if defined(_WIN32_WINNT) && _WIN32_WINNT >= 0x0502
+    return GetThreadId((HANDLE)lhs) == GetThreadId((HANDLE)rhs);
+#else
+    return lhs == rhs;
+#endif
+}
+
+E_API e_thread e_thread_current(void)
+{
+    return (e_thread)GetCurrentThread();
+}
+
+E_API e_result e_thread_sleep(const struct timespec* duration, struct timespec* remaining)
+{
+    /*
+    Sleeping is annoyingly complicated in C11. Nothing crazy or anything, but it's not just a simple
+    millisecond sleep. These are the rules:
+    
+        * On success, return 0
+        * When the sleep is interupted due to a signal, return -1
+        * When any other error occurs, return some other negative value.
+        * When the sleep is interupted, the `remaining` output parameter needs to be filled out with
+          the remaining time.
+
+    In order to detect a signal, we can use SleepEx(). This only has a resolution of 1 millisecond,
+    however (this is true for everything on Windows). SleepEx() will return WAIT_IO_COMPLETION if
+    some I/O completion event occurs. This is the best we'll get on Windows, I think.
+
+    In order to calculate the value to place into `remaining`, we need to get the time before sleeping
+    and then get the time after the sleeping. We'll then have enough information to calculate the
+    difference which will be our remining. This is only required when the `remaining` parameter is not
+    NULL. Unfortunately we cannot use timespec_get() here because it doesn't have good support with
+    MinGW. We'll instead use Windows' high resolution performance counter which is supported back to
+    Windows 2000.
+    */
+    static LARGE_INTEGER frequency;
+    LARGE_INTEGER start;
+    DWORD sleepResult;
+    DWORD sleepMilliseconds;
+
+    if (duration == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    start.QuadPart = 0;
+
+    if (remaining != NULL) {
+        if (frequency.QuadPart == 0) {
+            if (QueryPerformanceFrequency(&frequency) == FALSE) {
+                frequency.QuadPart = 0; /* Just to be sure... */
+                return E_INVALID_ARGS;
+            }
+        }
+
+        if (QueryPerformanceCounter(&start) == FALSE) {
+            return E_INVALID_ARGS;   /* Failed to retrieve the start time. */
+        }
+    }
+
+    sleepMilliseconds = (DWORD)((duration->tv_sec * 1000) + (duration->tv_nsec / 1000000));
+
+    /*
+    A small, but important detail here. The C11 spec states that thrd_sleep() should sleep for a
+    *minimum* of the specified duration. In the above calculation we converted nanoseconds to
+    milliseconds, however this requires a division which may truncate a non-zero sub-millisecond
+    amount of time. We need to add an extra millisecond to meet the minimum duration requirement if
+    indeed we truncated.
+    */
+    if ((duration->tv_nsec % 1000000) != 0) {
+        sleepMilliseconds += 1; /* We truncated a sub-millisecond amount of time. Add an extra millisecond to meet the minimum duration requirement. */
+    }
+    
+    sleepResult = SleepEx(sleepMilliseconds, TRUE); /* <-- Make this sleep alertable so we can detect WAIT_IO_COMPLETION and return -1. */
+    if (sleepResult == 0) {
+        if (remaining != NULL) {
+            remaining->tv_sec  = 0;
+            remaining->tv_nsec = 0;
+        }
+
+        return E_SUCCESS;
+    }
+
+    /*
+    Getting here means we didn't sleep for the specified amount of time. We need to fill `remaining`.
+    To do this, we need to find out out much time has elapsed and then offset that will the requested
+    duration. This is the hard part of the process because we need to convert to and from timespec.
+    */
+    if (remaining != NULL) {
+        LARGE_INTEGER end;
+        if (QueryPerformanceCounter(&end)) {
+            LARGE_INTEGER elapsed;
+            elapsed.QuadPart = end.QuadPart - start.QuadPart;
+
+            /*
+            The remaining amount of time is the requested duration, minus the elapsed time. This section warrents an explanation.
+
+            The section below is converting between our performance counters and timespec structures. Just above we calculated the
+            amount of the time that has elapsed since sleeping. By subtracting the requested duration from the elapsed duration,
+            we'll be left with the remaining duration.
+
+            The first thing we do is convert the requested duration to a LARGE_INTEGER which will be based on the performance counter
+            frequency we retrieved earlier. The Windows high performance counters are based on seconds, so a counter divided by the
+            frequency will give you the representation in seconds. By multiplying the counter by 1000 before the division by the
+            frequency you'll have a result in milliseconds, etc.
+
+            Once the remainder has be calculated based on the high performance counters, it's converted to the timespec structure
+            which is just the reverse.
+            */
+            {
+                LARGE_INTEGER durationCounter;
+                LARGE_INTEGER remainingCounter;
+
+                durationCounter.QuadPart = ((duration->tv_sec * frequency.QuadPart) + ((duration->tv_nsec * frequency.QuadPart) / 1000000000));
+                if (durationCounter.QuadPart > elapsed.QuadPart) {
+                    remainingCounter.QuadPart = durationCounter.QuadPart - elapsed.QuadPart;
+                } else {
+                    remainingCounter.QuadPart = 0;   /* For safety. Ensures we don't go negative. */
+                }
+
+                remaining->tv_sec  = (time_t)((remainingCounter.QuadPart * 1)          / frequency.QuadPart);
+                remaining->tv_nsec =  (long)(((remainingCounter.QuadPart * 1000000000) / frequency.QuadPart) - (remaining->tv_sec * (LONGLONG)1000000000));
+            }
+        } else {
+            remaining->tv_sec  = 0; /* Just for safety. */
+            remaining->tv_nsec = 0;
+        }
+    }
+
+    if (sleepResult == WAIT_IO_COMPLETION) {
+        return E_INTERRUPT;  /* -1 */
+    } else {
+        return E_INVALID_ARGS;   /* "other negative value if an error occurred." */
+    }
+}
+
+E_API void e_thread_yield(void)
+{
+    Sleep(0);
+}
+
+E_API void e_thread_exit(int res)
+{
+    ExitThread((DWORD)res);
+}
+
+E_API e_result e_thread_detach(e_thread thr)
+{
+    /*
+    The documentation for thrd_detach() says explicitly that any error should return thrd_error.
+    We'll do the same, so make sure e_thread_result_from_GetLastError() is not used here.
+    */
+    BOOL result;
+
+    result = CloseHandle((HANDLE)thr);
+    if (!result) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_thread_join(e_thread thr, int* res)
+{
+    /*
+    Like thrd_detach(), the documentation for thrd_join() says to return thrd_success or thrd_error.
+    Therefore, make sure e_thread_result_from_GetLastError() is not used here.
+
+    In Win32, waiting for the thread to complete and retrieving the result is done as two separate
+    steps.
+    */
+
+    /* Wait for the thread. */
+    if (WaitForSingleObject((HANDLE)thr, INFINITE) == WAIT_FAILED) {
+        return E_INVALID_ARGS;   /* Wait failed. */
+    }
+
+    /* Retrieve the result code if required. */
+    if (res != NULL) {
+        DWORD exitCode;
+        if (GetExitCodeThread((HANDLE)thr, &exitCode) == FALSE) {
+            return E_INVALID_ARGS;
+        }
+
+        *res = (int)exitCode;
+    }
+
+    /*
+    It's not entirely clear from the documentation for thrd_join() as to whether or not the thread
+    handle should be closed at this point. I think it makes sense to close it here, as I don't recall
+    ever seeing a pattern or joining a thread, and then explicitly closing the thread handle. I think
+    joining should be an implicit detach.
+    */
+    return e_thread_detach(thr);
+}
+
+
+E_API e_result e_mutex_init(e_mutex* mutex, int type)
+{
+    HANDLE hMutex;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* Initialize the object to zero for safety. */
+    mutex->handle = NULL;
+    mutex->type   = 0;
+
+    /*
+    CreateMutex() will create a thread-aware mutex (allowing recursiveness), whereas an auto-reset
+    event (CreateEvent()) is not thread-aware and will deadlock (will not allow recursiveness). In
+    Win32 I'm making all mutex's timeable.
+    */
+    if ((type & E_MUTEX_TYPE_RECURSIVE) != 0) {
+        hMutex = CreateMutexA(NULL, FALSE, NULL);
+    } else {
+        hMutex = CreateEventA(NULL, FALSE, TRUE, NULL);
+    }
+
+    if (hMutex == NULL) {
+        return e_thread_result_from_GetLastError(GetLastError());
+    }
+
+    mutex->handle = (e_handle)hMutex;
+    mutex->type   = type;
+
+    return E_SUCCESS;
+}
+
+E_API void e_mutex_destroy(e_mutex* mutex)
+{
+    if (mutex == NULL) {
+        return;
+    }
+
+    CloseHandle((HANDLE)mutex->handle);
+}
+
+E_API e_result e_mutex_lock(e_mutex* mutex)
+{
+    DWORD result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)mutex->handle, INFINITE);
+    if (result != WAIT_OBJECT_0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_mutex_timedlock(e_mutex* mutex, const struct timespec* time_point)
+{
+    DWORD result;
+
+    if (mutex == NULL || time_point == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)mutex->handle, (DWORD)e_timespec_diff_milliseconds(*time_point, e_timespec_now()));
+    if (result != WAIT_OBJECT_0) {
+        if (result == WAIT_TIMEOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_mutex_trylock(e_mutex* mutex)
+{
+    DWORD result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)mutex->handle, 0);
+    if (result != WAIT_OBJECT_0) {
+        return E_BUSY;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_mutex_unlock(e_mutex* mutex)
+{
+    BOOL result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if ((mutex->type & E_MUTEX_TYPE_RECURSIVE) != 0) {
+        result = ReleaseMutex((HANDLE)mutex->handle);
+    } else {
+        result = SetEvent((HANDLE)mutex->handle);
+    }
+
+    if (!result) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+
+
+E_API e_result e_cond_init(e_cond* cnd)
+{
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* Not supporting condition variables on Win32. */
+    return E_INVALID_ARGS;
+}
+
+E_API void e_cond_destroy(e_cond* cnd)
+{
+    if (cnd == NULL) {
+        return;
+    }
+
+    /* Not supporting condition variables on Win32. */
+}
+
+E_API e_result e_cond_signal(e_cond* cnd)
+{
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* Not supporting condition variables on Win32. */
+    return E_INVALID_ARGS;
+}
+
+E_API e_result e_cond_broadcast(e_cond* cnd)
+{
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* Not supporting condition variables on Win32. */
+    return E_INVALID_ARGS;
+}
+
+E_API e_result e_cond_wait(e_cond* cnd, e_mutex* mtx)
+{
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    (void)mtx;
+
+    /* Not supporting condition variables on Win32. */
+    return E_INVALID_ARGS;
+}
+
+E_API e_result e_cond_timedwait(e_cond* cnd, e_mutex* mtx, const struct timespec* time_point)
+{
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    (void)mtx;
+    (void)time_point;
+
+    /* Not supporting condition variables on Win32. */
+    return E_INVALID_ARGS;
+}
+
+
+
+E_API e_result e_semaphore_init(e_semaphore* sem, int value, int valueMax)
+{
+    HANDLE hSemaphore;
+
+    if (sem == NULL || valueMax == 0 || value > valueMax) {
+        return E_INVALID_ARGS;
+    }
+
+    *sem = NULL;
+
+    hSemaphore = CreateSemaphore(NULL, value, valueMax, NULL);
+    if (hSemaphore == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *sem = hSemaphore;
+
+    return E_SUCCESS;
+}
+
+E_API void e_semaphore_destroy(e_semaphore* sem)
+{
+    if (sem == NULL) {
+        return;
+    }
+
+    CloseHandle((HANDLE)*sem);
+}
+
+E_API e_result e_semaphore_wait(e_semaphore* sem)
+{
+    DWORD result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)*sem, INFINITE);
+    if (result != WAIT_OBJECT_0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_semaphore_timedwait(e_semaphore* sem, const struct timespec* time_point)
+{
+    DWORD result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)*sem, (DWORD)e_timespec_diff_milliseconds(*time_point, e_timespec_now()));
+    if (result != WAIT_OBJECT_0) {
+        if (result == WAIT_TIMEOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_semaphore_post(e_semaphore* sem)
+{
+    BOOL result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = ReleaseSemaphore((HANDLE)*sem, 1, NULL);
+    if (!result) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+
+
+E_API e_result e_syncevent_init(e_syncevent* evnt)
+{
+    HANDLE hEvent;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *evnt = NULL;
+
+    hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
+    if (hEvent == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *evnt = hEvent;
+
+    return E_SUCCESS;
+}
+
+E_API void e_syncevent_destroy(e_syncevent* evnt)
+{
+    if (evnt == NULL) {
+        return;
+    }
+
+    CloseHandle((HANDLE)*evnt);
+}
+
+E_API e_result e_syncevent_wait(e_syncevent* evnt)
+{
+    DWORD result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)*evnt, INFINITE);
+    if (result != WAIT_OBJECT_0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_syncevent_timedwait(e_syncevent* evnt, const struct timespec* time_point)
+{
+    DWORD result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = WaitForSingleObject((HANDLE)*evnt, (DWORD)e_timespec_diff_milliseconds(*time_point, e_timespec_now()));
+    if (result != WAIT_OBJECT_0) {
+        if (result == WAIT_TIMEOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_syncevent_signal(e_syncevent* evnt)
+{
+    BOOL result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = SetEvent((HANDLE)*evnt);
+    if (!result) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+#endif
+
+/* POSIX */
+#if defined(E_POSIX)
+#include <pthread.h>
+#include <stdlib.h>     /* For malloc(), realloc(), free(). */
+#include <errno.h>      /* For errno_t. */
+#include <sys/time.h>   /* For timeval. */
+
+#ifndef E_MALLOC
+#define E_MALLOC(sz)        malloc(sz)
+#endif
+
+#ifndef E_REALLOC
+#define E_REALLOC(p, sz)    realloc(p, sz)
+#endif
+
+#ifndef E_FREE
+#define E_FREE(p)           free(p)
+#endif
+
+
+static int e_thread_result_from_errno(int e)
+{
+    switch (e)
+    {
+        case 0:         return E_SUCCESS;
+        case ENOMEM:    return E_OUT_OF_MEMORY;
+        case ETIME:     return E_TIMEOUT;
+        case ETIMEDOUT: return E_TIMEOUT;
+        case EBUSY:     return E_BUSY;
+    }
+
+    return E_INVALID_ARGS;
+}
+
+
+typedef struct
+{
+    e_thread_start_callback func;
+    void* arg;
+    e_entry_exit_callbacks entryExitCallbacks;
+    e_allocation_callbacks allocationCallbacks;
+    int usingCustomAllocator;
+} e_thread_start_data_posix;
+
+static void* e_thread_start_posix(void* pUserData)
+{
+    e_thread_start_data_posix* pStartData = (e_thread_start_data_posix*)pUserData;
+    e_entry_exit_callbacks entryExitCallbacks;
+    e_thread_start_callback func;
+    void* arg;
+    void* result;
+
+    entryExitCallbacks = pStartData->entryExitCallbacks;
+    if (entryExitCallbacks.onEntry != NULL) {
+        entryExitCallbacks.onEntry(entryExitCallbacks.pUserData);
+    }
+
+    /* Make sure we make a copy of the start data here. That way we can free pStartData straight away (it was allocated in e_thread_create()). */
+    func = pStartData->func;
+    arg  = pStartData->arg;
+
+    /* We should free the data pointer before entering into the start function. That way when e_thread_exit() is called we don't leak. */
+    e_free(pStartData, (pStartData->usingCustomAllocator) ? NULL : &pStartData->allocationCallbacks);
+
+    result = (void*)(e_intptr)func(arg);
+
+    if (entryExitCallbacks.onExit != NULL) {
+        entryExitCallbacks.onExit(entryExitCallbacks.pUserData);
+    }
+
+    return result;
+}
+
+E_API e_result e_thread_create_ex(e_thread* thr, e_thread_start_callback func, void* arg, const e_entry_exit_callbacks* pEntryExitCallbacks, const e_allocation_callbacks* pAllocationCallbacks)
+{
+    int result;
+    e_thread_start_data_posix* pData;
+    pthread_t thread;
+
+    if (thr == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *thr = 0;   /* Safety. */
+
+    if (func == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pData = (e_thread_start_data_posix*)e_malloc(sizeof(*pData), pAllocationCallbacks);   /* <-- This will be freed when e_thread_start_posix() is entered. */
+    if (pData == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pData->func = func;
+    pData->arg  = arg;
+
+    if (pEntryExitCallbacks != NULL) {
+        pData->entryExitCallbacks = *pEntryExitCallbacks;
+    } else {
+        pData->entryExitCallbacks.onEntry   = NULL;
+        pData->entryExitCallbacks.onExit    = NULL;
+        pData->entryExitCallbacks.pUserData = NULL;
+    }
+
+    if (pAllocationCallbacks != NULL) {
+        pData->allocationCallbacks  = *pAllocationCallbacks;
+        pData->usingCustomAllocator = 1;
+    } else {
+        pData->allocationCallbacks.onMalloc  = NULL;
+        pData->allocationCallbacks.onRealloc = NULL;
+        pData->allocationCallbacks.onFree    = NULL;
+        pData->allocationCallbacks.pUserData = NULL;
+        pData->usingCustomAllocator = 0;
+    }
+
+    result = pthread_create(&thread, NULL, e_thread_start_posix, pData);
+    if (result != 0) {
+        e_free(pData, pAllocationCallbacks);
+        return e_thread_result_from_errno(errno);
+    }
+
+    *thr = thread;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_thread_create(e_thread* thr, e_thread_start_callback func, void* arg)
+{
+    return e_thread_create_ex(thr, func, arg, NULL, NULL);
+}
+
+E_API e_bool32 e_thread_equal(e_thread lhs, e_thread rhs)
+{
+    return pthread_equal(lhs, rhs);
+}
+
+E_API e_thread e_thread_current(void)
+{
+    return pthread_self();
+}
+
+E_API e_result e_thread_sleep(const struct timespec* duration, struct timespec* remaining)
+{
+    /*
+    The documentation for thrd_sleep() mentions nanosleep(), so we'll go ahead and use that if it's
+    available. Otherwise we'll fallback to select() and use a similar algorithm to what we use with
+    the Windows build. We need to keep in mind the requirement to handle signal interrupts.
+    */
+    int result;
+
+#if defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 199309L
+    result = nanosleep(duration, remaining);
+    if (result != 0) {
+        if (result == EINTR) {
+            return E_INTERRUPT;
+        }
+
+        return E_INVALID_ARGS;    
+    }
+#else
+    /*
+    We need to fall back to select(). We'll use e_timespec_get() to retrieve the time before and after
+    for the purpose of diffing.
+    */
+    struct timeval tv;
+    struct timespec tsBeg;
+    struct timespec tsEnd;
+
+    if (duration == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    We need to grab the time before the wait. This will be diff'd with the time after waiting to
+    produce the remaining amount.
+    */
+    if (remaining != NULL) {
+        result = e_timespec_get(&tsBeg, TIME_UTC);
+        if (result == 0) {
+            return E_INVALID_ARGS;   /* Failed to retrieve the start time. */
+        }
+    }
+
+    tv.tv_sec  = duration->tv_sec;
+    tv.tv_usec = duration->tv_nsec / 1000;
+
+    /*
+    We need to sleep for the *minimum* of `duration`. Our nanoseconds-to-microseconds conversion
+    above may have truncated some nanoseconds, so we'll need to add a microsecond to compensate.
+    */
+    if ((duration->tv_nsec % 1000) != 0) {
+        tv.tv_usec += 1;
+        if (tv.tv_usec > 1000000) {
+            tv.tv_usec = 0;
+            tv.tv_sec += 1;
+        }
+    }
+
+    result = select(0, NULL, NULL, NULL, &tv);
+    if (result == 0) {
+        if (remaining != NULL) {
+            remaining->tv_sec  = 0;
+            remaining->tv_nsec = 0;
+        }
+
+        return E_SUCCESS;
+    }
+
+    /* Getting here means didn't wait the whole time. We'll need to grab the diff. */
+    if (remaining != NULL) {
+        if (e_timespec_get(&tsEnd, TIME_UTC) != 0) {
+            *remaining = e_timespec_diff(tsEnd, tsBeg);
+        } else {
+            /* Failed to get the end time, somehow. Shouldn't ever happen. */
+            remaining->tv_sec  = 0;
+            remaining->tv_nsec = 0;
+        }
+    }
+
+    if (result == EINTR) {
+        return E_INTERRUPT;
+    } else {
+        return E_INVALID_ARGS;
+    }
+#endif
+    
+    return E_SUCCESS;
+}
+
+E_API void e_thread_yield(void)
+{
+    sched_yield();
+}
+
+E_API void e_thread_exit(int res)
+{
+    pthread_exit((void*)(e_intptr)res);
+}
+
+E_API e_result e_thread_detach(e_thread thr)
+{
+    /*
+    The documentation for thrd_detach() explicitly says E_SUCCESS if successful or E_INVALID_ARGS
+    for any other error. Don't use e_thread_result_from_errno() here.
+    */
+    int result = pthread_detach(thr);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_thread_join(e_thread thr, int* res)
+{
+    /* Same rules apply here as thrd_detach() with respect to the return value. */
+    void* retval;
+    int result = pthread_join(thr, &retval);
+    if (result != 0) {
+        return E_INVALID_ARGS;   
+    }
+
+    if (res != NULL) {
+        *res = (int)(e_intptr)retval;
+    }
+
+    return E_SUCCESS;
+}
+
+
+
+E_API e_result e_mutex_init(e_mutex* mutex, int type)
+{
+    int result;
+    pthread_mutexattr_t attr;   /* For specifying whether or not the mutex is recursive. */
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pthread_mutexattr_init(&attr);
+    if ((type & E_MUTEX_TYPE_RECURSIVE) != 0) {
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    } else {
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);     /* Will deadlock. Consistent with Win32. */
+    }
+
+    result = pthread_mutex_init((pthread_mutex_t*)mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API void e_mutex_destroy(e_mutex* mutex)
+{
+    if (mutex == NULL) {
+        return;
+    }
+
+    pthread_mutex_destroy((pthread_mutex_t*)mutex);
+}
+
+E_API e_result e_mutex_lock(e_mutex* mutex)
+{
+    int result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_lock((pthread_mutex_t*)mutex);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+
+/* I'm not entirely sure what the best wait time would be, so making it configurable. Defaulting to 1 microsecond. */
+#ifndef E_TIMEDLOCK_WAIT_TIME_IN_NANOSECONDS
+#define E_TIMEDLOCK_WAIT_TIME_IN_NANOSECONDS    1000
+#endif
+
+static int e_pthread_mutex_timedlock(pthread_mutex_t* mutex, const struct timespec* time_point)
+{
+#if defined(__USE_XOPEN2K) && !defined(__APPLE__)
+    return pthread_mutex_timedlock((pthread_mutex_t*)mutex, time_point);
+#else
+    /*
+    Fallback implementation for when pthread_mutex_timedlock() is not avaialble. This is just a
+    naive loop which waits a bit of time before continuing.
+    */
+    #if !defined(C89ATOMIC_SUPPRESS_FALLBACK_WARNING) && !defined(__APPLE__)
+        #warning pthread_mutex_timedlock() is unavailable. Falling back to a suboptimal implementation. Set _XOPEN_SOURCE to >= 600 to use the native implementation of pthread_mutex_timedlock(). Use C89ATOMIC_SUPPRESS_FALLBACK_WARNING to suppress this warning.
+    #endif
+
+    int result;
+
+    if (time_point == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    for (;;) {
+        result = pthread_mutex_trylock((pthread_mutex_t*)mutex);
+        if (result == EBUSY) {
+            struct timespec tsNow;
+            e_timespec_get(&tsNow, TIME_UTC);
+
+            if (e_timespec_cmp(tsNow, *time_point) > 0) {
+                result = ETIMEDOUT;
+                break;
+            } else {
+                /* Have not yet timed out. Need to wait a bit and then try again. */
+                e_thread_sleep_timespec(e_timespec_nanoseconds(E_TIMEDLOCK_WAIT_TIME_IN_NANOSECONDS));
+                continue;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if (result == 0) {
+        return E_SUCCESS;
+    } else {
+        if (result == ETIMEDOUT) {
+            return E_TIMEOUT;
+        } else {
+            return E_INVALID_ARGS;
+        }
+    }
+#endif
+}
+
+E_API e_result e_mutex_timedlock(e_mutex* mutex, const struct timespec* time_point)
+{
+    int result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_pthread_mutex_timedlock((pthread_mutex_t*)mutex, time_point);
+    if (result != 0) {
+        if (result == ETIMEDOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_mutex_trylock(e_mutex* mutex)
+{
+    int result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_trylock((pthread_mutex_t*)mutex);
+    if (result != 0) {
+        if (result == EBUSY) {
+            return E_BUSY;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_mutex_unlock(e_mutex* mutex)
+{
+    int result;
+
+    if (mutex == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_unlock((pthread_mutex_t*)mutex);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+
+
+E_API e_result e_cond_init(e_cond* cnd)
+{
+    int result;
+
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_cond_init((pthread_cond_t*)cnd, NULL);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API void e_cond_destroy(e_cond* cnd)
+{
+    if (cnd == NULL) {
+        return;
+    }
+
+    pthread_cond_destroy((pthread_cond_t*)cnd);
+}
+
+E_API e_result e_cond_signal(e_cond* cnd)
+{
+    int result;
+
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_cond_signal((pthread_cond_t*)cnd);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_cond_broadcast(e_cond* cnd)
+{
+    int result;
+
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_cond_broadcast((pthread_cond_t*)cnd);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_cond_wait(e_cond* cnd, e_mutex* mtx)
+{
+    int result;
+
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_cond_wait((pthread_cond_t*)cnd, (pthread_mutex_t*)mtx);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_cond_timedwait(e_cond* cnd, e_mutex* mtx, const struct timespec* time_point)
+{
+    int result;
+
+    if (cnd == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_cond_timedwait((pthread_cond_t*)cnd, (pthread_mutex_t*)mtx, time_point);
+    if (result != 0) {
+        if (result == ETIMEDOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    return E_SUCCESS;
+}
+
+
+
+E_API e_result e_semaphore_init(e_semaphore* sem, int value, int valueMax)
+{
+    int result;
+
+    if (sem == NULL || valueMax == 0 || value > valueMax) {
+        return E_INVALID_ARGS;
+    }
+
+    sem->value    = value;
+    sem->valueMax = valueMax;
+
+    result = pthread_mutex_init((pthread_mutex_t*)&sem->lock, NULL);
+    if (result != 0) {
+        return e_thread_result_from_errno(result);  /* Failed to create mutex. */
+    }
+
+    result = pthread_cond_init((pthread_cond_t*)&sem->cond, NULL);
+    if (result != 0) {
+        pthread_mutex_destroy((pthread_mutex_t*)&sem->lock);
+        return e_thread_result_from_errno(result);  /* Failed to create condition variable. */
+    }
+
+    return E_SUCCESS;
+}
+
+E_API void e_semaphore_destroy(e_semaphore* sem)
+{
+    if (sem == NULL) {
+        return;
+    }
+
+    pthread_cond_destroy((pthread_cond_t*)&sem->cond);
+    pthread_mutex_destroy((pthread_mutex_t*)&sem->lock);
+}
+
+E_API e_result e_semaphore_wait(e_semaphore* sem)
+{
+    int result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_lock((pthread_mutex_t*)&sem->lock);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    /* We need to wait on a condition variable before escaping. We can't return from this function until the semaphore has been signaled. */
+    while (sem->value == 0) {
+        pthread_cond_wait((pthread_cond_t*)&sem->cond, (pthread_mutex_t*)&sem->lock);
+    }
+
+    sem->value -= 1;
+    pthread_mutex_unlock((pthread_mutex_t*)&sem->lock);
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_semaphore_timedwait(e_semaphore* sem, const struct timespec* time_point)
+{
+    int result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_pthread_mutex_timedlock((pthread_mutex_t*)&sem->lock, time_point);
+    if (result != 0) {
+        if (result == ETIMEDOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    /* We need to wait on a condition variable before escaping. We can't return from this function until the semaphore has been signaled. */
+    while (sem->value == 0) {
+        result = pthread_cond_timedwait((pthread_cond_t*)&sem->cond, (pthread_mutex_t*)&sem->lock, time_point);
+        if (result == ETIMEDOUT) {
+            pthread_mutex_unlock((pthread_mutex_t*)&sem->lock);
+            return E_TIMEOUT;
+        }
+    }
+
+    sem->value -= 1;
+
+    pthread_mutex_unlock((pthread_mutex_t*)&sem->lock);
+    return E_SUCCESS;
+}
+
+E_API e_result e_semaphore_post(e_semaphore* sem)
+{
+    int result;
+
+    if (sem == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_lock((pthread_mutex_t*)&sem->lock);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    if (sem->value < sem->valueMax) {
+        sem->value += 1;
+        pthread_cond_signal((pthread_cond_t*)&sem->cond);
+        result = E_SUCCESS;
+    } else {
+        result = E_INVALID_ARGS;
+    }
+
+    pthread_mutex_unlock((pthread_mutex_t*)&sem->lock);
+    return result;
+}
+
+
+
+E_API e_result e_syncevent_init(e_syncevent* evnt)
+{
+    int result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    evnt->value = 0;
+
+    result = pthread_mutex_init((pthread_mutex_t*)&evnt->lock, NULL);
+    if (result != 0) {
+        return e_thread_result_from_errno(result);  /* Failed to create mutex. */
+    }
+
+    result = pthread_cond_init((pthread_cond_t*)&evnt->cond, NULL);
+    if (result != 0) {
+        pthread_mutex_destroy((pthread_mutex_t*)&evnt->lock);
+        return e_thread_result_from_errno(result);  /* Failed to create condition variable. */
+    }
+
+    return E_SUCCESS;
+}
+
+E_API void e_syncevent_destroy(e_syncevent* evnt)
+{
+    if (evnt == NULL) {
+        return;
+    }
+
+    pthread_cond_destroy((pthread_cond_t*)&evnt->cond);
+    pthread_mutex_destroy((pthread_mutex_t*)&evnt->lock);
+}
+
+E_API e_result e_syncevent_wait(e_syncevent* evnt)
+{
+    int result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_lock((pthread_mutex_t*)&evnt->lock);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    while (evnt->value == 0) {
+        pthread_cond_wait((pthread_cond_t*)&evnt->cond, (pthread_mutex_t*)&evnt->lock);
+    }
+    evnt->value = 0;  /* Auto-reset. */
+
+    pthread_mutex_unlock((pthread_mutex_t*)&evnt->lock);
+    return E_SUCCESS;
+}
+
+E_API e_result e_syncevent_timedwait(e_syncevent* evnt, const struct timespec* time_point)
+{
+    int result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_pthread_mutex_timedlock((pthread_mutex_t*)&evnt->lock, time_point);
+    if (result != 0) {
+        if (result == ETIMEDOUT) {
+            return E_TIMEOUT;
+        }
+
+        return E_INVALID_ARGS;
+    }
+
+    while (evnt->value == 0) {
+        result = pthread_cond_timedwait((pthread_cond_t*)&evnt->cond, (pthread_mutex_t*)&evnt->lock, time_point);
+        if (result == ETIMEDOUT) {
+            pthread_mutex_unlock((pthread_mutex_t*)&evnt->lock);
+            return E_TIMEOUT;
+        }
+    }
+    evnt->value = 0;  /* Auto-reset. */
+
+    pthread_mutex_unlock((pthread_mutex_t*)&evnt->lock);
+    return E_SUCCESS;
+}
+
+E_API e_result e_syncevent_signal(e_syncevent* evnt)
+{
+    int result;
+
+    if (evnt == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = pthread_mutex_lock((pthread_mutex_t*)&evnt->lock);
+    if (result != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    evnt->value = 1;
+    pthread_cond_signal((pthread_cond_t*)&evnt->cond);
+
+    pthread_mutex_unlock((pthread_mutex_t*)&evnt->lock);
+    return E_SUCCESS;
+}
+#endif
+/* END e_thread.c */
+
 
 /* BEG e_threading.c */
+#if 0
 static e_result e_result_from_c89thread(int result)
 {
     switch (result)
@@ -3325,6 +4786,7 @@ E_API void e_mutex_unlock(e_mutex* pMutex)
 {
     c89mtx_unlock(&pMutex->mtx);
 }
+#endif
 /* END e_threading.c */
 
 
@@ -7243,14 +8705,14 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
     pZip->centralDirectorySize = (size_t)cdSizeInBytes64;
 
 
-    pZip->pHeap = e_malloc(e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount), pAllocationCallbacks);
+    pZip->pHeap = e_malloc(sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount), pAllocationCallbacks);
     if (pZip->pHeap == NULL) {
         return E_OUT_OF_MEMORY;
     }
 
     pZip->pLock             = (e_mutex*    )E_OFFSET_PTR(pZip->pHeap, 0);
-    pZip->pCentralDirectory =               E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size());
-    pZip->pIndex            = (e_zip_index*)E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize);
+    pZip->pCentralDirectory =               E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex));
+    pZip->pIndex            = (e_zip_index*)E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize);
     pZip->pCDRootNode       = NULL; /* <-- This will be set later. */
 
     result = e_stream_read(pStream, pZip->pCentralDirectory, pZip->centralDirectorySize, NULL);
@@ -7443,7 +8905,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
         to remember to update our pointers here.
         */
         {
-            void* pNewHeap = e_realloc(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount) + (sizeof(*pZip->pCDRootNode) * nodeUpperBoundCount), pAllocationCallbacks);
+            void* pNewHeap = e_realloc(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount) + (sizeof(*pZip->pCDRootNode) * nodeUpperBoundCount), pAllocationCallbacks);
             if (pNewHeap == NULL) {
                 e_free(pZip->pHeap, pAllocationCallbacks);
                 return E_OUT_OF_MEMORY;
@@ -7451,9 +8913,9 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
 
             pZip->pHeap = pNewHeap;
             pZip->pLock             = (e_mutex*      )E_OFFSET_PTR(pZip->pHeap, 0);
-            pZip->pCentralDirectory =                 E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size());
-            pZip->pIndex            = (e_zip_index*  )E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize);
-            pZip->pCDRootNode       = (e_zip_cd_node*)E_OFFSET_PTR(pZip->pHeap, e_mutex_alloc_size() + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount));
+            pZip->pCentralDirectory =                 E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex));
+            pZip->pIndex            = (e_zip_index*  )E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize);
+            pZip->pCDRootNode       = (e_zip_cd_node*)E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount));
         }
 
         /*
@@ -7492,7 +8954,7 @@ static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_a
     needs to be done last because we can't be changing the address of the mutex, which may happen
     due to the realloc() above.
     */
-    result = e_mutex_init_preallocated(pZip->pLock);
+    result = e_mutex_init(pZip->pLock, E_MUTEX_TYPE_PLAIN);
     if (result != E_SUCCESS) {
         /*
         Initialization of the mutex failed, but it's not really a critical error. It just means it
@@ -8409,7 +9871,7 @@ E_API e_result e_log_init(const e_allocation_callbacks* pAllocationCallbacks, e_
     pLog->allocationCallbacks = e_allocation_callbacks_init_copy(pAllocationCallbacks);
 
     /* We want a mutex to keep our logging thread-safe. */
-    result = e_mutex_init(pAllocationCallbacks, &pLog->pMutex);
+    result = e_mutex_init(&pLog->mutex, E_MUTEX_TYPE_PLAIN);
     if (result != E_SUCCESS) {
         e_free(pLog, pAllocationCallbacks);
         return result;
@@ -8432,7 +9894,7 @@ E_API void e_log_uninit(e_log* pLog, const e_allocation_callbacks* pAllocationCa
         return;
     }
 
-    e_mutex_uninit(pLog->pMutex, pAllocationCallbacks);
+    e_mutex_destroy(&pLog->mutex);
     e_free(pLog, pAllocationCallbacks);
 }
 
@@ -8466,11 +9928,11 @@ E_API e_result e_log_register_callback(e_log* pLog, e_log_callback_proc onLog, v
         return E_INVALID_ARGS;
     }
 
-    e_mutex_lock(pLog->pMutex);
+    e_mutex_lock(&pLog->mutex);
     {
         result = e_log_register_callback_nolock(pLog, onLog, pUserData, pAllocationCallbacks);
     }
-    e_mutex_unlock(pLog->pMutex);
+    e_mutex_unlock(&pLog->mutex);
 
     return result;
 }
@@ -8486,7 +9948,7 @@ E_API e_result e_log_post(e_log* pLog, e_log_level level, const char* pMessage)
         return E_INVALID_ARGS;
     }
 
-    e_mutex_lock(pLog->pMutex);
+    e_mutex_lock(&pLog->mutex);
     {
         size_t iLog;
         for (iLog = 0; iLog < pLog->callbackCount; iLog += 1) {
@@ -8495,7 +9957,7 @@ E_API e_result e_log_post(e_log* pLog, e_log_level level, const char* pMessage)
             }
         }
     }
-    e_mutex_unlock(pLog->pMutex);
+    e_mutex_unlock(&pLog->mutex);
 
     return E_SUCCESS;
 }
