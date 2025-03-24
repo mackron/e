@@ -273,6 +273,7 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 #define e_round_up_to_nearest_16(value) ((value + 15) & ~15)
 
 
+/* BEG e_allocation_callbacks.c */
 /* Default allocation callbacks. */
 static void* e_malloc_default(size_t sz, void* pUserData)
 {
@@ -293,7 +294,7 @@ static void e_free_default(void* p, void* pUserData)
 }
 
 
-E_API e_allocation_callbacks e_allocation_callbacks_init_default(void)
+static e_allocation_callbacks e_allocation_callbacks_init_default(void)
 {
     e_allocation_callbacks allocationCallbacks;
 
@@ -313,26 +314,6 @@ static e_allocation_callbacks e_allocation_callbacks_init_copy(const e_allocatio
         return e_allocation_callbacks_init_default();
     }
 }
-
-static c89str_allocation_callbacks e_allocation_callbacks_to_c89str(const e_allocation_callbacks* pAllocationCallbacks)
-{
-    c89str_allocation_callbacks allocationCallbacks;
-
-    if (pAllocationCallbacks != NULL) {
-        allocationCallbacks.pUserData = pAllocationCallbacks->pUserData;
-        allocationCallbacks.onMalloc  = pAllocationCallbacks->onMalloc;
-        allocationCallbacks.onRealloc = pAllocationCallbacks->onRealloc;
-        allocationCallbacks.onFree    = pAllocationCallbacks->onFree;
-    } else {
-        allocationCallbacks.pUserData = NULL;
-        allocationCallbacks.onMalloc  = e_malloc_default;
-        allocationCallbacks.onRealloc = e_realloc_default;
-        allocationCallbacks.onFree    = e_free_default;
-    }
-
-    return allocationCallbacks;
-}
-
 
 
 E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks)
@@ -387,6 +368,7 @@ E_API void e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks)
         e_free_default(p, NULL);
     }
 }
+/* END e_allocation_callbacks.c */
 
 
 
@@ -2774,7 +2756,7 @@ E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes)
 
 
 
-/* ==== BEG e_misc.c ==== */
+/* BEG e_misc.c */
 static E_INLINE void e_swap(void* a, void* b, size_t sz)
 {
     char* _a = (char*)a;
@@ -2863,11 +2845,11 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
         return e_binary_search(pKey, pList, count, stride, compareProc, pUserData);
     }
 }
-/* ==== END e_misc.c ==== */
+/* END e_misc.c */
 
 
 
-/* ==== BEG e_timer.h ==== */
+/* BEG e_timer.h */
 #if defined(E_WIN32) && !defined(E_POSIX)
     static LARGE_INTEGER e_gTimerFrequency;   /* <-- Initialized to zero since it's static. */
     E_API void e_timer_init(e_timer* pTimer)
@@ -2972,11 +2954,11 @@ E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, s
         }
     #endif
 #endif
-/* ==== END e_timer.h ==== */
+/* END e_timer.h */
 
 
 
-/* ==== BEG e_net.c ==== */
+/* BEG e_net.c */
 /*
 Unfortunately the Windows ecosystem does not work well because winsock2.h conflicts with windows.h.
 Since a simple build system is one of the primary goals of this project, we're going to have to do
@@ -3165,11 +3147,11 @@ E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 nonBlocking)
     return fcntl(socket, F_SETFL, flags);
 #endif
 }
-/* ==== END e_net.c ==== */
+/* END e_net.c */
 
 
 
-/* ==== BEG e_threading.c ==== */
+/* BEG e_threading.c */
 static e_result e_result_from_c89thread(int result)
 {
     switch (result)
@@ -3343,11 +3325,11 @@ E_API void e_mutex_unlock(e_mutex* pMutex)
 {
     c89mtx_unlock(&pMutex->mtx);
 }
-/* ==== END e_threading.c ==== */
+/* END e_threading.c */
 
 
 
-/* ==== BEG e_stream.c ==== */
+/* BEG e_stream.c */
 E_API e_result e_stream_init(const e_stream_vtable* pVTable, void* pVTableUserData, e_stream* pStream)
 {
     if (pStream == NULL) {
@@ -3791,12 +3773,12 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream)
 
     return e_memory_stream_remove(pStream, pStream->cursor, (*pStream->pDataSize - pStream->cursor));
 }
-/* ==== END e_stream.c ==== */
+/* END e_stream.c */
 
 
 
 
-/* ==== BEG e_deflate.c ==== */
+/* BEG e_deflate.c */
 /*
 This is all taken from the old public domain version of miniz.c but restyled for consistency with
 the rest of the code base.
@@ -4389,13 +4371,13 @@ common_exit:
 
     return status;
 }
-/* ==== END e_deflate.c ==== */
+/* END e_deflate.c */
 
 
 
 
 
-/* ==== BEG e_fs.c ==== */
+/* BEG e_fs.c */
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -6065,11 +6047,11 @@ E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryP
 
     return E_SUCCESS;
 }
-/* ==== END e_fs.c ==== */
+/* END e_fs.c */
 
 
 
-/* ==== BEG e_archive.c ==== */
+/* BEG e_archive.c */
 E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
 {
     e_result result;
@@ -6258,11 +6240,11 @@ E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_
 {
     e_fs_free_iterator(pIterator, pAllocationCallbacks);
 }
-/* ==== END e_archive.c ==== */
+/* END e_archive.c */
 
 
 
-/* ==== BEG e_zip.c ==== */
+/* BEG e_zip.c */
 /* The cache size must be at least 32K, and a power of 2. */
 #ifndef E_ZIP_CACHE_SIZE_IN_BYTES
 #define E_ZIP_CACHE_SIZE_IN_BYTES               32768
@@ -8118,11 +8100,11 @@ E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_call
 {
     e_archive_free_iterator(pIterator, pAllocationCallbacks);
 }
-/* ==== END e_zip.c ==== */
+/* END e_zip.c */
 
 
 
-/* ==== BEG e_log.c ==== */
+/* BEG e_log.c */
 const char* e_log_level_to_string(e_log_level level)
 {
     switch (level)
@@ -8337,11 +8319,11 @@ E_API e_result e_log_postf(e_log* pLog, e_log_level level, const char* pFormat, 
 
     return result;
 }
-/* ==== END e_log.c ==== */
+/* END e_log.c */
 
 
 
-/* ==== BEG e_script.h ==== */
+/* BEG e_script.h */
 static e_result e_result_from_lua(int result)
 {
     switch (result)
@@ -8483,11 +8465,11 @@ E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFil
 
     return result;
 }
-/* ==== END e_script.h ==== */
+/* END e_script.h */
 
 
 
-/* ==== BEG e_config_file.c ==== */
+/* BEG e_config_file.c */
 E_API e_result e_config_file_init(const e_allocation_callbacks* pAllocationCallbacks, e_config_file* pConfigFile)
 {
     lua_State* pLua;
@@ -9002,11 +8984,11 @@ E_API e_result e_config_file_get_uint64(e_config_file* pConfigFile, const char* 
     return E_SUCCESS;
 
 }
-/* ==== END e_config_file.c ==== */
+/* END e_config_file.c */
 
 
 
-/* ==== BEG e_image.h ==== */
+/* BEG e_image.h */
 #ifndef E_NO_STB_IMAGE
 typedef struct
 {
@@ -9163,11 +9145,11 @@ E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUse
 
     return E_SUCCESS;
 }
-/* ==== END e_image.h ==== */
+/* END e_image.h */
 
 
 
-/* ==== BEG e_font.c ==== */
+/* BEG e_font.c */
 E_API e_font_config e_font_config_init(void)
 {
     e_font_config config;
@@ -9383,10 +9365,10 @@ E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphInd
 
     stbtt_MakeGlyphBitmap(&pFont->fontInfo, pBitmap, (int)bitmapSizeX, (int)bitmapSizeY, (int)stride, scale, scale, glyphIndex);
 }
-/* ==== END e_font.c ==== */
+/* END e_font.c */
 
 
-/* ==== BEG e_engine.c ==== */
+/* BEG e_engine.c */
 /* Helper for retrieving the GLBapi object from the engine. This is just a cast. */
 #if !defined(E_NO_OPENGL) && !defined(E_EMSCRIPTEN)
 static GLBapi* e_engine_gl(const e_engine* pEngine)
@@ -9808,11 +9790,11 @@ E_API void* e_engine_get_vkapi(const e_engine* pEngine)
 
     return pEngine->pVK;
 }
-/* ==== END e_engine.c ==== */
+/* END e_engine.c */
 
 
 
-/* ==== BEG e_window.c ==== */
+/* BEG e_window.c */
 E_API unsigned int e_window_buffer_stride(const e_window_buffer* pBuffer)
 {
     if (pBuffer == NULL) {
@@ -10107,12 +10089,12 @@ E_API e_result e_window_next_buffer(e_window* pWindow, unsigned int bufferSizeX,
 
     return e_platform_window_next_buffer(pWindow->pPlatformWindow, bufferSizeX, bufferSizeY, pBuffer);
 }
-/* ==== END e_window.c ==== */
+/* END e_window.c */
 
 
 
 
-/* === BEG e_input.c === */
+/* BEG e_input.c */
 E_API e_input_config e_input_config_init(void)
 {
     e_input_config config;
@@ -10590,11 +10572,11 @@ E_API e_uint32 e_input_dequeue_character(e_input* pInput)
     return utf32;
 
 }
-/* === END e_input.c === */
+/* END e_input.c */
 
 
 
-/* ==== BEG e_graphics.c ==== */
+/* BEG e_graphics.c */
 static const char* e_graphics_get_backend_name(e_graphics_backend backend); /* Implemented near the bottom of this section. */
 
 /*
@@ -12779,12 +12761,12 @@ E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface)
 {
     return e_graphics_device_get_log(e_graphics_surface_get_device(pSurface));
 }
-/* ==== END e_graphics.c ==== */
+/* END e_graphics.c */
 
 
 
 
-/* ==== BEG e_client.c ==== */
+/* BEG e_client.c */
 static e_result e_client_handle_event(e_client* pClient, e_event* pEvent)
 {
     e_result result;
@@ -13455,12 +13437,12 @@ E_API e_result e_client_hide_cursor(e_client* pClient)
 
     return e_window_hide_cursor(pClient->pWindow);
 }
-/* ==== END e_client.c ==== */
+/* END e_client.c */
 
 
 
 
-/* ==== BEG e_editor.c ==== */
+/* BEG e_editor.c */
 E_API e_editor_config e_editor_config_init(e_engine* pEngine)
 {
     e_editor_config config;
@@ -13507,7 +13489,7 @@ E_API e_result e_editor_hide(e_editor* pEditor)
 
     return E_SUCCESS;
 }
-/* ==== END e_editor.c ==== */
+/* END e_editor.c */
 
 
 #endif  /* e_c */

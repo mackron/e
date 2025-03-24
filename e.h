@@ -328,35 +328,33 @@ E_API e_proc   e_dlsym(e_handle hLibrary, const char* pSymbol);
 E_API e_result e_dlerror(char* pOutMessage, size_t messageSizeInBytes);
 
 
-/* Allocation callbacks must be thread-safe. */
+/* BEG e_allocation_callbacks.h */
 typedef struct e_allocation_callbacks
 {
     void* pUserData;
-    void* (* onMalloc)(size_t sz, void* pUserData);
+    void* (* onMalloc )(size_t sz, void* pUserData);
     void* (* onRealloc)(void* p, size_t sz, void* pUserData);
-    void  (* onFree)(void* p, void* pUserData);
+    void  (* onFree   )(void* p, void* pUserData);
 } e_allocation_callbacks;
-
-E_API e_allocation_callbacks e_allocation_callbacks_init_default(void);
 
 E_API void* e_malloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_calloc(size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void* e_realloc(void* p, size_t sz, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void  e_free(void* p, const e_allocation_callbacks* pAllocationCallbacks);
+/* END e_allocation_callbacks.h */
 
 
-
-/* ==== BEG e_misc.h ==== */
+/* BEG e_misc.h */
 E_API void e_sort(void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 
 E_API void* e_binary_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 E_API void* e_linear_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
 E_API void* e_sorted_search(const void* pKey, const void* pList, size_t count, size_t stride, int (*compareProc)(void*, const void*, const void*), void* pUserData);
-/* ==== END e_misc.h ==== */
+/* END e_misc.h */
 
 
 
-/* ==== BEG e_timer.h ==== */
+/* BEG e_timer.h */
 typedef struct
 {
     e_int64 counter;
@@ -365,11 +363,11 @@ typedef struct
 
 E_API void e_timer_init(e_timer* pTimer);
 E_API double e_timer_get_time_in_seconds(e_timer* pTimer);
-/* ==== END e_timer.h ==== */
+/* END e_timer.h */
 
 
 
-/* ==== BEG e_net.h ==== */
+/* BEG e_net.h */
 /*
 The low-level socket library should be a direct mapping to the underlying socket API. The problem
 child here is Windows due to annyoing compilation errors when including winsock2.h and windows.h,
@@ -569,11 +567,11 @@ E_API e_result e_net_init(void);
 E_API void e_net_uninit(void);
 E_API int e_net_get_last_error(void);
 E_API int e_net_set_non_blocking(E_SOCKET socket, e_bool32 blocking);
-/* ==== END e_net.h ==== */
+/* END e_net.h */
 
 
 
-/* ==== BEG e_threading.h ==== */
+/* BEG e_threading.h */
 typedef int (* e_thread_start_callback)(void* arg);
 
 typedef struct e_thread_config e_thread_config;
@@ -600,11 +598,11 @@ E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, 
 E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_mutex_lock(e_mutex* pMutex);
 E_API void e_mutex_unlock(e_mutex* pMutex);
-/* ==== END e_threading.h ==== */
+/* END e_threading.h */
 
 
 
-/* ==== BEG e_stream.h ==== */
+/* BEG e_stream.h */
 typedef enum
 {
     E_SEEK_ORIGIN_CURRENT,
@@ -718,11 +716,11 @@ E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, e_
 E_API e_result e_memory_stream_tell(e_memory_stream* pStream, size_t* pCursor);
 E_API e_result e_memory_stream_remove(e_memory_stream* pStream, size_t offset, size_t size);
 E_API e_result e_memory_stream_truncate(e_memory_stream* pStream);
-/* ==== END e_stream.h ==== */
+/* END e_stream.h */
 
 
 
-/* ==== BEG e_deflate.h ==== */
+/* BEG e_deflate.h */
 enum
 {
     E_DEFLATE_FLAG_PARSE_ZLIB_HEADER = 1,
@@ -777,13 +775,13 @@ typedef struct e_deflate_decompressor
 
 E_API e_result e_deflate_decompressor_init(e_deflate_decompressor* pDecompressor);
 E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const e_uint8* pInputBuffer, size_t* pInputBufferSize, e_uint8* pOutputBufferStart, e_uint8* pOutputBufferNext, size_t* pOutputBufferSize, e_uint32 flags);
-/* ==== END e_deflate.h ==== */
+/* END e_deflate.h */
 
 
 
 
 
-/* ==== BEG e_fs.h ==== */
+/* BEG e_fs.h */
 typedef struct e_fs_vtable         e_fs_vtable;
 typedef struct e_fs_config         e_fs_config;
 typedef struct e_fs                e_fs;
@@ -912,11 +910,11 @@ Strings will be sorted by name. Duplicates will be removed (duplicates will be p
 base paths are specified).
 */
 E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, e_file_info** ppFileInfos, size_t* pFileCount);
-/* ==== END e_fs.h ==== */
+/* END e_fs.h */
 
 
 
-/* ==== BEG e_archive.h ==== */
+/* BEG e_archive.h */
 
 /*
 Archives are file systems which means they need to implement the file system vtable. There are also
@@ -957,11 +955,11 @@ E_API e_archive* e_archive_get(e_file* pFile);
 E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-/* ==== END e_archive.h ==== */
+/* END e_archive.h */
 
 
 
-/* ==== BEG e_zip.h ==== */
+/* BEG e_zip.h */
 typedef struct e_zip e_zip;
 
 E_API e_archive_vtable* e_zip_vtable(void);
@@ -980,11 +978,11 @@ E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo);
 E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
 E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-/* ==== END e_zip.h ==== */
+/* END e_zip.h */
 
 
 
-/* ==== BEG e_log.h ==== */
+/* BEG e_log.h */
 typedef enum
 {
     E_LOG_LEVEL_DEBUG   = 4,
@@ -1022,21 +1020,21 @@ E_API e_result e_log_register_callback(e_log* pLog, e_log_callback_proc onLog, v
 E_API e_result e_log_post(e_log* pLog, e_log_level level, const char* pMessage);
 E_API e_result e_log_postv(e_log* pLog, e_log_level level, const char* pFormat, va_list args);
 E_API e_result e_log_postf(e_log* pLog, e_log_level level, const char* pFormat, ...) E_ATTRIBUTE_FORMAT(3, 4);
-/* ==== END e_log.h ==== */
+/* END e_log.h */
 
 
 
-/* ==== BEG e_script.h ==== */
+/* BEG e_script.h */
 typedef void e_script; /* This is actually a lua_State*. You can just cast this and plug it into any Lua API. */
 
 E_API e_result e_script_init(const e_allocation_callbacks* pAllocationCallbacks, e_script** ppScript);
 E_API void e_script_uninit(e_script* pScript, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_script_load(e_script* pScript, e_stream* pStream, const char* pName, e_log* pLog);
 E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
-/* ==== END e_script.h ==== */
+/* END e_script.h */
 
 
-/* ==== BEG e_config_file.h ==== */
+/* BEG e_config_file.h */
 typedef struct e_config_file e_config_file;
 
 struct e_config_file
@@ -1054,11 +1052,11 @@ E_API e_result e_config_file_get_int(e_config_file* pConfigFile, const char* pSe
 E_API e_result e_config_file_get_uint(e_config_file* pConfigFile, const char* pSection, const char* pName, unsigned int* pValue);
 E_API e_result e_config_file_get_int64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_int64* pValue);
 E_API e_result e_config_file_get_uint64(e_config_file* pConfigFile, const char* pSection, const char* pName, e_uint64* pValue);
-/* ==== END e_config_file.h ==== */
+/* END e_config_file.h */
 
 
 
-/* ==== BEG e_image.h ==== */
+/* BEG e_image.h */
 typedef struct e_image_loader_vtable e_image_loader_vtable;
 
 struct e_image_loader_vtable
@@ -1068,11 +1066,11 @@ struct e_image_loader_vtable
 
 E_API e_result e_load_image(e_image_loader_vtable* pVTable, void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
 E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, void** ppData, e_uint32* pSizeX, e_uint32* pSizeY, e_format* pFormat);
-/* ==== END e_image.h ==== */
+/* END e_image.h */
 
 
 
-/* ==== BEG e_font.h ==== */
+/* BEG e_font.h */
 typedef struct e_font          e_font;
 typedef struct e_font_config   e_font_config;
 typedef struct e_font_metrics  e_font_metrics;
@@ -1113,11 +1111,11 @@ E_API void e_font_get_metrics(e_font* pFont, float scale, e_font_metrics* pMetri
 E_API void e_font_get_glyph_metrics(e_font* pFont, float scale, e_uint32 glyphIndex, e_glyph_metrics* pMetrics);
 E_API e_int32 e_font_get_kerning(e_font* pFont, float scale, e_uint32 glyphIndex1, e_uint32 glyphIndex2);
 E_API void e_font_get_glyph_bitmap(e_font* pFont, float scale, e_uint32 glyphIndex, e_uint32 bitmapSizeX, e_uint32 bitmapSizeY, e_uint32 stride, e_uint8* pBitmap);
-/* ==== END e_font.h ==== */
+/* END e_font.h */
 
 
 
-/* ==== BEG e_ui.h ==== */
+/* BEG e_ui.h */
 typedef struct e_ui          e_ui;
 typedef struct e_ui_renderer e_ui_renderer;
 
@@ -1254,11 +1252,11 @@ E_API void e_ui_uninit(e_ui* pUI);
 E_API void e_ui_invalidate(e_ui* pUI);                          /* Invalidates the UI and all of its children. This tells the UI system that the layout has changed and that the control needs to be redrawn. Can be called once at a base level control. */
 E_API void e_ui_update(e_ui* pUI, double dt);                   /* This will step through the UI and update the layout and process any animations. */
 E_API void e_ui_render(e_ui* pUI, e_ui_renderer* pRenderer);    /* This will render the UI. You should call this once on a top level UI. */
-/* ==== END e_ui.h ==== */
+/* END e_ui.h */
 
 
 
-/* ==== BEG e_engine.h ==== */
+/* BEG e_engine.h */
 typedef enum
 {
     E_ENGINE_FLAG_NO_GRAPHICS = 0x01,   /* Will also disable the graphics sub-system in clients. */
@@ -1325,12 +1323,12 @@ E_API void e_engine_reset_timer(e_engine* pEngine);
 E_API e_bool32 e_engine_is_graphics_backend_supported(const e_engine* pEngine, e_graphics_backend backend);
 E_API void* e_engine_get_glapi(const e_engine* pEngine);
 E_API void* e_engine_get_vkapi(const e_engine* pEngine);
-/* ==== END e_engine.h ==== */
+/* END e_engine.h */
 
 
 
 
-/* ==== BEG e_window.h ==== */
+/* BEG e_window.h */
 typedef enum
 {
     E_WINDOW_FLAG_FULLSCREEN = 0x01,
@@ -1622,11 +1620,11 @@ E_API e_result e_window_pin_cursor(e_window* pWindow, int cursorPosX, int cursor
 E_API e_result e_window_unpin_cursor(e_window* pWindow);
 E_API e_result e_window_post_close_event(e_window* pWindow);
 E_API e_result e_window_next_buffer(e_window* pWindow, unsigned int bufferSizeX, unsigned int bufferSizeY, e_window_buffer* pBuffer);   /* For software rendering. Swaps buffers, returns information about the new back buffer. */
-/* ==== END e_window.h ==== */
+/* END e_window.h */
 
 
 
-/* ==== BEG e_math.h ==== */
+/* BEG e_math.h */
 #define E_PI    3.14159265358979323846
 #define E_PIF   3.14159265358979323846f
 
@@ -2006,7 +2004,7 @@ E_INLINE e_quatf e_quatf_lookat(e_vec3f eye, e_vec3f target, e_vec3f up)
 
     return e_quatf_from_mat4f(m);
 }
-/* ==== END e_math.h ==== */
+/* END e_math.h */
 
 
 
@@ -2093,12 +2091,12 @@ E_API e_bool32 e_input_was_key_released(e_input* pInput, e_uint32 key);
 E_API e_bool32 e_input_is_key_down(e_input* pInput, e_uint32 key);
 E_API void e_input_enqueue_character(e_input* pInput, e_uint32 utf32);
 E_API e_uint32 e_input_dequeue_character(e_input* pInput); /* Will return 0 if there are no more characters buffered. */
-/* === END e_input.h === */
+/* END e_input.h */
 
 
 
 
-/* ==== BEG e_graphics.h ==== */
+/* BEG e_graphics.h */
 typedef struct e_graphics_vtable                        e_graphics_vtable;
 typedef struct e_graphics_config                        e_graphics_config;
 typedef struct e_graphics                               e_graphics;
@@ -2231,11 +2229,11 @@ E_API e_result e_graphics_surface_refresh(e_graphics_surface* pSurface, const e_
 E_API e_graphics* e_graphics_surface_get_graphics(const e_graphics_surface* pSurface);
 E_API e_graphics_device* e_graphics_surface_get_device(const e_graphics_surface* pSurface);
 E_API e_log* e_graphics_surface_get_log(e_graphics_surface* pSurface);
-/* ==== END e_graphics.h ==== */
+/* END e_graphics.h */
 
 
 
-/* ==== BEG e_gui.h ==== */
+/* BEG e_gui.h */
 typedef struct e_gui_config e_gui_config;
 typedef struct e_gui e_gui; /* The main GUI object. All GUI objects are a e_gui object. */
 
@@ -2302,11 +2300,10 @@ struct e_gui
 
 E_API e_result e_gui_init(const e_gui_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_gui* pGUI);
 E_API void e_gui_uninit(e_gui* pGUI, const e_allocation_callbacks* pAllocationCallbacks);
+/* END e_gui.h */
 
-/* ==== END e_gui.h ==== */
 
-
-/* ==== BEG e_client.h ==== */
+/* BEG e_client.h */
 typedef enum
 {
     E_CLIENT_FLAG_NO_WINDOW     = 0x01,   /* Does not create a window. This also disables graphics. */
@@ -2389,11 +2386,11 @@ E_API e_result e_client_pin_cursor(e_client* pClient, int pinnedCursorPosX, int 
 E_API e_result e_client_unpin_cursor(e_client* pClient);
 E_API e_result e_client_show_cursor(e_client* pClient);
 E_API e_result e_client_hide_cursor(e_client* pClient);
-/* ==== END e_client.h ==== */
+/* END e_client.h */
 
 
 
-/* ==== BEG e_editor.h ==== */
+/* BEG e_editor.h */
 typedef struct e_editor_config e_editor_config;
 typedef struct e_editor        e_editor;
 
@@ -2415,6 +2412,6 @@ E_API void e_editor_uninit(e_editor* pEditor, const e_allocation_callbacks* pAll
 E_API e_result e_editor_run(e_editor* pEditor);
 E_API e_result e_editor_show(e_editor* pEditor);
 E_API e_result e_editor_hide(e_editor* pEditor);
-/* ==== END e_editor.h ==== */
+/* END e_editor.h */
 
 #endif  /* e_h */

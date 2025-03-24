@@ -1,0 +1,17 @@
+e_h := <../e.h>;
+e_c := <../e.c>;
+
+// TODO: Update these paths to a local copy of fs later on once everything settles.
+fs_h :: <../../fs/fs.h>;
+fs_c :: <../../fs/fs.c>;
+
+replace_namespace_fs :: function(src:string) string
+{
+    return @(src)
+        ["fs_"] <= "e_"
+        ["FS_"] <= "E_";
+}
+
+// Allocation callbacks.
+e_h("/\* BEG e_allocation_callbacks.h \*/\R":"\R/\* END e_allocation_callbacks.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_allocation_callbacks.h \*/\R":"\R/\* END fs_allocation_callbacks.h \*/")));
+e_c("/\* BEG e_allocation_callbacks.c \*/\R":"\R/\* END e_allocation_callbacks.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_allocation_callbacks.c \*/\R":"\R/\* END fs_allocation_callbacks.c \*/")));
