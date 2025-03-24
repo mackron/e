@@ -110,6 +110,11 @@
 #define E_DEFAULT_RESOLUTION_Y      720
 
 
+/* Silence a warning with Emscripten. */
+#if defined(E_EMSCRIPTEN)
+#define E_SUPPRESS_MUTEX_TIMEDLOCK_FALLBACK_WARNING
+#endif
+
 
 #define E_UNUSED(x) (void)x
 
