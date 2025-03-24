@@ -584,7 +584,7 @@ E_API e_result e_thread_join(e_thread* pThread, int* pExitCode);
 
 typedef struct e_mutex e_mutex;
 
-E_API size_t e_mutex_alloc_size();
+E_API size_t e_mutex_alloc_size(void);
 E_API e_result e_mutex_init_preallocated(e_mutex* pMutex);
 E_API e_result e_mutex_init(const e_allocation_callbacks* pAllocationCallbacks, e_mutex** ppMutex);
 E_API void e_mutex_uninit(e_mutex* pMutex, const e_allocation_callbacks* pAllocationCallbacks);
@@ -954,7 +954,7 @@ E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_
 /* ==== BEG e_zip.h ==== */
 typedef struct e_zip e_zip;
 
-E_API e_archive_vtable* e_zip_vtable();
+E_API e_archive_vtable* e_zip_vtable(void);
 
 E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
 E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
@@ -1090,7 +1090,7 @@ struct e_font_config
     const char* pFilePath;  /* Set to NULL if the font is being loaded using logical settings. In this case it will be loaded by the operating system. When set, will be loaded directly from a TTF file. */
 };
 
-E_API e_font_config e_font_config_init();
+E_API e_font_config e_font_config_init(void);
 E_API e_font_config e_font_config_init_file(e_fs* pFS, const char* pFilePath);
 
 E_API e_result e_font_init(const e_font_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_font** ppFont);
@@ -1659,7 +1659,7 @@ E_INLINE e_vec3f e_vec3f_3f(float x, float y, float z)          { e_vec3f result
 
 E_INLINE e_vec4f e_vec4f_4f(float x, float y, float z, float w) { e_vec4f result = {x, y, z, w}; return result; }
 E_INLINE e_vec4f e_vec4f_vec3f_1f(e_vec3f v, float w)           { return e_vec4f_4f(v.x, v.y, v.z, w); }
-E_INLINE e_vec4f e_vec4f_zero()                                 { return e_vec4f_4f(0, 0, 0, 0); }
+E_INLINE e_vec4f e_vec4f_zero(void)                             { return e_vec4f_4f(0, 0, 0, 0); }
 E_INLINE e_vec4f e_vec4f_add(e_vec4f a, e_vec4f b)              { return e_vec4f_4f(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
 E_INLINE e_vec4f e_vec4f_sub(e_vec4f a, e_vec4f b)              { return e_vec4f_4f(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
 E_INLINE e_vec4f e_vec4f_mul(e_vec4f a, e_vec4f b)              { return e_vec4f_4f(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w); }
@@ -1690,8 +1690,8 @@ E_INLINE e_vec4f e_vec4f_from_pitch_yaw(float pitch, float yaw)
 
 
 E_INLINE e_mat4f e_mat4f_init(e_vec4f c0, e_vec4f c1, e_vec4f c2, e_vec4f c3) { e_mat4f result; result.c[0] = c0; result.c[1] = c1; result.c[2] = c2; result.c[3] = c3; return result; }
-E_INLINE e_mat4f e_mat4f_identity()                             { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0,  1, 0, 0), e_vec4f_4f(0, 0, 1,    0), e_vec4f_4f(0, 0, 0,    1)); }
-E_INLINE e_mat4f e_mat4f_vulkan_clip_correction()               { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, -1, 0, 0), e_vec4f_4f(0, 0, 0.5f, 0), e_vec4f_4f(0, 0, 0.5f, 1)); }
+E_INLINE e_mat4f e_mat4f_identity(void)                         { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0,  1, 0, 0), e_vec4f_4f(0, 0, 1,    0), e_vec4f_4f(0, 0, 0,    1)); }
+E_INLINE e_mat4f e_mat4f_vulkan_clip_correction(void)           { return e_mat4f_init(e_vec4f_4f(1, 0, 0, 0), e_vec4f_4f(0, -1, 0, 0), e_vec4f_4f(0, 0, 0.5f, 0), e_vec4f_4f(0, 0, 0.5f, 1)); }
 E_INLINE e_mat4f e_mat4f_3x3(e_mat4f m)                         { return e_mat4f_init(m.c[0], m.c[1], m.c[2], e_vec4f_4f(0, 0, 0, 0)); }
 
 E_INLINE e_mat4f e_mat4f_mul(e_mat4f a, e_mat4f b)
@@ -1882,7 +1882,7 @@ E_INLINE e_mat4f e_mat4f_normal(e_mat4f m)
 
 
 E_INLINE e_quatf e_quatf_4f(float x, float y, float z, float w) { e_quatf result = {x, y, z, w}; return result; }
-E_INLINE e_quatf e_quatf_identity()                             { return e_quatf_4f(0, 0, 0, 1); }
+E_INLINE e_quatf e_quatf_identity(void)                         { return e_quatf_4f(0, 0, 0, 1); }
 E_INLINE e_quatf e_quatf_mul(e_quatf a, e_quatf b)              { return e_quatf_4f(a.x*b.w + a.w*b.x + a.y*b.z - a.z*b.y, a.y*b.w + a.w*b.y + a.z*b.x - a.x*b.z, a.z*b.w + a.w*b.z + a.x*b.y - a.y*b.x, a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z); }
 E_INLINE e_quatf e_quatf_mul_1f(e_quatf a, float b)             { return e_quatf_4f(a.x*b, a.y*b, a.z*b, a.w*b); }
 E_INLINE e_quatf e_quatf_div(e_quatf a, e_quatf b)              { return e_quatf_4f(a.x/b.x, a.y/b.y, a.z/b.z, a.w/b.w); }

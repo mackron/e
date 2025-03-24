@@ -293,7 +293,7 @@ static void e_free_default(void* p, void* pUserData)
 }
 
 
-static e_allocation_callbacks e_allocation_callbacks_init_default()
+static e_allocation_callbacks e_allocation_callbacks_init_default(void)
 {
     e_allocation_callbacks allocationCallbacks;
 
@@ -3288,7 +3288,7 @@ struct e_mutex
     e_bool32 freeOnUninit;
 };
 
-E_API size_t e_mutex_alloc_size()
+E_API size_t e_mutex_alloc_size(void)
 {
     return sizeof(e_mutex);
 }
@@ -8060,7 +8060,7 @@ static e_archive_vtable e_gArchiveVTableZip =
     e_archive_uninit_zip
 };
 
-E_API e_archive_vtable* e_zip_vtable()
+E_API e_archive_vtable* e_zip_vtable(void)
 {
     return &e_gArchiveVTableZip;
 }
@@ -9120,7 +9120,7 @@ E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUse
 
 
 /* ==== BEG e_font.c ==== */
-E_API e_font_config e_font_config_init()
+E_API e_font_config e_font_config_init(void)
 {
     e_font_config config;
 
