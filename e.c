@@ -234,10 +234,12 @@ static e_result e_result_from_errno(int error)
 {
     switch (error)
     {
-        case 0:      return E_SUCCESS;
-        case ENOENT: return E_DOES_NOT_EXIST;
-        case ENOMEM: return E_OUT_OF_MEMORY;
-        case EINVAL: return E_INVALID_ARGS;
+        case 0:       return E_SUCCESS;
+        case ENOENT:  return E_DOES_NOT_EXIST;
+        case EEXIST:  return E_ALREADY_EXISTS;
+        case ENOTDIR: return E_NOT_DIRECTORY;
+        case ENOMEM:  return E_OUT_OF_MEMORY;
+        case EINVAL:  return E_INVALID_ARGS;
         default: break;
     }
 
