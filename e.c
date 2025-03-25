@@ -163,6 +163,12 @@ static void e_zero_memory_default(void* p, size_t sz)
 #define E_ALIGN(x, a)              ((x + (a-1)) & ~(a-1))
 #define E_ALIGN_64(x)              E_ALIGN(x, 8)
 
+#define E_ROUND_UP(value, multiple_PowerOfTwo2) (((value) + ((multiple_PowerOfTwo2) - 1)) & ~((multiple_PowerOfTwo2) - 1))
+#define E_ROUND_UP_4(value)        E_ROUND_UP(value, 4)
+#define E_ROUND_UP_16(value)       E_ROUND_UP(value, 16)
+
+
+/* TODO: Delete this once deflate decompressor is amalgamated from fs. */
 #define E_READ_LE16(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U))
 #define E_READ_LE32(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint32)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint32)(((const e_uint8*)(p))[3]) << 24U))
 #define E_READ_LE64(p) ((e_uint64)(((const e_uint8*)(p))[0]) | ((e_uint64)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint64)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint64)(((const e_uint8*)(p))[3]) << 24U) | ((e_uint64)(((const e_uint8*)(p))[4]) << 32U) | ((e_uint64)(((const e_uint8*)(p))[5]) << 40U) | ((e_uint64)(((const e_uint8*)(p))[6]) << 48U) | ((e_uint64)(((const e_uint8*)(p))[7]) << 56U))
@@ -709,9 +715,6 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
     return result;
 }
 
-
-#define e_round_up_to_nearest_4(value)  ((value +  3) & ~3)
-#define e_round_up_to_nearest_16(value) ((value + 15) & ~15)
 
 
 /* BEG e_allocation_callbacks.c */
@@ -1573,7 +1576,7 @@ static e_result e_platform_window_next_buffer(e_platform_window* pWindow, unsign
                     pDst[x] = (pSrc[x] & 0xFF00FF00) | ((pSrc[x] & 0x00FF0000) >> 16) | ((pSrc[x] & 0x000000FF) << 16);
                 }
 
-                pSrc += e_round_up_to_nearest_4(pWindow->bufferSizeX);
+                pSrc += E_ROUND_UP_4(pWindow->bufferSizeX);
                 pDst += pWindow->bufferSizeX;
             }
         }
@@ -1655,7 +1658,7 @@ static e_result e_platform_window_next_buffer(e_platform_window* pWindow, unsign
             ((bufferSizeX & 0x03) != 0))                        /* <-- Width must be a multiple of 4. */
         {
             /* Getting here means we do not meet the necessary alignment requirements and we need to use an intermediary buffer which does. */
-            pWindow->pBufferDIBDataIntermediary = e_aligned_malloc((e_round_up_to_nearest_16(bufferSizeX * 4) * bufferSizeY), 16, NULL);
+            pWindow->pBufferDIBDataIntermediary = e_aligned_malloc((E_ROUND_UP_16(bufferSizeX * 4) * bufferSizeY), 16, NULL);
             if (pWindow->pBufferDIBDataIntermediary == NULL) {
                 DeleteObject(pWindow->hBufferDIB);
                 pWindow->hBufferDIB = NULL;
@@ -12140,7 +12143,7 @@ E_API unsigned int e_window_buffer_stride(const e_window_buffer* pBuffer)
         return 0;
     }
 
-    return e_round_up_to_nearest_16(pBuffer->sizeX * 4);
+    return E_ROUND_UP_16(pBuffer->sizeX * 4);
 }
 
 
