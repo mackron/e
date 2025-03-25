@@ -5,7 +5,7 @@ e_c := <../e.c>;
 fs_h        :: <../../fs/fs.h>;
 fs_c        :: <../../fs/fs.c>;
 c89thread_h :: <../../c89thread/c89thread.h>;
-c89thread_c :: <../../c89thread/c89thread.c>;
+c89str_h    :: <../../c89str/c89str.h>;
 
 replace_namespace_fs :: function(src:string) string
 {
@@ -13,6 +13,14 @@ replace_namespace_fs :: function(src:string) string
         ["fs_"] <= "e_"
         ["FS_"] <= "E_";
 }
+
+replace_namespace_c89str :: function(src:string) string
+{
+    return @(src)
+        ["c89str_"] <= "e_"
+        ["C89STR_"] <= "E_";
+}
+
 
 // Allocation Callbacks
 e_h("/\* BEG e_allocation_callbacks.h \*/\R":"\R/\* END e_allocation_callbacks.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_allocation_callbacks.h \*/\R":"\R/\* END fs_allocation_callbacks.h \*/")));
@@ -61,6 +69,14 @@ e_c("/\* BEG e_stream.c \*/\R":"\R/\* END e_stream.c \*/") = stream_c;
 e_h("/\* BEG e_memory_stream.h \*/\R":"\R/\* END e_memory_stream.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_memory_stream.h \*/\R":"\R/\* END fs_memory_stream.h \*/")));
 e_c("/\* BEG e_memory_stream.c \*/\R":"\R/\* END e_memory_stream.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_memory_stream.c \*/\R":"\R/\* END fs_memory_stream.c \*/")));
 
+
+// Path API
+e_h("/\* BEG e_path.h \*/\R":"\R/\* END e_path.h \*/") = replace_namespace_fs(@(fs_h("/\* BEG fs_path.h \*/\R":"\R/\* END fs_path.h \*/")));
+e_c("/\* BEG e_path.c \*/\R":"\R/\* END e_path.c \*/") = replace_namespace_fs(@(fs_c("/\* BEG fs_path.c \*/\R":"\R/\* END fs_path.c \*/")));
+
+
+// Basic String API
+e_c("/\* BEG e_basic_strings.c \*/\R":"\R/\* END e_basic_strings.c \*/") = replace_namespace_c89str(@(c89str_h("/\* BEG c89str_stdlib.c \*/\R":"\R/\* END c89str_stdlib.c \*/")));
 
 
 // Threading

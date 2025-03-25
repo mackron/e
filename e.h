@@ -181,6 +181,8 @@ typedef void* e_ptr;
 
 #define E_INT64_MAX ((e_int64)(((e_uint64)0x7FFFFFFF << 32) | 0xFFFFFFFF))
 
+#define E_NULL_TERMINATED  ((size_t)-1)
+
 typedef enum
 {
     /* Engine-specific non-error codes. */
@@ -915,6 +917,52 @@ E_API e_result e_memory_stream_truncate(e_memory_stream* pStream);
 E_API void* e_memory_stream_take_ownership(e_memory_stream* pStream, size_t* pSize);  /* Takes ownership of the buffer. The caller is responsible for freeing the buffer with e_free(). Only valid in write mode. */
 /* END e_memory_stream.h */
 
+
+#define E_NO_ABOVE_ROOT_NAVIGATION 0x0400   /* <-- Temporary until we get the file system API amalgamated. TODO: Delete this. */
+
+/* BEG e_path.h */
+/*
+These functions are low-level functions for working with paths. The most important part of this API
+is probably the iteration functions. These functions are used for iterating over each of the
+segments of a path. This library will recognize both '\' and '/'. If you want to use just one or
+the other, or a different separator, you'll need to use a different library. Likewise, this library
+will treat paths as case sensitive. Again, you'll need to use a different library if this is not
+suitable for you.
+
+Iteration will always return both sides of a separator. For example, if you iterate "abc/def",
+you will get two items: "abc" and "def". Where this is of particular importance and where you must
+be careful, is the handling of the root directory. If you iterate "/", it will also return two
+items. The first will be length 0 with an offset of zero which represents the left side of the "/"
+and the second will be length 0 with an offset of 1 which represents the right side. The reason for
+this design is that it makes iteration unambiguous and makes it easier to reconstruct a path.
+
+The path API does not do any kind of validation to check if it represents an actual path on the
+file system. Likewise, it does not do any validation to check if the path contains invalid
+characters. All it cares about is "/" and "\".
+*/
+typedef struct
+{
+    const char* pFullPath;
+    size_t fullPathLength;
+    size_t segmentOffset;
+    size_t segmentLength;
+} e_path_iterator;
+
+E_API e_result e_path_first(const char* pPath, size_t pathLen, e_path_iterator* pIterator);
+E_API e_result e_path_last(const char* pPath, size_t pathLen, e_path_iterator* pIterator);
+E_API e_result e_path_next(e_path_iterator* pIterator);
+E_API e_result e_path_prev(e_path_iterator* pIterator);
+E_API e_bool32 e_path_is_first(const e_path_iterator* pIterator);
+E_API e_bool32 e_path_is_last(const e_path_iterator* pIterator);
+E_API int e_path_iterators_compare(const e_path_iterator* pIteratorA, const e_path_iterator* pIteratorB);
+E_API const char* e_path_file_name(const char* pPath, size_t pathLen);    /* Does *not* include the null terminator. Returns an offset of pPath. Will only be null terminated if pPath is. Returns null if the path ends with a slash. */
+E_API int e_path_directory(char* pDst, size_t dstCap, const char* pPath, size_t pathLen); /* Returns the length, or < 0 on error. pDst can be null in which case the required length will be returned. Will not include a trailing slash. */
+E_API const char* e_path_extension(const char* pPath, size_t pathLen);    /* Does *not* include the null terminator. Returns an offset of pPath. Will only be null terminated if pPath is. Returns null if the extension cannot be found. */
+E_API e_bool32 e_path_extension_equal(const char* pPath, size_t pathLen, const char* pExtension, size_t extensionLen); /* Returns true if the extension is equal to the given extension. Case insensitive. */
+E_API const char* e_path_trim_base(const char* pPath, size_t pathLen, const char* pBasePath, size_t basePathLen);
+E_API int e_path_append(char* pDst, size_t dstCap, const char* pBasePath, size_t basePathLen, const char* pPathToAppend, size_t pathToAppendLen); /* pDst can be equal to pBasePath in which case it will be appended in-place. pDst can be null in which case the function will return the required length. */
+E_API int e_path_normalize(char* pDst, size_t dstCap, const char* pPath, size_t pathLen, unsigned int options); /* The only root component recognized is "/". The path cannot start with "C:", "//<address>", etc. This is not intended to be a general cross-platform path normalization routine. If the path starts with "/", this will fail with a negative result code if normalization would result in the path going above the root directory. Will convert all separators to "/". Will remove trailing slash. pDst can be null in which case the required length will be returned. */
+/* END e_path.h */
 
 
 /* BEG e_deflate.h */

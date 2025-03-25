@@ -249,6 +249,447 @@ static e_result e_result_from_errno(int error)
 
 
 
+/* BEG e_basic_strings.c */
+E_API size_t e_strlen(const char* src)
+{
+    const char* end;
+
+    E_ASSERT(src != NULL);
+    
+    end = src;
+    while (end[0] != '\0') {
+        end += 1;
+    }
+
+    return end - src;
+}
+
+E_API char* e_strcpy(char* dst, const char* src)
+{
+    char* dstorig;
+
+    E_ASSERT(dst != NULL);
+    E_ASSERT(src != NULL);
+
+    dstorig = dst;
+
+    /* No, we're not using this garbage: while (*dst++ = *src++); */
+    for (;;) {
+        *dst = *src;
+        if (*src == '\0') {
+            break;
+        }
+
+        dst += 1;
+        src += 1;
+    }
+
+    return dstorig;
+}
+
+E_API int e_strncpy(char* dst, const char* src, size_t count)
+{
+    size_t maxcount;
+    size_t i;
+
+    if (dst == 0) {
+        return EINVAL;
+    }
+    if (src == 0) {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    maxcount = count;
+
+    for (i = 0; i < maxcount && src[i] != '\0'; ++i) {
+        dst[i] = src[i];
+    }
+
+    if (src[i] == '\0' || i == count || count == ((size_t)-1)) {
+        dst[i] = '\0';
+        return 0;
+    }
+
+    dst[0] = '\0';
+    return ERANGE;
+}
+
+E_API int e_strcpy_s(char* dst, size_t dstCap, const char* src)
+{
+    size_t i;
+
+    if (dst == 0) {
+        return EINVAL;
+    }
+    if (dstCap == 0) {
+        return ERANGE;
+    }
+    if (src == 0) {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    for (i = 0; i < dstCap && src[i] != '\0'; ++i) {
+        dst[i] = src[i];
+    }
+
+    if (i < dstCap) {
+        dst[i] = '\0';
+        return 0;
+    }
+
+    dst[0] = '\0';
+    return ERANGE;
+}
+
+E_API int e_strncpy_s(char* dst, size_t dstCap, const char* src, size_t count)
+{
+    size_t maxcount;
+    size_t i;
+
+    if (dst == 0) {
+        return EINVAL;
+    }
+    if (dstCap == 0) {
+        return EINVAL;
+    }
+    if (src == 0) {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    maxcount = count;
+    if (count == ((size_t)-1) || count >= dstCap) {        /* -1 = _TRUNCATE */
+        maxcount = dstCap - 1;
+    }
+
+    for (i = 0; i < maxcount && src[i] != '\0'; ++i) {
+        dst[i] = src[i];
+    }
+
+    if (src[i] == '\0' || i == count || count == ((size_t)-1)) {
+        dst[i] = '\0';
+        return 0;
+    }
+
+    dst[0] = '\0';
+    return ERANGE;
+}
+
+E_API int e_strcat_s(char* dst, size_t dstCap, const char* src)
+{
+    char* dstorig;
+
+    if (dst == 0) {
+        return EINVAL;
+    }
+    if (dstCap == 0) {
+        return ERANGE;
+    }
+    if (src == 0) {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    dstorig = dst;
+
+    while (dstCap > 0 && dst[0] != '\0') {
+        dst    += 1;
+        dstCap -= 1;
+    }
+
+    if (dstCap == 0) {
+        return EINVAL;  /* Unterminated. */
+    }
+
+    while (dstCap > 0 && src[0] != '\0') {
+        *dst++ = *src++;
+        dstCap -= 1;
+    }
+
+    if (dstCap > 0) {
+        dst[0] = '\0';
+    } else {
+        dstorig[0] = '\0';
+        return ERANGE;
+    }
+
+    return 0;
+}
+
+E_API int e_strncat_s(char* dst, size_t dstCap, const char* src, size_t count)
+{
+    char* dstorig;
+
+    if (dst == 0) {
+        return EINVAL;
+    }
+    if (dstCap == 0) {
+        return ERANGE;
+    }
+    if (src == 0) {
+        return EINVAL;
+    }
+
+    dstorig = dst;
+
+    while (dstCap > 0 && dst[0] != '\0') {
+        dst    += 1;
+        dstCap -= 1;
+    }
+
+    if (dstCap == 0) {
+        return EINVAL;  /* Unterminated. */
+    }
+
+    if (count == ((size_t)-1)) {        /* _TRUNCATE */
+        count = dstCap - 1;
+    }
+
+    while (dstCap > 0 && src[0] != '\0' && count > 0) {
+        *dst++ = *src++;
+        dstCap -= 1;
+        count  -= 1;
+    }
+
+    if (dstCap > 0) {
+        dst[0] = '\0';
+    } else {
+        dstorig[0] = '\0';
+        return ERANGE;
+    }
+
+    return 0;
+}
+
+E_API int e_itoa_s(int value, char* dst, size_t dstCap, int radix)
+{
+    int sign;
+    unsigned int valueU;
+    char* dstEnd;
+
+    if (dst == NULL || dstCap == 0) {
+        return EINVAL;
+    }
+    if (radix < 2 || radix > 36) {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    sign = (value < 0 && radix == 10) ? -1 : 1;     /* The negative sign is only used when the base is 10. */
+
+    if (value < 0) {
+        valueU = -value;
+    } else {
+        valueU = value;
+    }
+
+    dstEnd = dst;
+    do
+    {
+        int remainder = valueU % radix;
+        if (remainder > 9) {
+            *dstEnd = (char)((remainder - 10) + 'a');
+        } else {
+            *dstEnd = (char)(remainder + '0');
+        }
+
+        dstEnd += 1;
+        dstCap -= 1;
+        valueU /= radix;
+    } while (dstCap > 0 && valueU > 0);
+
+    if (dstCap == 0) {
+        dst[0] = '\0';
+        return EINVAL;  /* Ran out of room in the output buffer. */
+    }
+
+    if (sign < 0) {
+        *dstEnd++ = '-';
+        dstCap -= 1;
+    }
+
+    if (dstCap == 0) {
+        dst[0] = '\0';
+        return EINVAL;  /* Ran out of room in the output buffer. */
+    }
+
+    *dstEnd = '\0';
+
+
+    /* At this point the string will be reversed. */
+    dstEnd -= 1;
+    while (dst < dstEnd) {
+        char temp = *dst;
+        *dst = *dstEnd;
+        *dstEnd = temp;
+
+        dst += 1;
+        dstEnd -= 1;
+    }
+
+    return 0;
+}
+
+E_API int e_strcmp(const char* str1, const char* str2)
+{
+    if (str1 == str2) return  0;
+
+    /* These checks differ from the standard implementation. It's not important, but I prefer it just for sanity. */
+    if (str1 == NULL) return -1;
+    if (str2 == NULL) return  1;
+
+    for (;;) {
+        if (str1[0] == '\0') {
+            break;
+        }
+
+        if (str1[0] != str2[0]) {
+            break;
+        }
+
+        str1 += 1;
+        str2 += 1;
+    }
+
+    return ((unsigned char*)str1)[0] - ((unsigned char*)str2)[0];
+}
+
+E_API int e_strncmp(const char* str1, const char* str2, size_t maxLen)
+{
+    if (str1 == str2) return  0;
+
+    /* These checks differ from the standard implementation. It's not important, but I prefer it just for sanity. */
+    if (str1 == NULL) return -1;
+    if (str2 == NULL) return  1;
+
+    /* This function still needs to check for null terminators even though the length has been specified. */
+    for (;;) {
+        if (maxLen == 0) {
+            break;
+        }
+
+        if (str1[0] == '\0') {
+            break;
+        }
+
+        if (str1[0] != str2[0]) {
+            break;
+        }
+
+        str1 += 1;
+        str2 += 1;
+        maxLen -= 1;
+    }
+
+    if (maxLen == 0) {
+        return 0;
+    }
+
+    return ((unsigned char*)str1)[0] - ((unsigned char*)str2)[0];
+}
+
+E_API int e_stricmp_ascii(const char* str1, const char* str2)
+{
+    if (str1 == NULL || str2 == NULL) {
+        return 0;
+    }
+
+    while (*str1 != '\0' && *str2 != '\0') {
+        int c1 = (int)*str1;
+        int c2 = (int)*str2;
+    
+        if (c1 >= 'A' && c1 <= 'Z') {
+            c1 += 'a' - 'A';
+        }
+        if (c2 >= 'A' && c2 <= 'Z') {
+            c2 += 'a' - 'A';
+        }
+    
+        if (c1 != c2) {
+            return c1 - c2;
+        }
+    
+        str1 += 1;
+        str2 += 1;
+    }
+
+    if (*str1 == '\0' && *str2 == '\0') {
+        return 0;
+    } else if (*str1 == '\0') {
+        return -1;
+    } else {
+        return 1;
+    }
+}
+
+E_API int e_strnicmp_ascii(const char* str1, const char* str2, size_t count)
+{
+    if (str1 == NULL || str2 == NULL) {
+        return 0;
+    }
+
+    while (*str1 != '\0' && *str2 != '\0' && count > 0) {
+        int c1 = (int)*str1;
+        int c2 = (int)*str2;
+    
+        if (c1 >= 'A' && c1 <= 'Z') {
+            c1 += 'a' - 'A';
+        }
+        if (c2 >= 'A' && c2 <= 'Z') {
+            c2 += 'a' - 'A';
+        }
+       
+        if (c1 != c2) {
+            return c1 - c2;
+        }
+       
+        str1  += 1;
+        str2  += 1;
+        count -= 1;
+    }
+
+    if (count == 0) {
+        return 0;
+    } else if (*str1 == '\0' && *str2 == '\0') {
+        return 0;
+    } else if (*str1 == '\0') {
+        return -1;
+    } else {
+        return 1;
+    }
+}
+
+E_API int e_stricmp(const char* str1, const char* str2)
+{
+    /* We will use the standard implementations of stricmp() and strcasecmp() if they are available. */
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+    return _stricmp(str1, str2);
+#elif defined(__GNUC__) && defined(__USE_GNU)
+    return strcasecmp(str1, str2);
+#else
+    /* It would be good if we could use a custom implementation based on the Unicode standard here. Would require a lot of work to get that right, however. */
+    return e_stricmp_ascii(str1, str2);
+#endif
+}
+
+E_API int e_strnicmp(const char* str1, const char* str2, size_t count)
+{
+    /* We will use the standard implementations of strnicmp() and strncasecmp() if they are available. */
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+    return _strnicmp(str1, str2, count);
+#elif defined(__GNUC__) && defined(__USE_GNU)
+    return strncasecmp(str1, str2, count);
+#else
+    /* It would be good if we could use a custom implementation based on the Unicode standard here. Would require a lot of work to get that right, however. */
+    return e_strnicmp_ascii(str1, str2, count);
+#endif
+}
+/* END e_basic_strings.c */
+
+
+
 E_API int e_vsnprintf(char* buf, size_t count, const char* fmt, va_list args)
 {
     return c89str_vsnprintf(buf, count, fmt, args);
@@ -5128,6 +5569,548 @@ E_API void* e_memory_stream_take_ownership(e_memory_stream* pStream, size_t* pSi
 }
 /* END e_memory_stream.c */
 
+
+
+/* BEG e_path.c */
+E_API e_result e_path_first(const char* pPath, size_t pathLen, e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ZERO_OBJECT(pIterator);
+
+    if (pPath == NULL || pPath[0] == '\0' || pathLen == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    pIterator->pFullPath      = pPath;
+    pIterator->fullPathLength = pathLen;
+    pIterator->segmentOffset  = 0;
+    pIterator->segmentLength  = 0;
+
+    /* We need to find the first separator, or the end of the string. */
+    while (pIterator->segmentLength < pathLen && pPath[pIterator->segmentLength] != '\0' && (pPath[pIterator->segmentLength] != '\\' && pPath[pIterator->segmentLength] != '/')) {
+        pIterator->segmentLength += 1;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_path_last(const char* pPath, size_t pathLen, e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ZERO_OBJECT(pIterator);
+
+    if (pathLen == 0 || pPath == NULL || pPath[0] == '\0') {
+        return E_INVALID_ARGS;
+    }
+
+    if (pathLen == (size_t)-1) {
+        pathLen = strlen(pPath);
+    }
+
+    /* Little trick here. Not *quite* as optimal as it could be, but just go to the end of the string, and then go to the previous segment. */
+    pIterator->pFullPath      = pPath;
+    pIterator->fullPathLength = pathLen;
+    pIterator->segmentOffset  = pathLen;
+    pIterator->segmentLength  = 0;
+
+    /* We need to find the last separator, or the beginning of the string. */
+    while (pIterator->segmentLength < pathLen && pPath[pIterator->segmentOffset - 1] != '\0' && (pPath[pIterator->segmentOffset - 1] != '\\' && pPath[pIterator->segmentOffset - 1] != '/')) {
+        pIterator->segmentOffset -= 1;
+        pIterator->segmentLength += 1;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_path_next(e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ASSERT(pIterator->pFullPath != NULL);
+
+    /* Move the offset to the end of the previous segment and reset the length. */
+    pIterator->segmentOffset = pIterator->segmentOffset + pIterator->segmentLength;
+    pIterator->segmentLength = 0;
+
+    /* If we're at the end of the string, we're done. */
+    if (pIterator->segmentOffset >= pIterator->fullPathLength || pIterator->pFullPath[pIterator->segmentOffset] == '\0') {
+        return E_AT_END;
+    }
+
+    /* At this point we should be sitting on a separator. The next character starts the next segment. */
+    pIterator->segmentOffset += 1;
+
+    /* Now we need to find the next separator or the end of the path. This will be the end of the segment. */
+    for (;;) {
+        if (pIterator->segmentOffset + pIterator->segmentLength >= pIterator->fullPathLength || pIterator->pFullPath[pIterator->segmentOffset + pIterator->segmentLength] == '\0') {
+            break;  /* Reached the end of the path. */
+        }
+
+        if (pIterator->pFullPath[pIterator->segmentOffset + pIterator->segmentLength] == '\\' || pIterator->pFullPath[pIterator->segmentOffset + pIterator->segmentLength] == '/') {
+            break;  /* Found a separator. This marks the end of the next segment. */
+        }
+
+        pIterator->segmentLength += 1;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_path_prev(e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ASSERT(pIterator->pFullPath != NULL);
+
+    if (pIterator->segmentOffset == 0) {
+        return E_AT_END;  /* If we're already at the start it must mean we're finished iterating. */
+    }
+
+    pIterator->segmentLength = 0;
+
+    /*
+    The start of the segment of the current iterator should be sitting just before a separator. We
+    need to move backwards one step. This will become the end of the segment we'll be returning.
+    */
+    pIterator->segmentOffset = pIterator->segmentOffset - 1;
+    pIterator->segmentLength = 0;
+
+    /* Just keep scanning backwards until we find a separator or the start of the path. */
+    for (;;) {
+        if (pIterator->segmentOffset == 0) {
+            break;
+        }
+
+        if (pIterator->pFullPath[pIterator->segmentOffset - 1] == '\\' || pIterator->pFullPath[pIterator->segmentOffset - 1] == '/') {
+            break;
+        }
+
+        pIterator->segmentOffset -= 1;
+        pIterator->segmentLength += 1;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_bool32 e_path_is_first(const e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_FALSE;
+    }
+
+    return pIterator->segmentOffset == 0;
+
+}
+
+E_API e_bool32 e_path_is_last(const e_path_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return E_FALSE;
+    }
+
+    if (pIterator->fullPathLength == E_NULL_TERMINATED) {
+        return pIterator->pFullPath[pIterator->segmentOffset + pIterator->segmentLength] == '\0';
+    } else {
+        return pIterator->segmentOffset + pIterator->segmentLength == pIterator->fullPathLength;
+    }
+}
+
+E_API int e_path_iterators_compare(const e_path_iterator* pIteratorA, const e_path_iterator* pIteratorB)
+{
+    E_ASSERT(pIteratorA != NULL);
+    E_ASSERT(pIteratorB != NULL);
+
+    if (pIteratorA->pFullPath == pIteratorB->pFullPath && pIteratorA->segmentOffset == pIteratorB->segmentOffset && pIteratorA->segmentLength == pIteratorB->segmentLength) {
+        return 0;
+    }
+
+    return e_strncmp(pIteratorA->pFullPath + pIteratorA->segmentOffset, pIteratorB->pFullPath + pIteratorB->segmentOffset, E_MIN(pIteratorA->segmentLength, pIteratorB->segmentLength));
+}
+
+E_API const char* e_path_file_name(const char* pPath, size_t pathLen)
+{
+    /* The file name is just the last segment. */
+    e_result result;
+    e_path_iterator last;
+
+    result = e_path_last(pPath, pathLen, &last);
+    if (result != E_SUCCESS) {
+        return NULL;
+    }
+
+    if (last.segmentLength == 0) {
+        return NULL;
+    }
+    
+    return last.pFullPath + last.segmentOffset;
+}
+
+E_API int e_path_directory(char* pDst, size_t dstCap, const char* pPath, size_t pathLen)
+{
+    const char* pFileName;
+
+    pFileName = e_path_file_name(pPath, pathLen);
+    if (pFileName == NULL) {
+        return -1;
+    }
+
+    if (pFileName == pPath) {
+        if (pDst != NULL && dstCap > 0) {
+            pDst[0] = '\0';
+        }
+
+        return 0;   /* The path is just a file name. */
+    } else {
+        const char* pDirEnd = pFileName - 1;
+        size_t dirLen = (size_t)(pDirEnd - pPath);
+
+        if (pDst != NULL && dstCap > 0) {
+            size_t bytesToCopy = E_MIN(dstCap - 1, dirLen);
+            if (bytesToCopy > 0) {
+                E_COPY_MEMORY(pDst, pPath, bytesToCopy);
+            }
+
+            pDst[bytesToCopy] = '\0';
+        }
+
+        if (dirLen > (size_t)-1) {
+            return -1;  /* Too long. */
+        }
+
+        return (int)dirLen;
+    }
+}
+
+E_API const char* e_path_extension(const char* pPath, size_t pathLen)
+{
+    const char* pDot = NULL;
+    const char* pLastSlash = NULL;
+    size_t i;
+
+    if (pPath == NULL) {
+        return NULL;
+    }
+
+    /* We need to find the last dot after the last slash. */
+    for (i = 0; i < pathLen; ++i) {
+        if (pPath[i] == '\0') {
+            break;
+        }
+
+        if (pPath[i] == '.') {
+            pDot = pPath + i;
+        } else if (pPath[i] == '\\' || pPath[i] == '/') {
+            pLastSlash = pPath + i;
+        }
+    }
+
+    /* If the last dot is after the last slash, we've found it. Otherwise, it's not there and we need to return null. */
+    if (pDot != NULL && pDot > pLastSlash) {
+        return pDot + 1;
+    } else {
+        return NULL;
+    }
+}
+
+E_API e_bool32 e_path_extension_equal(const char* pPath, size_t pathLen, const char* pExtension, size_t extensionLen)
+{
+    if (pPath == NULL || pExtension == NULL) {
+        return E_FALSE;
+    }
+
+    if (extensionLen == E_NULL_TERMINATED) {
+        extensionLen = strlen(pExtension);
+    }
+
+    if (pathLen == E_NULL_TERMINATED) {
+        pathLen = strlen(pPath);
+    }
+
+    if (extensionLen >= pathLen) {
+        return E_FALSE;
+    }
+
+    if (pPath[pathLen - extensionLen - 1] != '.') {
+        return E_FALSE;
+    }
+
+    return e_strnicmp(pPath + pathLen - extensionLen, pExtension, extensionLen) == 0;
+}
+
+E_API const char* e_path_trim_base(const char* pPath, size_t pathLen, const char* pBasePath, size_t basePathLen)
+{
+    e_path_iterator iPath;
+    e_path_iterator iBase;
+    e_result result;
+
+    if (basePathLen != E_NULL_TERMINATED && pathLen < basePathLen) {
+        return NULL;
+    }
+
+    if (basePathLen == 0 || pBasePath == NULL || pBasePath[0] == '\0') {
+        return pPath;
+    }
+
+    result = e_path_first(pPath, pathLen, &iPath);
+    if (result != E_SUCCESS) {
+        return NULL;
+    }
+
+    result = e_path_first(pBasePath, basePathLen, &iBase);
+    if (result != E_SUCCESS) {
+        return NULL;
+    }
+
+    /* We just keep iterating until we find a mismatch or reach the end of the base path. */
+    for (;;) {
+        if (iPath.segmentLength != iBase.segmentLength) {
+            return NULL;
+        }
+
+        if (e_strncmp(iPath.pFullPath + iPath.segmentOffset, iBase.pFullPath + iBase.segmentOffset, iPath.segmentLength) != 0) {
+            return NULL;
+        }
+
+        result = e_path_next(&iBase);
+        if (result != E_SUCCESS) {
+            e_path_next(&iPath);   /* Move to the next segment in the path to ensure our iterators are in sync. */
+            break;
+        }
+
+        result = e_path_next(&iPath);
+        if (result != E_SUCCESS) {
+            return NULL;    /* If we hit this it means the we've reached the end of the path before the base and therefore we don't match. */
+        }
+    }
+
+    /* Getting here means we got to the end of the base path without finding a mismatched segment which means the path begins with the base. */
+    return iPath.pFullPath + iPath.segmentOffset;
+}
+
+E_API int e_path_append(char* pDst, size_t dstCap, const char* pBasePath, size_t basePathLen, const char* pPathToAppend, size_t pathToAppendLen)
+{
+    size_t dstLen = 0;
+
+    if (pBasePath == NULL) {
+        pBasePath = "";
+        basePathLen = 0;
+    }
+
+    if (pPathToAppend == NULL) {
+        pPathToAppend = "";
+        pathToAppendLen = 0;
+    }
+
+    if (basePathLen == E_NULL_TERMINATED) {
+        basePathLen = strlen(pBasePath);
+    }
+
+    if (pathToAppendLen == E_NULL_TERMINATED) {
+        pathToAppendLen = strlen(pPathToAppend);
+    }
+
+
+    /* Do not include the separator if we have one. */
+    if (basePathLen > 0 && (pBasePath[basePathLen - 1] == '\\' || pBasePath[basePathLen - 1] == '/')) {
+        basePathLen -= 1;
+    }
+
+
+    /*
+    We don't want to be appending a separator if the base path is empty. Otherwise we'll end up with
+    a leading slash.
+    */
+    if (basePathLen > 0) {
+        /* Base path. */
+        if (pDst != NULL) {
+            size_t bytesToCopy = E_MIN(basePathLen, dstCap);
+            
+            if (bytesToCopy > 0) {
+                if (bytesToCopy == dstCap) {
+                    bytesToCopy -= 1;   /* Need to leave room for the null terminator. */
+                }
+
+                /* Don't move the base path if we're appending in-place. */
+                if (pDst != pBasePath) {
+                    E_COPY_MEMORY(pDst, pBasePath, E_MIN(basePathLen, dstCap));
+                }
+            }
+
+            pDst   += bytesToCopy;
+            dstCap -= bytesToCopy;
+        }
+        dstLen += basePathLen;
+
+        /* Separator. */
+        if (pDst != NULL) {
+            if (dstCap > 1) {   /* Need to leave room for the separator. */
+                pDst[0] = '/';
+                pDst += 1;
+                dstCap -= 1;
+            }
+        }
+        dstLen += 1;    
+    }
+    
+
+    /* Path to append. */
+    if (pDst != NULL) {
+        size_t bytesToCopy = E_MIN(pathToAppendLen, dstCap);
+        
+        if (bytesToCopy > 0) {
+            if (bytesToCopy == dstCap) {
+                bytesToCopy -= 1;   /* Need to leave room for the null terminator. */
+            }
+
+            E_COPY_MEMORY(pDst, pPathToAppend, bytesToCopy);
+            pDst[bytesToCopy] = '\0';
+        }
+    }
+    dstLen += pathToAppendLen;
+
+
+    if (dstLen > 0x7FFFFFFF) {
+        return -1;  /* Path is too long to convert to an int. */
+    }
+
+    return (int)dstLen;
+}
+
+E_API int e_path_normalize(char* pDst, size_t dstCap, const char* pPath, size_t pathLen, unsigned int options)
+{
+    e_path_iterator iPath;
+    e_result result;
+    e_bool32 allowLeadingBackNav = E_TRUE;
+    e_path_iterator stack[256];    /* The size of this array controls the maximum number of components supported by this function. We're not doing any heap allocations here. Might add this later if necessary. */
+    int top = 0;    /* Acts as a counter for the number of valid items in the stack. */
+    int leadingBackNavCount = 0;
+    int dstLen = 0;
+
+    if (pPath == NULL) {
+        pPath = "";
+        pathLen = 0;
+    }
+
+    if (pDst != NULL && dstCap > 0) {
+        pDst[0] = '\0';
+    }
+
+    /* Get rid of the empty case just to make our life easier below. */
+    if (pathLen == 0 || pPath[0] == '\0') {
+        return 0;
+    }
+
+    result = e_path_first(pPath, pathLen, &iPath);
+    if (result != E_SUCCESS) {
+        return -1;  /* Should never hit this because we did an empty string test above. */
+    }
+
+    /* We have a special case for when the result starts with "/". */
+    if (iPath.segmentLength == 0) {
+        allowLeadingBackNav = E_FALSE; /* When the path starts with "/" we cannot allow a leading ".." in the output path. */
+
+        if (pDst != NULL && dstCap > 0) {
+            pDst[0] = '/';
+            pDst   += 1;
+            dstCap -= 1;
+        }
+        dstLen += 1;
+
+        /* Get past the root. */
+        result = e_path_next(&iPath);
+        if (result != E_SUCCESS) {
+            return dstLen;
+        }
+    }
+
+    if ((options & E_NO_ABOVE_ROOT_NAVIGATION) != 0) {
+        allowLeadingBackNav = E_FALSE;
+    }
+
+    for (;;) {
+        /* Everything in this control block should goto a section below or abort early. */
+        {
+            if (iPath.segmentLength == 0 || (iPath.segmentLength == 1 && iPath.pFullPath[iPath.segmentOffset] == '.')) {
+                /* It's either an empty segment or ".". These are ignored. */
+                goto next_segment;
+            } else if (iPath.segmentLength == 2 && iPath.pFullPath[iPath.segmentOffset] == '.' && iPath.pFullPath[iPath.segmentOffset + 1] == '.') {
+                /* It's a ".." segment. We need to either pop an entry from the stack, or if there is no way to go further back, push the "..". */
+                if (top > leadingBackNavCount) {
+                    top -= 1;
+                    goto next_segment;
+                } else {
+                    /* In this case the path is trying to navigate above the root. This is not always allowed. */
+                    if (!allowLeadingBackNav) {
+                        return -1;
+                    }
+
+                    leadingBackNavCount += 1;
+                    goto push_segment;
+                }
+            } else {
+                /* It's a regular segment. These always need to be pushed onto the stack. */
+                goto push_segment;
+            }
+        }
+
+    push_segment:
+        if (top < (int)E_COUNTOF(stack)) {
+            stack[top] = iPath;
+            top += 1;
+        } else {
+            return -1;  /* Ran out of room in "stack". */
+        }
+
+    next_segment:
+        result = e_path_next(&iPath);
+        if (result != E_SUCCESS) {
+            break;
+        }
+    }
+
+    /* At this point we should have a stack of items. Now we can construct the output path. */
+    {
+        int i = 0;
+        for (i = 0; i < top; i += 1) {
+            size_t segLen = stack[i].segmentLength;
+
+            if (pDst != NULL && dstCap > segLen) {
+                E_COPY_MEMORY(pDst, stack[i].pFullPath + stack[i].segmentOffset, segLen);
+                pDst   += segLen;
+                dstCap -= segLen;
+            }
+            dstLen += (int)segLen;
+
+            /* Separator. */
+            if (i + 1 < top) {
+                if (pDst != NULL && dstCap > 0) {
+                    pDst[0] = '/';
+                    pDst   += 1;
+                    dstCap -= 1;
+                }
+                dstLen += 1;
+            }
+        }
+    }
+
+    /* Null terminate. */
+    if (pDst != NULL && dstCap > 0) {
+        pDst[0] = '\0';
+    }
+
+    return dstLen;
+}
+/* END e_path.c */
 
 
 
