@@ -4,6 +4,8 @@ e_c := <../e.c>;
 // TODO: Update these paths to a local copy of fs later on once everything settles.
 fs_h        :: <../../fs/fs.h>;
 fs_c        :: <../../fs/fs.c>;
+fs_zip_h    :: <../../fs/extras/backends/zip/fs_zip.h>;
+fs_zip_c    :: <../../fs/extras/backends/zip/fs_zip.c>;
 c89thread_h :: <../../c89thread/c89thread.h>;
 c89str_h    :: <../../c89str/c89str.h>;
 
@@ -182,6 +184,27 @@ c89thread_types_c["\R/\* BEG e_cond_pthread.c \*/" : "/\* END e_cond_pthread.c \
 
 e_h("/\* BEG e_thread.h \*/\R":"\R/\* END e_thread.h \*/") = c89thread_types_h;
 e_c("/\* BEG e_thread.c \*/\R":"\R/\* END e_thread.c \*/") = c89thread_types_c;
+
+
+// Deflate API
+rename_deflate_symbols :: function(src:string) string
+{
+    return @(src)
+        ["\bfs_zip_deflate"]      <= "e_deflate"
+        ["\bFS_ZIP_DEFLATE"]      <= "E_DEFLATE"
+        ["\bfs_"]                 <= "e_"
+        ["\bFS_"]                 <= "E_"
+        ["\bE_ZIP_READ_"]         <= "E_DEFLATE_READ_"
+        ["\bE_ZIP_MIN\b"]         <= "E_MIN"
+        ["\bE_ZIP_MAX\b"]         <= "E_MAX"
+        ["\bE_ZIP_COPY_MEMORY\b"] <= "E_COPY_MEMORY"
+        ["\bE_ZIP_ZERO_MEMORY\b"] <= "E_ZERO_MEMORY"
+        ["\bE_ZIP_ZERO_OBJECT\b"] <= "E_ZERO_OBJECT"
+    ;
+}
+
+e_h("/\* BEG e_deflate.h \*/\R":"\R/\* END e_deflate.h \*/") = rename_deflate_symbols(@(fs_zip_c("/\* BEG fs_zip_deflate.h \*/\R":"\R/\* END fs_zip_deflate.h \*/")));
+e_c("/\* BEG e_deflate.c \*/\R":"\R/\* END e_deflate.c \*/") = rename_deflate_symbols(@(fs_zip_c("/\* BEG fs_zip_deflate.c \*/\R":"\R/\* END fs_zip_deflate.c \*/")));
     
 
 // Main File System API

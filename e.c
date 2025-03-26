@@ -168,12 +168,6 @@ static void e_zero_memory_default(void* p, size_t sz)
 #define E_ROUND_UP_16(value)       E_ROUND_UP(value, 16)
 
 
-/* TODO: Delete this once deflate decompressor is amalgamated from fs. */
-#define E_READ_LE16(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U))
-#define E_READ_LE32(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint32)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint32)(((const e_uint8*)(p))[3]) << 24U))
-#define E_READ_LE64(p) ((e_uint64)(((const e_uint8*)(p))[0]) | ((e_uint64)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint64)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint64)(((const e_uint8*)(p))[3]) << 24U) | ((e_uint64)(((const e_uint8*)(p))[4]) << 32U) | ((e_uint64)(((const e_uint8*)(p))[5]) << 40U) | ((e_uint64)(((const e_uint8*)(p))[6]) << 48U) | ((e_uint64)(((const e_uint8*)(p))[7]) << 56U))
-
-
 E_API const char* e_result_description(e_result result)
 {
     switch (result)
@@ -6118,6 +6112,10 @@ E_API int e_path_normalize(char* pDst, size_t dstCap, const char* pPath, size_t 
 
 
 /* BEG e_deflate.c */
+#define E_DEFLATE_READ_LE16(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U))
+#define E_DEFLATE_READ_LE32(p) ((e_uint32)(((const e_uint8*)(p))[0]) | ((e_uint32)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint32)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint32)(((const e_uint8*)(p))[3]) << 24U))
+#define E_DEFLATE_READ_LE64(p) ((e_uint64)(((const e_uint8*)(p))[0]) | ((e_uint64)(((const e_uint8*)(p))[1]) << 8U) | ((e_uint64)(((const e_uint8*)(p))[2]) << 16U) | ((e_uint64)(((const e_uint8*)(p))[3]) << 24U) | ((e_uint64)(((const e_uint8*)(p))[4]) << 32U) | ((e_uint64)(((const e_uint8*)(p))[5]) << 40U) | ((e_uint64)(((const e_uint8*)(p))[6]) << 48U) | ((e_uint64)(((const e_uint8*)(p))[7]) << 56U))
+
 /*
 This is all taken from the old public domain version of miniz.c but restyled for consistency with
 the rest of the code base.
@@ -6153,7 +6151,7 @@ reads ahead more than it needs to. Currently E_DEFLATE_GET_BYTE() pads the end o
         } \
     } else c = *pInputBufferCurrent++; } E_DEFLATE_MACRO_END
 
-#define E_DEFLATE_NEED_BITS(stateIndex, n) do { unsigned int c; E_DEFLATE_GET_BYTE(stateIndex, c); bitBuffer |= (((e_deflate_bitBufferfer)c) << bitCount); bitCount += 8; } while (bitCount < (unsigned int)(n))
+#define E_DEFLATE_NEED_BITS(stateIndex, n) do { unsigned int c; E_DEFLATE_GET_BYTE(stateIndex, c); bitBuffer |= (((e_deflate_bitbuf)c) << bitCount); bitCount += 8; } while (bitCount < (unsigned int)(n))
 #define E_DEFLATE_SKIP_BITS(stateIndex, n) do { if (bitCount < (unsigned int)(n)) { E_DEFLATE_NEED_BITS(stateIndex, n); } bitBuffer >>= (n); bitCount -= (n); } E_DEFLATE_MACRO_END
 #define E_DEFLATE_GET_BITS(stateIndex, b, n) do { if (bitCount < (unsigned int)(n)) { E_DEFLATE_NEED_BITS(stateIndex, n); } b = bitBuffer & ((1 << (n)) - 1); bitBuffer >>= (n); bitCount -= (n); } E_DEFLATE_MACRO_END
 
@@ -6181,7 +6179,7 @@ bit buffer contains >=15 bits (deflate's max. Huffman code size).
             } \
         } \
         E_DEFLATE_GET_BYTE(stateIndex, c); \
-        bitBuffer |= (((e_deflate_bitBufferfer)c) << bitCount); \
+        bitBuffer |= (((e_deflate_bitbuf)c) << bitCount); \
         bitCount += 8; \
     } while (bitCount < 15);
 
@@ -6199,7 +6197,7 @@ The slow path is only executed at the very end of the input buffer.
         if ((pInputBufferEnd - pInputBufferCurrent) < 2) { \
             E_DEFLATE_HUFF_BITBUF_FILL(stateIndex, pHuff); \
         } else { \
-            bitBuffer |= (((e_deflate_bitBufferfer)pInputBufferCurrent[0]) << bitCount) | (((e_deflate_bitBufferfer)pInputBufferCurrent[1]) << (bitCount + 8)); \
+            bitBuffer |= (((e_deflate_bitbuf)pInputBufferCurrent[0]) << bitCount) | (((e_deflate_bitbuf)pInputBufferCurrent[1]) << (bitCount + 8)); \
             pInputBufferCurrent += 2; \
             bitCount += 16; \
         } \
@@ -6226,7 +6224,7 @@ E_API e_result e_deflate_decompressor_init(e_deflate_decompressor* pDecompressor
     return E_SUCCESS;
 }
 
-E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const e_uint8* pInputBuffer, size_t* pInputBufferSize, e_uint8* pOutputBufferStart, e_uint8* pOutputBufferNext, size_t* pOutputBufferSize, const e_uint32 flags)
+E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const e_uint8* pInputBuffer, size_t* pInputBufferSize, e_uint8* pOutputBufferStart, e_uint8* pOutputBufferNext, size_t* pOutputBufferSize, e_uint32 flags)
 {
     static const int sLengthBase[31] =
     {
@@ -6265,7 +6263,7 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
     e_uint32 dist;
     e_uint32 counter;
     e_uint32 extraCount;
-    e_deflate_bitBufferfer bitBuffer;
+    e_deflate_bitbuf bitBuffer;
     const e_uint8* pInputBufferCurrent = pInputBuffer;
     const e_uint8* const pInputBufferEnd = pInputBuffer + *pInputBufferSize;
     e_uint8 *pOutputBufferCurrent = pOutputBufferNext;
@@ -6523,13 +6521,13 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
                         unsigned int codeLen;
 #ifdef E_64BIT      
                         if (bitCount < 30) {
-                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE32(pInputBufferCurrent)) << bitCount);
+                            bitBuffer |= (((e_deflate_bitbuf)E_DEFLATE_READ_LE32(pInputBufferCurrent)) << bitCount);
                             pInputBufferCurrent += 4;
                             bitCount += 32;
                         }
 #else               
                         if (bitCount < 15) {
-                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE16(pInputBufferCurrent)) << bitCount);
+                            bitBuffer |= (((e_deflate_bitbuf)E_DEFLATE_READ_LE16(pInputBufferCurrent)) << bitCount);
                             pInputBufferCurrent += 2;
                             bitCount += 16;
                         }
@@ -6551,10 +6549,9 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
                         if (counter & 256) {
                             break;
                         }
-                    
 #ifndef E_64BIT     
                         if (bitCount < 15) {
-                            bitBuffer |= (((e_deflate_bitBufferfer)E_READ_LE16(pInputBufferCurrent)) << bitCount);
+                            bitBuffer |= (((e_deflate_bitbuf)E_DEFLATE_READ_LE16(pInputBufferCurrent)) << bitCount);
                             pInputBufferCurrent += 2;
                             bitCount += 16;
                         }

@@ -968,6 +968,9 @@ E_API int e_path_normalize(char* pDst, size_t dstCap, const char* pPath, size_t 
 
 
 /* BEG e_deflate.h */
+/*
+This deflate stuff was taken from the old public domain version of miniz.c.
+*/
 enum
 {
     E_DEFLATE_FLAG_PARSE_ZLIB_HEADER = 1,
@@ -994,9 +997,9 @@ typedef struct
 } e_deflate_huff_table;
 
 #ifdef E_64BIT
-    typedef e_uint64 e_deflate_bitBufferfer;
+    typedef e_uint64 e_deflate_bitbuf;
 #else
-    typedef e_uint32 e_deflate_bitBufferfer;
+    typedef e_uint32 e_deflate_bitbuf;
 #endif
 
 typedef struct e_deflate_decompressor
@@ -1013,7 +1016,7 @@ typedef struct e_deflate_decompressor
     e_uint32 counter;
     e_uint32 extraCount;
     e_uint32 tableSizes[E_DEFLATE_MAX_HUFF_TABLES];
-    e_deflate_bitBufferfer bitBuffer;
+    e_deflate_bitbuf bitBuffer;
     size_t distFromOutBufStart;
     e_deflate_huff_table tables[E_DEFLATE_MAX_HUFF_TABLES];
     e_uint8 rawHeader[4];
