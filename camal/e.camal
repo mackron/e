@@ -33,16 +33,13 @@ e_c("/\* BEG e_allocation_callbacks.c \*/\R":"\R/\* END e_allocation_callbacks.c
 rename_fs_format :: function(src:string) string
 {
     return @(src)
-        ["E_FORMAT_TEXT"]   <= "E_STREAM_DATA_FORMAT_TEXT"
-        ["E_FORMAT_BINARY"] <= "E_STREAM_DATA_FORMAT_BINARY"
-        ["e_format"]        <= "e_stream_data_format";
+        ["FS_FORMAT_TEXT"]   <= "E_STREAM_DATA_FORMAT_TEXT"
+        ["FS_FORMAT_BINARY"] <= "E_STREAM_DATA_FORMAT_BINARY"
+        ["fs_format"]        <= "e_stream_data_format";
 }
 
-stream_h := replace_namespace_fs(@(fs_h("/\* BEG fs_stream.h \*/\R":"\R/\* END fs_stream.h \*/")));
-stream_c := replace_namespace_fs(@(fs_c("/\* BEG fs_stream.c \*/\R":"\R/\* END fs_stream.c \*/")));
-
-stream_h = rename_fs_format(stream_h);
-stream_c = rename_fs_format(stream_c);
+stream_h := replace_namespace_fs(rename_fs_format(@(fs_h("/\* BEG fs_stream.h \*/\R":"\R/\* END fs_stream.h \*/"))));
+stream_c := replace_namespace_fs(rename_fs_format(@(fs_c("/\* BEG fs_stream.c \*/\R":"\R/\* END fs_stream.c \*/"))));
 
 // Alignment fixes.
 stream_h
@@ -197,9 +194,15 @@ rename_deflate_symbols :: function(src:string) string
         ["\bE_ZIP_READ_"]         <= "E_DEFLATE_READ_"
         ["\bE_ZIP_MIN\b"]         <= "E_MIN"
         ["\bE_ZIP_MAX\b"]         <= "E_MAX"
+        ["\bE_ZIP_ABS\b"]         <= "E_ABS"
         ["\bE_ZIP_COPY_MEMORY\b"] <= "E_COPY_MEMORY"
+        ["\bE_ZIP_MOVE_MEMORY\b"] <= "E_MOVE_MEMORY"
         ["\bE_ZIP_ZERO_MEMORY\b"] <= "E_ZERO_MEMORY"
         ["\bE_ZIP_ZERO_OBJECT\b"] <= "E_ZERO_OBJECT"
+        ["\bE_ZIP_ASSERT\b"]      <= "E_ASSERT"
+        ["\bE_ZIP_OFFSET_PTR\b"]  <= "E_OFFSET_PTR"
+        ["\bE_ZIP_ALIGN\b"]       <= "E_ALIGN"
+        ["\be_zip_strncpy_s\b"]   <= "e_strncpy_s"
     ;
 }
 
@@ -278,3 +281,16 @@ fs_api_c := rename_fs_symbols(@(fs_c("/\* BEG fs.c \*/\R":"\R/\* END fs.c \*/"))
 
 e_h("/\* BEG e_fs.h \*/\R":"\R/\* END e_fs.h \*/") = fs_api_h;
 e_c("/\* BEG e_fs.c \*/\R":"\R/\* END e_fs.c \*/") = fs_api_c;
+
+
+// Zip File System Backend
+rename_zip_symbols :: function(src:string) string
+{
+    return rename_fs_symbols(rename_deflate_symbols(src))
+        ["\bfs_zip"]  <= "e_zip"
+        ["\bFS_ZIP"]  <= "E_ZIP"
+        ["\bE_ZIP\b"] <= "E_FS_ZIP"
+    ;
+}
+
+e_c("/\* BEG e_fs_zip.c \*/\R":"\R/\* END e_fs_zip.c \*/") = rename_zip_symbols(@(fs_zip_c("/\* BEG fs_zip.c \*/\R":"\R/\* END fs_zip.c \*/")));
