@@ -1204,8 +1204,19 @@ extern const e_fs_backend* E_FS_STDIO;  /* The default stdio backend. The handle
 
 
 /* BEG e_fs_zip.h */
-extern const e_fs_backend* E_FS_ZIP;    /* The zip backend. */
-/* BEG e_fs_zip.h */
+extern const e_fs_backend* E_FS_ZIP;
+/* END e_fs_zip.h */
+
+
+/* BEG e_fs_subfs.h */
+typedef struct e_subfs_config
+{
+    e_fs* pOwnerFS;
+    const char* pRootDir;
+} e_subfs_config;
+
+extern const e_fs_backend* E_FS_SUBFS;
+/* END e_fs_subfs.h */
 
 
 /* BEG e_log.h */

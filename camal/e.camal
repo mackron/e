@@ -6,6 +6,8 @@ fs_h        :: <../../fs/fs.h>;
 fs_c        :: <../../fs/fs.c>;
 fs_zip_h    :: <../../fs/extras/backends/zip/fs_zip.h>;
 fs_zip_c    :: <../../fs/extras/backends/zip/fs_zip.c>;
+fs_subfs_h  :: <../../fs/extras/backends/subfs/fs_subfs.h>;
+fs_subfs_c  :: <../../fs/extras/backends/subfs/fs_subfs.c>;
 c89thread_h :: <../../c89thread/c89thread.h>;
 c89str_h    :: <../../c89str/c89str.h>;
 
@@ -293,4 +295,22 @@ rename_zip_symbols :: function(src:string) string
     ;
 }
 
+e_h("/\* BEG e_fs_zip.h \*/\R":"\R/\* END e_fs_zip.h \*/") = rename_zip_symbols(@(fs_zip_h("/\* BEG fs_zip.h \*/\R":"\R/\* END fs_zip.h \*/")));
 e_c("/\* BEG e_fs_zip.c \*/\R":"\R/\* END e_fs_zip.c \*/") = rename_zip_symbols(@(fs_zip_c("/\* BEG fs_zip.c \*/\R":"\R/\* END fs_zip.c \*/")));
+
+
+// SubFS File System Backend
+rename_subfs_symbols :: function(src:string) string
+{
+    return rename_fs_symbols(src)
+        ["\bfs_subfs"]              <= "e_subfs"
+        ["\bFS_SUBFS"]              <= "E_SUBFS"
+        ["\bE_SUBFS\b"]             <= "E_FS_SUBFS"
+        ["\bE_SUBFS_UNUSED\b"]      <= "E_UNUSED"
+        ["\bE_SUBFS_ZERO_OBJECT\b"] <= "E_ZERO_OBJECT"
+        ["\bE_SUBFS_ASSERT\b"]      <= "E_ASSERT"
+    ;
+}
+
+e_h("/\* BEG e_fs_subfs.h \*/\R":"\R/\* END e_fs_subfs.h \*/") = rename_subfs_symbols(@(fs_subfs_h("/\* BEG fs_subfs.h \*/\R":"\R/\* END fs_subfs.h \*/")));
+e_c("/\* BEG e_fs_subfs.c \*/\R":"\R/\* END e_fs_subfs.c \*/") = rename_subfs_symbols(@(fs_subfs_c("/\* BEG fs_subfs.c \*/\R":"\R/\* END fs_subfs.c \*/")));

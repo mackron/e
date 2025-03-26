@@ -13116,6 +13116,428 @@ const e_fs_backend* E_FS_ZIP = &e_zip_backend;
 /* END e_fs_zip.c */
 
 
+/* BEG e_fs_subfs.c */
+typedef struct e_subfs
+{
+    e_fs* pOwnerFS;
+    char* pRootDir;   /* Points to the end of the structure. */
+    size_t rootDirLen;
+} e_subfs;
+
+typedef struct e_file_subfs
+{
+    e_file* pActualFile;
+} e_file_subfs;
+
+
+typedef struct e_subfs_path
+{
+    char  pFullPathStack[1024];
+    char* pFullPathHeap;
+    char* pFullPath;
+    int fullPathLen;
+} e_subfs_path;
+
+static e_result e_subfs_path_init(e_fs* pFS, const char* pPath, size_t pathLen, e_subfs_path* pSubFSPath)
+{
+    e_subfs* pSubFS;
+    char  pPathCleanStack[1024];
+    char* pPathCleanHeap = NULL;
+    char* pPathClean;
+    size_t pathCleanLen;
+
+    E_ASSERT(pFS        != NULL);
+    E_ASSERT(pPath      != NULL);
+    E_ASSERT(pSubFSPath != NULL);
+
+    E_ZERO_OBJECT(pSubFSPath);   /* Safety. */
+
+    /* We first have to clean the path, with a strict requirement that we fail if attempting to navigate above the root. */
+    pathCleanLen = e_path_normalize(pPathCleanStack, sizeof(pPathCleanStack), pPath, pathLen, E_NO_ABOVE_ROOT_NAVIGATION);
+    if (pathCleanLen <= 0) {
+        return E_DOES_NOT_EXIST;   /* Almost certainly because we're trying to navigate above the root directory. */
+    }
+
+    if (pathCleanLen >= sizeof(pPathCleanStack)) {
+        pPathCleanHeap = (char*)e_malloc(pathCleanLen + 1, e_fs_get_allocation_callbacks(pFS));
+        if (pPathCleanHeap == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        e_path_normalize(pPathCleanHeap, pathCleanLen + 1, pPath, pathLen, E_NO_ABOVE_ROOT_NAVIGATION);    /* This will never fail. */
+        pPathClean = pPathCleanHeap;
+    } else {
+        pPathClean = pPathCleanStack;
+    }
+
+    /* Now that the input path has been cleaned we need only append it to the base path. */
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    pSubFSPath->fullPathLen = e_path_append(pSubFSPath->pFullPathStack, sizeof(pSubFSPath->pFullPathStack), pSubFS->pRootDir, pSubFS->rootDirLen, pPathClean, pathCleanLen);
+    if (pSubFSPath->fullPathLen < 0) {
+        e_free(pPathCleanHeap, e_fs_get_allocation_callbacks(pFS));
+        return E_ERROR;    /* Should never hit this, but leaving here for safety. */
+    }
+
+    if (pSubFSPath->fullPathLen >= (int)sizeof(pSubFSPath->pFullPathStack)) {
+        pSubFSPath->pFullPathHeap = (char*)e_malloc(pSubFSPath->fullPathLen + 1, e_fs_get_allocation_callbacks(pFS));
+        if (pSubFSPath->pFullPathHeap == NULL) {
+            e_free(pPathCleanHeap, e_fs_get_allocation_callbacks(pFS));
+            return E_OUT_OF_MEMORY;
+        }
+
+        e_path_append(pSubFSPath->pFullPathHeap, pSubFSPath->fullPathLen + 1, pSubFS->pRootDir, pSubFS->rootDirLen, pPathClean, pathCleanLen);    /* This will never fail. */
+        pSubFSPath->pFullPath = pSubFSPath->pFullPathHeap;
+    } else {
+        pSubFSPath->pFullPath = pSubFSPath->pFullPathStack;
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_subfs_path_uninit(e_subfs_path* pSubFSPath)
+{
+    if (pSubFSPath->pFullPathHeap != NULL) {
+        e_free(pSubFSPath->pFullPathHeap, e_fs_get_allocation_callbacks(NULL));
+    }
+
+    E_ZERO_OBJECT(pSubFSPath);
+}
+
+
+static size_t e_alloc_size_subfs(const void* pBackendConfig)
+{
+    e_subfs_config* pSubFSConfig = (e_subfs_config*)pBackendConfig;
+
+    if (pSubFSConfig == NULL) {
+        return 0;   /* The subfs config must be specified. */
+    }
+
+    /* We include a copy of the path with the main allocation. */
+    return sizeof(e_subfs) + strlen(pSubFSConfig->pRootDir) + 1 + 1;   /* +1 for trailing slash and +1 for null terminator. */
+}
+
+static e_result e_init_subfs(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
+{
+    e_subfs_config* pSubFSConfig = (e_subfs_config*)pBackendConfig;
+    e_subfs* pSubFS;
+
+    E_ASSERT(pFS != NULL);
+    E_UNUSED(pStream);
+
+    if (pSubFSConfig == NULL) {
+        return E_INVALID_ARGS; /* Must have a config. */
+    }
+
+    if (pSubFSConfig->pOwnerFS == NULL) {
+        return E_INVALID_ARGS; /* Must have an owner FS. */
+    }
+
+    if (pSubFSConfig->pRootDir == NULL) {
+        return E_INVALID_ARGS; /* Must have a root directory. */
+    }
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pFS != NULL);
+
+    pSubFS->pOwnerFS   = pSubFSConfig->pOwnerFS;
+    pSubFS->pRootDir   = (char*)(pSubFS + 1);
+    pSubFS->rootDirLen = strlen(pSubFSConfig->pRootDir);
+
+    e_strcpy(pSubFS->pRootDir, pSubFSConfig->pRootDir);
+
+    /* Append a trailing slash if necessary. */
+    if (pSubFS->pRootDir[pSubFS->rootDirLen - 1] != '/') {
+        pSubFS->pRootDir[pSubFS->rootDirLen] = '/';
+        pSubFS->pRootDir[pSubFS->rootDirLen + 1] = '\0';
+        pSubFS->rootDirLen += 1;
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_uninit_subfs(e_fs* pFS)
+{
+    /* Nothing to do here. */
+    E_UNUSED(pFS);
+}
+
+static e_result e_ioctl_subfs(e_fs* pFS, int op, void* pArgs)
+{
+    e_subfs* pSubFS;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    return e_fs_ioctl(pSubFS->pOwnerFS, op, pArgs);
+}
+
+static e_result e_remove_subfs(e_fs* pFS, const char* pFilePath)
+{
+    e_result result;
+    e_subfs* pSubFS;
+    e_subfs_path subfsPath;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    result = e_subfs_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subfsPath);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_fs_remove(pSubFS->pOwnerFS, subfsPath.pFullPath);
+    e_subfs_path_uninit(&subfsPath);
+
+    return result;
+}
+
+static e_result e_rename_subfs(e_fs* pFS, const char* pOldName, const char* pNewName)
+{
+    e_result result;
+    e_subfs* pSubFS;
+    e_subfs_path subfsPathOld;
+    e_subfs_path subfsPathNew;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    result = e_subfs_path_init(pFS, pOldName, E_NULL_TERMINATED, &subfsPathOld);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_subfs_path_init(pFS, pNewName, E_NULL_TERMINATED, &subfsPathNew);
+    if (result != E_SUCCESS) {
+        e_subfs_path_uninit(&subfsPathOld);
+        return result;
+    }
+
+    result = e_fs_rename(pSubFS->pOwnerFS, subfsPathOld.pFullPath, subfsPathNew.pFullPath);
+
+    e_subfs_path_uninit(&subfsPathOld);
+    e_subfs_path_uninit(&subfsPathNew);
+
+    return result;
+}
+
+static e_result e_mkdir_subfs(e_fs* pFS, const char* pPath)
+{
+    e_result result;
+    e_subfs* pSubFS;
+    e_subfs_path subfsPath;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    result = e_subfs_path_init(pFS, pPath, E_NULL_TERMINATED, &subfsPath);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_fs_mkdir(pSubFS->pOwnerFS, subfsPath.pFullPath);
+    e_subfs_path_uninit(&subfsPath);
+
+    return result;
+}
+
+static e_result e_info_subfs(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+{
+    e_result result;
+    e_subfs* pSubFS;
+    e_subfs_path subfsPath;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    result = e_subfs_path_init(pFS, pPath, E_NULL_TERMINATED, &subfsPath);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_fs_info(pSubFS->pOwnerFS, subfsPath.pFullPath, openMode, pInfo);
+    e_subfs_path_uninit(&subfsPath);
+
+    return result;
+}
+
+static size_t e_file_alloc_size_subfs(e_fs* pFS)
+{
+    E_UNUSED(pFS);
+    return sizeof(e_file_subfs);
+}
+
+static e_result e_file_open_subfs(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
+{
+    e_result result;
+    e_subfs_path subfsPath;
+    e_subfs* pSubFS;
+    e_file_subfs* pSubFSFile;
+
+    E_UNUSED(pStream);
+
+    result = e_subfs_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subfsPath);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    result = e_file_open(pSubFS->pOwnerFS, subfsPath.pFullPath, openMode, &pSubFSFile->pActualFile);
+    e_subfs_path_uninit(&subfsPath);
+
+    return result;
+}
+
+static e_result e_file_open_handle_subfs(e_fs* pFS, void* hBackendFile, e_file* pFile)
+{
+    e_subfs* pSubFS;
+    e_file_subfs* pSubFSFile;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    return e_file_open_from_handle(pSubFS->pOwnerFS, hBackendFile, &pSubFSFile->pActualFile);
+}
+
+static void e_file_close_subfs(e_file* pFile)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    e_file_close(pSubFSFile->pActualFile);
+}
+
+static e_result e_file_read_subfs(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    return e_file_read(pSubFSFile->pActualFile, pDst, bytesToRead, pBytesRead);
+}
+
+static e_result e_file_write_subfs(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    return e_file_write(pSubFSFile->pActualFile, pSrc, bytesToWrite, pBytesWritten);
+}
+
+static e_result e_file_seek_subfs(e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+    
+    return e_file_seek(pSubFSFile->pActualFile, offset, origin);
+}
+
+static e_result e_file_tell_subfs(e_file* pFile, e_int64* pCursor)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+    
+    return e_file_tell(pSubFSFile->pActualFile, pCursor);
+}
+
+static e_result e_file_flush_subfs(e_file* pFile)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+    
+    return e_file_flush(pSubFSFile->pActualFile);
+}
+
+static e_result e_file_info_subfs(e_file* pFile, e_file_info* pInfo)
+{
+    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+    
+    return e_file_get_info(pSubFSFile->pActualFile, pInfo);
+}
+
+static e_result e_file_duplicate_subfs(e_file* pFile, e_file* pDuplicatedFile)
+{
+    e_file_subfs* pSubFSFile;
+    e_file_subfs* pSubFSFileDuplicated;
+
+    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    E_ASSERT(pSubFSFile != NULL);
+
+    pSubFSFileDuplicated = (e_file_subfs*)e_file_get_backend_data(pDuplicatedFile);
+    E_ASSERT(pSubFSFileDuplicated != NULL);
+    
+    return e_file_duplicate(pSubFSFile->pActualFile, &pSubFSFileDuplicated->pActualFile);
+}
+
+static e_fs_iterator* e_first_subfs(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+{
+    e_result result;
+    e_subfs* pSubFS;
+    e_subfs_path subfsPath;
+    e_fs_iterator* pIterator;
+
+    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    E_ASSERT(pSubFS != NULL);
+
+    result = e_subfs_path_init(pFS, pDirectoryPath, directoryPathLen, &subfsPath);
+    if (result != E_SUCCESS) {
+        return NULL;
+    }
+
+    pIterator = e_fs_first(pSubFS->pOwnerFS, subfsPath.pFullPath, subfsPath.fullPathLen);
+    e_subfs_path_uninit(&subfsPath);
+
+    return pIterator;
+}
+
+static e_fs_iterator* e_next_subfs(e_fs_iterator* pIterator)
+{
+    return e_fs_next(pIterator);
+}
+
+static void e_free_iterator_subfs(e_fs_iterator* pIterator)
+{
+    e_fs_free_iterator(pIterator);
+}
+
+e_fs_backend e_subfs_backend =
+{
+    e_alloc_size_subfs,
+    e_init_subfs,
+    e_uninit_subfs,
+    e_ioctl_subfs,
+    e_remove_subfs,
+    e_rename_subfs,
+    e_mkdir_subfs,
+    e_info_subfs,
+    e_file_alloc_size_subfs,
+    e_file_open_subfs,
+    e_file_open_handle_subfs,
+    e_file_close_subfs,
+    e_file_read_subfs,
+    e_file_write_subfs,
+    e_file_seek_subfs,
+    e_file_tell_subfs,
+    e_file_flush_subfs,
+    e_file_info_subfs,
+    e_file_duplicate_subfs,
+    e_first_subfs,
+    e_next_subfs,
+    e_free_iterator_subfs
+};
+const e_fs_backend* E_FS_SUBFS = &e_subfs_backend;
+/* END e_fs_subfs.c */
+
+
 
 /* BEG e_log.c */
 const char* e_log_level_to_string(e_log_level level)
