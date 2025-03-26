@@ -208,12 +208,12 @@ e_c("/\* BEG e_deflate.c \*/\R":"\R/\* END e_deflate.c \*/") = rename_deflate_sy
     
 
 // Main File System API
-rename_fs_api_types :: function(src:string) string
+rename_fs_symbols :: function(src:string) string
 {
-    return @(src)
+    return rename_fs_format(src)
         ["\bfs\b"] <= "e_fs"
-        ["fs_"]    <= "e_"
-        ["FS_"]    <= "E_"
+        ["\bfs_"]  <= "e_"
+        ["\bFS_"]  <= "E_"
 
         // Some type names need to be adjusted.
         ["\be_config\b"]   <= "e_fs_config"
@@ -273,11 +273,8 @@ rename_fs_api_types :: function(src:string) string
     ;
 }
 
-fs_api_h := rename_fs_api_types(@(fs_h("/\* BEG fs.h \*/\R":"\R/\* END fs.h \*/")));
-fs_api_h  = rename_fs_format(fs_api_h);
-
-fs_api_c := rename_fs_api_types(@(fs_c("/\* BEG fs.c \*/\R":"\R/\* END fs.c \*/")));
-fs_api_c  = rename_fs_format(fs_api_c);
+fs_api_h := rename_fs_symbols(@(fs_h("/\* BEG fs.h \*/\R":"\R/\* END fs.h \*/")));
+fs_api_c := rename_fs_symbols(@(fs_c("/\* BEG fs.c \*/\R":"\R/\* END fs.c \*/")));
 
 e_h("/\* BEG e_fs.h \*/\R":"\R/\* END e_fs.h \*/") = fs_api_h;
 e_c("/\* BEG e_fs.c \*/\R":"\R/\* END e_fs.c \*/") = fs_api_c;
