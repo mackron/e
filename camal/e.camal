@@ -183,3 +183,78 @@ c89thread_types_c["\R/\* BEG e_cond_pthread.c \*/" : "/\* END e_cond_pthread.c \
 e_h("/\* BEG e_thread.h \*/\R":"\R/\* END e_thread.h \*/") = c89thread_types_h;
 e_c("/\* BEG e_thread.c \*/\R":"\R/\* END e_thread.c \*/") = c89thread_types_c;
     
+
+// Main File System API
+rename_fs_api_types :: function(src:string) string
+{
+    return @(src)
+        ["\bfs\b"] <= "e_fs"
+        ["fs_"]    <= "e_"
+        ["FS_"]    <= "E_"
+
+        // Some type names need to be adjusted.
+        ["\be_config\b"]   <= "e_fs_config"
+        ["\be_iterator\b"] <= "e_fs_iterator"
+        ["\be_backend\b"]  <= "e_fs_backend"
+
+        // There are some function that need to use slightly different naming. For example, in fs there is
+        // a function named "fs_init()". This makes sense in the context of the fs library, but in e, that
+        // will result in a function called "e_init()" which is way too general. We want that to instead be
+        // "e_fs_init()".
+        //
+        // Similarly, there are functions where we *don't* want to use the "e_fs" naming scheme. For example
+        // we don't want "fs_file_open()" to be "e_fs_file_open()". Instead we can just do "e_file_open()".
+        ["\be_config_init\b"]              <= "e_fs_config_init"
+        ["\be_init\b"]                     <= "e_fs_init"
+        ["\be_uninit\b"]                   <= "e_fs_uninit"
+        ["\be_ioctl\b"]                    <= "e_fs_ioctl"
+        ["\be_remove\b"]                   <= "e_fs_remove"
+        ["\be_rename\b"]                   <= "e_fs_rename"
+        ["\be_mkdir\b"]                    <= "e_fs_mkdir"
+        ["\be_info\b"]                     <= "e_fs_info"
+        ["\be_get_stream\b"]               <= "e_fs_get_stream"
+        ["\be_get_allocation_callbacks\b"] <= "e_fs_get_allocation_callbacks"
+        ["\be_get_backend_data\b"]         <= "e_fs_get_backend_data"
+        ["\be_get_backend_data_size\b"]    <= "e_fs_get_backend_data_size"
+        //["\be_open_archive_ex\b"]          <= "e_fs_open_archive_ex"
+        //["\be_open_archive\b"]             <= "e_fs_open_archive"
+        //["\be_close_archive\b"]            <= "e_fs_close_archive"
+        ["\be_gc_archives\b"]              <= "e_fs_gc_archives"
+        ["\be_set_archive_gc_threshold\b"] <= "e_fs_set_archive_gc_threshold"
+        ["\be_get_archive_gc_threshold\b"] <= "e_fs_get_archive_gc_threshold"
+        ["\be_first_ex\b"]                 <= "e_fs_first_ex"
+        ["\be_first\b"]                    <= "e_fs_first"
+        ["\be_next\b"]                     <= "e_fs_next"
+        ["\be_free_iterator\b"]            <= "e_fs_free_iterator"
+        ["\be_mount\b"]                    <= "e_fs_mount"
+        ["\be_unmount\b"]                  <= "e_fs_unmount"
+        ["\be_mount_fs\b"]                 <= "e_fs_mount_fs"
+        ["\be_unmount_fs\b"]               <= "e_fs_unmount_fs"
+        ["\be_mount_write\b"]              <= "e_fs_mount_write"
+        ["\be_unmount_write\b"]            <= "e_fs_unmount_write"
+
+        ["\be_backend"]       <= "e_fs_backend"
+        ["\be_proxy"]         <= "e_fs_proxy"
+
+        ["\be_mtx"]           <= "e_mutex"
+        ["\bE_MTX_RECURSIVE"] <= "E_MUTEX_TYPE_RECURSIVE"
+
+        ["\bE_STDIO\b"]       <= "E_FS_STDIO"
+
+        // Alignment hacks.
+        ["void         \("] <= "void        ("
+        ["size_t       \("] <= "size_t      ("
+        ["    \(\* "]       <= "       (* "
+        ["typedef struct e_file      "] <= "typedef struct e_file         "
+        ["typedef struct e_file_info "] <= "typedef struct e_file_info    "
+    ;
+}
+
+fs_api_h := rename_fs_api_types(@(fs_h("/\* BEG fs.h \*/\R":"\R/\* END fs.h \*/")));
+fs_api_h  = rename_fs_format(fs_api_h);
+
+fs_api_c := rename_fs_api_types(@(fs_c("/\* BEG fs.c \*/\R":"\R/\* END fs.c \*/")));
+fs_api_c  = rename_fs_format(fs_api_c);
+
+e_h("/\* BEG e_fs.h \*/\R":"\R/\* END e_fs.h \*/") = fs_api_h;
+e_c("/\* BEG e_fs.c \*/\R":"\R/\* END e_fs.c \*/") = fs_api_c;

@@ -247,9 +247,11 @@ typedef enum
     E_CANCELLED = -51,
     E_MEMORY_ALREADY_MAPPED = -52,
 
+    E_CHECKSUM_MISMATCH   = -100,
+    E_NO_BACKEND          = -101,
+
     /* Engine-specific error codes. */
-    E_CHECKSUM_MISMATCH = -100,
-    E_BACKEND_DISABLED = -101
+    E_BACKEND_DISABLED = -1001
 } e_result;
 
 typedef enum
@@ -1027,204 +1029,180 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
 
 
 /* BEG e_fs.h */
-typedef struct e_fs_vtable         e_fs_vtable;
-typedef struct e_fs_config         e_fs_config;
-typedef struct e_fs                e_fs;
-typedef struct e_fs_iterator       e_fs_iterator;       /* For iterating over files in a directory (not recursive). File system's must extend from this struct. */
-typedef struct e_file              e_file;
-typedef struct e_file_info         e_file_info;
+/* Open mode flags. */
+#define E_READ                     0x0001
+#define E_WRITE                    0x0002
+#define E_APPEND                   (E_WRITE | 0x0004)
+#define E_OVERWRITE                (E_WRITE | 0x0008)
+#define E_TRUNCATE                 (E_WRITE)
 
-typedef struct e_archive_vtable    e_archive_vtable;
-typedef struct e_archive           e_archive;
-typedef struct e_archive_extension e_archive_extension; /* For internal use only. Used for mapping extensions to archive types. */
+#define E_TRANSPARENT              0x0000  /* Default. Opens a file such that archives of a known type are handled transparently. For example, "somefolder/archive.zip/file.txt" can be opened with "somefolder/file.txt" (the "archive.zip" part need not be specified). This assumes the `e_fs` object has been initialized with support for the relevant archive types. */
+#define E_OPAQUE                   0x0010  /* When used, files inside archives cannot be opened automatically. For example, "somefolder/archive.zip/file.txt" will fail. Mounted archives work fine. */
+#define E_VERBOSE                  0x0020  /* When used, files inside archives can be opened, but the name of the archive must be specified explicitly in the path, such as "somefolder/archive.zip/file.txt" */
 
-typedef enum
+#define E_NO_CREATE_DIRS           0x0040  /* When used, directories will not be created automatically when opening files for writing. */
+#define E_IGNORE_MOUNTS            0x0080  /* When used, mounted directories and archives will be ignored when opening and iterating files. */
+#define E_ONLY_MOUNTS              0x0100  /* When used, only mounted directories and archives will be considered when opening and iterating files. */
+#define E_NO_SPECIAL_DIRS          0x0200  /* When used, the presence of special directories like "." and ".." will be result in an error when opening files. */
+#define E_NO_ABOVE_ROOT_NAVIGATION 0x0400  /* When used, navigating above the mount point with leading ".." segments will result in an error. Can be also be used with e_path_normalize(). */
+
+
+/* Garbage collection policies.*/
+#define E_GC_POLICY_THRESHOLD      0x0001  /* Only garbage collect unreferenced opened archives until the count is below the configured threshold. */
+#define E_GC_POLICY_FULL           0x0002  /* Garbage collect every unreferenced opened archive, regardless of how many are open.*/
+
+
+typedef struct e_fs_config    e_fs_config;
+typedef struct e_fs           e_fs;
+typedef struct e_file         e_file;
+typedef struct e_file_info    e_file_info;
+typedef struct e_fs_iterator  e_fs_iterator;
+typedef struct e_fs_backend   e_fs_backend;
+
+typedef enum e_mount_priority
 {
-    E_OPEN_MODE_READ     = 0x01,
-    E_OPEN_MODE_WRITE    = 0x02,
-    E_OPEN_MODE_APPEND   = 0x04,    /* Used with E_OPEN_MODE_WRITE. If specified, writing will append to the end. If E_OPEN_MODE_WRITE is not specified, this is ignored. */
-    E_OPEN_MODE_TRUNCATE = 0x08,    /* Used with E_OPEN_MODE_WRITE. If specified, and the file exists, the file will be truncated to length 0. Cannot be used with E_OPEN_MODE_APPEND. */
-} e_open_mode;
+    E_MOUNT_PRIORITY_HIGHEST = 0,
+    E_MOUNT_PRIORITY_LOWEST  = 1
+} e_mount_priority;
+
+typedef struct e_archive_type
+{
+    const e_fs_backend* pBackend;
+    const char* pExtension;
+} e_archive_type;
 
 struct e_file_info
 {
     e_uint64 size;
     e_uint64 lastModifiedTime;
     e_uint64 lastAccessTime;
-    e_bool32 directory;
+    int directory;
+    int symlink;
 };
 
 struct e_fs_iterator
 {
     e_fs* pFS;
-    const e_fs_vtable* pFSVTable;   /* In case pFS is null. */
-    void* pFSVTableUserData;        /* In case pFS is null. */
-    const char* pName;              /* Must be null terminated. The FS implementation is responsible for manageing the memory allocation, but it would normally be allocated at the end of the struct. */
+    const char* pName;              /* Must be null terminated. The FS implementation is responsible for manageing the memory allocation. */
     size_t nameLen;
     e_file_info info;
 };
 
-struct e_fs_vtable
-{
-    e_result       (* file_alloc_size)(void* pUserData, size_t* pSize);
-    e_result       (* open           )(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile);
-    void           (* close          )(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-    e_result       (* read           )(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-    e_result       (* write          )(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-    e_result       (* seek           )(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin);
-    e_result       (* tell           )(void* pUserData, e_file* pFile, e_int64* pCursor);
-    e_result       (* flush          )(void* pUserData, e_file* pFile);
-    e_result       (* info           )(void* pUserData, e_file* pFile, e_file_info* pInfo);
-    e_fs_iterator* (* first_file     )(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
-    e_fs_iterator* (* next_file      )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Must return null when there are no more files. In this case, free_iterator must be called internally. */
-    void           (* free_iterator  )(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);  /* <-- Free the `e_fs_iterator` object here since `first_file` and `next_file` were the ones who allocated it. Also do any uninitialization routines. */
-};
-
 struct e_fs_config
 {
-    const e_fs_vtable* pVTable;   /* Can be null, in which case it will use defaults which is just the platform's standard file IO. */
-    void* pVTableUserData;
+    const e_fs_backend* pBackend;
+    const void* pBackendConfig;
+    e_stream* pStream;
+    const e_archive_type* pArchiveTypes;
+    size_t archiveTypeCount;
+    const e_allocation_callbacks* pAllocationCallbacks;
 };
 
-E_API e_fs_config e_fs_config_init(const e_fs_vtable* pVTable, void* pVTableUserData);
+E_API e_fs_config e_config_init_default(void);
+E_API e_fs_config e_fs_config_init(const e_fs_backend* pBackend, void* pBackendConfig, e_stream* pStream);
 
 
-struct e_archive_extension
+typedef struct e_fs_backend
 {
-    e_archive_vtable* pArchiveVTable;
-    void* pArchiveVTableUserData;
-    char pExtension[16];   /* Null terminated. */
-};
+    size_t         (* alloc_size      )(const void* pBackendConfig);
+    e_result       (* init            )(e_fs* pFS, const void* pBackendConfig, e_stream* pStream);              /* Return 0 on success or an errno result code on error. pBackendConfig is a pointer to a backend-specific struct. The documentation for your backend will tell you how to use this. You can usually pass in NULL for this. */
+    void           (* uninit          )(e_fs* pFS);
+    e_result       (* ioctl           )(e_fs* pFS, int op, void* pArg);                                          /* Optional. */
+    e_result       (* remove          )(e_fs* pFS, const char* pFilePath);
+    e_result       (* rename          )(e_fs* pFS, const char* pOldName, const char* pNewName);
+    e_result       (* mkdir           )(e_fs* pFS, const char* pPath);                                           /* This is not recursive. Return E_SUCCESS if directory already exists. */
+    e_result       (* info            )(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);        /* openMode flags can be ignored by most backends. It's primarily used by proxy of passthrough style backends. */
+    size_t         (* file_alloc_size )(e_fs* pFS);
+    e_result       (* file_open       )(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile); /* Return 0 on success or an errno result code on error. Return ENOENT if the file does not exist. pStream will be null if the backend does not need a stream (the `pFS` object was not initialized with one). */
+    e_result       (* file_open_handle)(e_fs* pFS, void* hBackendFile, e_file* pFile);                   /* Optional. Open a file from a file handle. Backend-specific. The format of hBackendFile will be specified by the backend. */
+    void           (* file_close      )(e_file* pFile);
+    e_result       (* file_read       )(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);   /* Return 0 on success, or E_AT_END on end of file. Only return E_AT_END if *pBytesRead is 0. Return an errno code on error. Implementations must support reading when already at EOF, in which case E_AT_END should be returned and *pBytesRead should be 0. */
+    e_result       (* file_write      )(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+    e_result       (* file_seek       )(e_file* pFile, e_int64 offset, e_seek_origin origin);
+    e_result       (* file_tell       )(e_file* pFile, e_int64* pCursor);
+    e_result       (* file_flush      )(e_file* pFile);
+    e_result       (* file_info       )(e_file* pFile, e_file_info* pInfo);
+    e_result       (* file_duplicate  )(e_file* pFile, e_file* pDuplicate);                                  /* Duplicate the file handle. */
+    e_fs_iterator* (* first           )(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen);
+    e_fs_iterator* (* next            )(e_fs_iterator* pIterator);  /* <-- Must return null when there are no more files. In this case, free_iterator must be called internally. */
+    void           (* free_iterator   )(e_fs_iterator* pIterator);  /* <-- Free the `e_fs_iterator` object here since `first` and `next` were the ones who allocated it. Also do any uninitialization routines. */
+} e_fs_backend;
 
-typedef struct
-{
-    e_archive* pArchive;
-    char* pFilePath;   /* Null terminated. */
-} e_fs_opened_archive;
+E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS);
+E_API void e_fs_uninit(e_fs* pFS);
+E_API e_result e_fs_ioctl(e_fs* pFS, int op, void* pArg);
+E_API e_result e_fs_remove(e_fs* pFS, const char* pFilePath);
+E_API e_result e_fs_rename(e_fs* pFS, const char* pOldName, const char* pNewName);
+E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath);  /* Does not consider mounts. Returns E_SUCCESS if directory already exists. */
+E_API e_result e_fs_info(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);  /* openMode flags specify same options as openMode in file_open(), but E_READ, E_WRITE, E_TRUNCATE, E_APPEND, and E_OVERWRITE are ignored. */
+E_API e_stream* e_fs_get_stream(e_fs* pFS);
+E_API const e_allocation_callbacks* e_fs_get_allocation_callbacks(e_fs* pFS);
+E_API void* e_fs_get_backend_data(e_fs* pFS);    /* For use by the backend. Will be the size returned by the alloc_size() function in the vtable. */
+E_API size_t e_fs_get_backend_data_size(e_fs* pFS);
 
-struct e_fs
-{
-    const e_fs_vtable* pVTable;
-    void* pVTableUserData;
-    e_archive_extension* pArchiveExtensions;
-    size_t archiveExtensionCount;
-    e_fs_opened_archive* pOpenedArchives;
-    size_t openedArchiveCount;
-    size_t openedArchiveCap;
-    e_bool32 freeOnUninit;
-};
+E_API e_result e_open_archive_ex(e_fs* pFS, const e_fs_backend* pBackend, void* pBackendConfig, const char* pArchivePath, size_t archivePathLen, int openMode, e_fs** ppArchive);
+E_API e_result e_open_archive(e_fs* pFS, const char* pArchivePath, int openMode, e_fs** ppArchive);
+E_API void e_close_archive(e_fs* pArchive);
+E_API void e_fs_gc_archives(e_fs* pFS, int policy);
+E_API void e_fs_set_archive_gc_threshold(e_fs* pFS, size_t threshold);
+E_API size_t e_fs_get_archive_gc_threshold(e_fs* pFS);
 
-struct e_file
-{
-    e_stream stream;
-    e_fs* pFS;  /* Can be null in which case the system's standard file IO routines will be used. */
-    const e_fs_vtable* pVTable;
-    void* pVTableUserData;
-};
+E_API e_result e_file_open(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile);
+E_API e_result e_file_open_from_handle(e_fs* pFS, void* hBackendFile, e_file** ppFile);
+E_API void e_file_close(e_file* pFile);
+E_API e_result e_file_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead); /* Returns 0 on success, E_AT_END on end of file, or an errno result code on error. Will only return E_AT_END if *pBytesRead is 0. */
+E_API e_result e_file_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
+E_API e_result e_file_writef(e_file* pFile, const char* fmt, ...) E_ATTRIBUTE_FORMAT(2, 3);
+E_API e_result e_file_writefv(e_file* pFile, const char* fmt, va_list args);
+E_API e_result e_file_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
+E_API e_result e_file_tell(e_file* pFile, e_int64* pCursor);
+E_API e_result e_file_flush(e_file* pFile);
+E_API e_result e_file_get_info(e_file* pFile, e_file_info* pInfo);
+E_API e_result e_file_duplicate(e_file* pFile, e_file** ppDuplicate);  /* Duplicate the file handle. */
+E_API void* e_file_get_backend_data(e_file* pFile);
+E_API size_t e_file_get_backend_data_size(e_file* pFile);
+E_API e_stream* e_file_get_stream(e_file* pFile);     /* Files are streams. They can be cast directly to e_stream*, but this function is here for people who prefer function style getters. */
+E_API e_fs* e_file_get_fs(e_file* pFile);
 
-E_API e_result e_fs_init_preallocated(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs* pFS);
-E_API e_result e_fs_init(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs** ppFS);
-E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
-E_API void e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-E_API e_result e_fs_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-E_API e_result e_fs_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
-E_API e_result e_fs_tell(e_file* pFile, e_int64* pCursor);
-E_API e_result e_fs_flush(e_file* pFile);
-E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo);
-E_API e_stream* e_fs_file_stream(e_file* pFile);
-E_API e_fs* e_fs_get(e_file* pFile);
-E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_bool32 e_fs_is_path_archive(e_fs* pFS, const char* pFilePath, size_t filePathLen);
+E_API e_fs_iterator* e_fs_first_ex(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, int mode);
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, int mode);
+E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator);
+E_API void e_fs_free_iterator(e_fs_iterator* pIterator);
 
-E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFile, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void* pData, size_t dataSize, const e_allocation_callbacks* pAllocationCallbacks);
+E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority);
+E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint);
+E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pMountPoint, e_mount_priority priority);
+E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS);   /* Must be matched up with e_fs_mount_fs(). */
+
+E_API e_result e_fs_mount_write(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority);
+E_API e_result e_fs_unmount_write(e_fs* pFS, const char* pPathToMount_NotMountPoint);
 
 /*
-Helper function for gathering the file names in a directory. Returned names will be relative to the
-specified directory. Free pppFileNames with e_free(). Do not free ppFileNameLengths or ppFileInfos.
+Helper functions for reading the entire contents of a file, starting from the current cursor position. Free
+the returned pointer with e_free(), using the same allocation callbacks as the e_fs object. You can use
+e_fs_get_allocation_callbacks() if necessary, like so:
 
-Returned strings will be null terminated.
+    e_free(pFileData, e_fs_get_allocation_callbacks(pFS));
 
-Strings will be sorted by name. Duplicates will be removed (duplicates will be possible when multiple
-base paths are specified).
+The format (E_STREAM_DATA_FORMAT_TEXT or E_STREAM_DATA_FORMAT_BINARY) is used to determine whether or not a null terminator should be
+appended to the end of the data.
+
+For flexiblity in case the backend does not support cursor retrieval or positioning, the data will be read
+in fixed sized chunks.
 */
-E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, e_file_info** ppFileInfos, size_t* pFileCount);
+E_API e_result e_file_read_to_end(e_file* pFile, e_stream_data_format format, void** ppData, size_t* pDataSize);
+E_API e_result e_file_open_and_read(e_fs* pFS, const char* pFilePath, e_stream_data_format format, void** ppData, size_t* pDataSize);
+E_API e_result e_file_open_and_write(e_fs* pFS, const char* pFilePath, void* pData, size_t dataSize);
+
+
+/* Default Backend. */
+extern const e_fs_backend* E_FS_STDIO;  /* The default stdio backend. The handle for e_file_open_from_handle() is a FILE*. */
 /* END e_fs.h */
 
 
-
-/* BEG e_archive.h */
-
-/*
-Archives are file systems which means they need to implement the file system vtable. There are also
-some additional callbacks that are required specifically for archives, particularly around loading
-the archive from a stream.
-*/
-struct e_archive_vtable
-{
-    e_fs_vtable fs;
-    e_result (* archive_alloc_size)(void* pUserData, size_t* pSize);
-    e_result (* init              )(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive* pArchive);
-    void     (* uninit            )(void* pUserData, e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
-};
-
-struct e_archive
-{
-    e_fs fs;    /* Archives are file systems. This must be the first member. */
-    const e_archive_vtable* pVTable;
-    void* pVTableUserData;
-    e_stream* pStream;
-    e_file* pArchiveFile;   /* This will be non-null if the archive was initailized with e_archive_init_from_file(). */
-};
-
-E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive);
-E_API e_result e_archive_init_from_file(const e_archive_vtable* pVTable, void* pVTableUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive);
-E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_fs* e_archive_fs(e_archive* pArchive);
-E_API e_stream* e_archive_stream(e_archive* pArchive);
-E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
-E_API void e_archive_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_archive_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-E_API e_result e_archive_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-E_API e_result e_archive_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
-E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor);
-E_API e_result e_archive_flush(e_file* pFile);
-E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo);
-E_API e_archive* e_archive_get(e_file* pFile);
-E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-/* END e_archive.h */
-
-
-
-/* BEG e_zip.h */
-typedef struct e_zip e_zip;
-
-E_API e_archive_vtable* e_zip_vtable(void);
-
-E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
-E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip);
-E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile);
-E_API void e_zip_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_result e_zip_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);
-E_API e_result e_zip_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten);
-E_API e_result e_zip_seek(e_file* pFile, e_int64 offset, e_seek_origin origin);
-E_API e_result e_zip_tell(e_file* pFile, e_int64* pCursor);
-E_API e_result e_zip_flush(e_file* pFile);
-E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo);
-E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks);
-E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks);
-/* END e_zip.h */
-
+/* BEG e_fs_zip.h */
+extern const e_fs_backend* E_FS_ZIP;    /* The zip backend. */
+/* BEG e_fs_zip.h */
 
 
 /* BEG e_log.h */
@@ -1275,7 +1253,7 @@ typedef void e_script; /* This is actually a lua_State*. You can just cast this 
 E_API e_result e_script_init(const e_allocation_callbacks* pAllocationCallbacks, e_script** ppScript);
 E_API void e_script_uninit(e_script* pScript, const e_allocation_callbacks* pAllocationCallbacks);
 E_API e_result e_script_load(e_script* pScript, e_stream* pStream, const char* pName, e_log* pLog);
-E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog);
+E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, e_log* pLog);
 /* END e_script.h */
 
 
@@ -1529,8 +1507,6 @@ struct e_engine_config
     e_engine_vtable* pVTable;
     void* pVTableUserData;
     e_log* pLog;
-    e_fs_vtable* pFSVTable;
-    void* pFSVTableUserData;
     const char* pConfigFilePath;
 };
 
@@ -1547,7 +1523,7 @@ struct e_engine
     void* pVTableUserData;
     e_log* pLog;
     e_bool8 isOwnerOfLog;
-    e_fs fs;
+    e_fs* pFS;
     e_config_file configFile;
     e_timer timer;  /* For calculating delta times. */
     double lastTimeInSeconds;

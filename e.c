@@ -6717,20 +6717,3466 @@ common_exit:
 
 
 /* BEG e_fs.c */
-#include <sys/types.h>
+static size_t e_fs_backend_alloc_size(const e_fs_backend* pBackend, const void* pBackendConfig)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->alloc_size == NULL) {
+        return 0;
+    } else {
+        return pBackend->alloc_size(pBackendConfig);
+    }
+}
+
+static e_result e_fs_backend_init(const e_fs_backend* pBackend, e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->init == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->init(pFS, pBackendConfig, pStream);
+    }
+}
+
+static void e_fs_backend_uninit(const e_fs_backend* pBackend, e_fs* pFS)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->uninit == NULL) {
+        return;
+    } else {
+        pBackend->uninit(pFS);
+    }
+}
+
+static e_result e_fs_backend_ioctl(const e_fs_backend* pBackend, e_fs* pFS, int command, void* pArgs)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->ioctl == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->ioctl(pFS, command, pArgs);
+    }
+}
+
+static e_result e_fs_backend_remove(const e_fs_backend* pBackend, e_fs* pFS, const char* pFilePath)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->remove == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->remove(pFS, pFilePath);
+    }
+}
+
+static e_result e_fs_backend_rename(const e_fs_backend* pBackend, e_fs* pFS, const char* pOldName, const char* pNewName)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->remove == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->rename(pFS, pOldName, pNewName);
+    }
+}
+
+static e_result e_fs_backend_mkdir(const e_fs_backend* pBackend, e_fs* pFS, const char* pPath)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->remove == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->mkdir(pFS, pPath);
+    }
+}
+
+static e_result e_fs_backend_info(const e_fs_backend* pBackend, e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->info == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->info(pFS, pPath, openMode, pInfo);
+    }
+}
+
+static size_t e_fs_backend_file_alloc_size(const e_fs_backend* pBackend, e_fs* pFS)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_alloc_size == NULL) {
+        return 0;
+    } else {
+        return pBackend->file_alloc_size(pFS);
+    }
+}
+
+static e_result e_fs_backend_file_open(const e_fs_backend* pBackend, e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_open == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_open(pFS, pStream, pFilePath, openMode, pFile);
+    }
+}
+
+static e_result e_fs_backend_file_open_handle(const e_fs_backend* pBackend, e_fs* pFS, void* hBackendFile, e_file* pFile)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_open_handle == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_open_handle(pFS, hBackendFile, pFile);
+    }
+}
+
+static void e_fs_backend_file_close(const e_fs_backend* pBackend, e_file* pFile)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_close == NULL) {
+        return;
+    } else {
+        pBackend->file_close(pFile);
+    }
+}
+
+static e_result e_fs_backend_file_read(const e_fs_backend* pBackend, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_read == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_read(pFile, pDst, bytesToRead, pBytesRead);
+    }
+}
+
+static e_result e_fs_backend_file_write(const e_fs_backend* pBackend, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_write == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_write(pFile, pSrc, bytesToWrite, pBytesWritten);
+    }
+}
+
+static e_result e_fs_backend_file_seek(const e_fs_backend* pBackend, e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_seek == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_seek(pFile, offset, origin);
+    }
+}
+
+static e_result e_fs_backend_file_tell(const e_fs_backend* pBackend, e_file* pFile, e_int64* pCursor)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_tell == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_tell(pFile, pCursor);
+    }
+}
+
+static e_result e_fs_backend_file_flush(const e_fs_backend* pBackend, e_file* pFile)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_flush == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_flush(pFile);
+    }
+}
+
+static e_result e_fs_backend_file_info(const e_fs_backend* pBackend, e_file* pFile, e_file_info* pInfo)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_info == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_info(pFile, pInfo);
+    }
+}
+
+static e_result e_fs_backend_file_duplicate(const e_fs_backend* pBackend, e_file* pFile, e_file* pDuplicatedFile)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->file_duplicate == NULL) {
+        return E_NOT_IMPLEMENTED;
+    } else {
+        return pBackend->file_duplicate(pFile, pDuplicatedFile);
+    }
+}
+
+static e_fs_iterator* e_fs_backend_first(const e_fs_backend* pBackend, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->first == NULL) {
+        return NULL;
+    } else {
+        e_fs_iterator* pIterator;
+        
+        pIterator = pBackend->first(pFS, pDirectoryPath, directoryPathLen);
+        
+        /* Just make double sure the FS information is set in case the backend doesn't do it. */
+        if (pIterator != NULL) {
+            pIterator->pFS = pFS;
+        }
+
+        return pIterator;
+    }
+}
+
+static e_fs_iterator* e_fs_backend_next(const e_fs_backend* pBackend, e_fs_iterator* pIterator)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->next == NULL) {
+        return NULL;
+    } else {
+        return pBackend->next(pIterator);
+    }
+}
+
+static void e_fs_backend_free_iterator(const e_fs_backend* pBackend, e_fs_iterator* pIterator)
+{
+    E_ASSERT(pBackend != NULL);
+
+    if (pBackend->free_iterator == NULL) {
+        return;
+    } else {
+        pBackend->free_iterator(pIterator);
+    }
+}
+
+
+/*
+This is a special backend that we use for archives so we can intercept opening and closing of files within those archives
+and do any necessary reference counting.
+*/
+
+/* Forward declarations. */
+static size_t e_increment_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive);
+static size_t e_decrement_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive);
+
+typedef struct e_fs_proxy
+{
+    const e_fs_backend* pBackend;
+    e_file* pArchiveFile;
+} e_fs_proxy;
+
+typedef struct e_fs_proxy_config
+{
+    const e_fs_backend* pBackend;
+    const void* pBackendConfig;
+} e_fs_proxy_config;
+
+typedef struct e_file_proxy
+{
+    e_bool32 unrefArchiveOnClose;
+} e_file_proxy;
+
+static e_fs_proxy* e_fs_proxy_get_backend_data(e_fs* pFS)
+{
+    return (e_fs_proxy*)E_OFFSET_PTR(e_fs_get_backend_data(pFS), e_fs_get_backend_data_size(pFS) - sizeof(e_fs_proxy));
+}
+
+static const e_fs_backend* e_fs_proxy_get_backend(e_fs* pFS)
+{
+    return e_fs_proxy_get_backend_data(pFS)->pBackend;
+}
+
+static e_file* e_fs_proxy_get_archive_file(e_fs* pFS)
+{
+    e_fs_proxy* pProxy;
+
+    pProxy = e_fs_proxy_get_backend_data(pFS);
+    E_ASSERT(pProxy != NULL);
+
+    return pProxy->pArchiveFile;
+}
+
+static e_fs* e_fs_proxy_get_owner_fs(e_fs* pFS)
+{
+    return e_file_get_fs(e_fs_proxy_get_archive_file(pFS));
+}
+
+
+static e_file_proxy* e_file_proxy_get_backend_data(e_file* pFile)
+{
+    return (e_file_proxy*)E_OFFSET_PTR(e_file_get_backend_data(pFile), e_file_get_backend_data_size(pFile) - sizeof(e_file_proxy));
+}
+
+static e_bool32 e_file_proxy_get_unref_archive_on_close(e_file* pFile)
+{
+    return e_file_proxy_get_backend_data(pFile)->unrefArchiveOnClose;
+}
+
+static void e_file_proxy_set_unref_archive_on_close(e_file* pFile, e_bool32 unrefArchiveOnClose)
+{
+    e_file_proxy_get_backend_data(pFile)->unrefArchiveOnClose = unrefArchiveOnClose;
+}
+
+
+static size_t e_alloc_size_proxy(const void* pBackendConfig)
+{
+    const e_fs_proxy_config* pProxyConfig = (const e_fs_proxy_config*)pBackendConfig;
+    E_ASSERT(pProxyConfig != NULL);    /* <-- We must have a config since that's where the backend is specified. */
+
+    return e_fs_backend_alloc_size(pProxyConfig->pBackend, pProxyConfig->pBackendConfig) + sizeof(e_fs_proxy);
+}
+
+static e_result e_init_proxy(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
+{
+    const e_fs_proxy_config* pProxyConfig = (const e_fs_proxy_config*)pBackendConfig;
+    e_fs_proxy* pProxy;
+
+    E_ASSERT(pProxyConfig != NULL);    /* <-- We must have a config since that's where the backend is specified. */
+    E_ASSERT(pStream      != NULL);    /* <-- This backend is only used with archives which means we must have a stream. */
+
+    pProxy = e_fs_proxy_get_backend_data(pFS);
+    E_ASSERT(pProxy != NULL);
+
+    pProxy->pBackend     = pProxyConfig->pBackend;
+    pProxy->pArchiveFile = (e_file*)pStream; /* The stream will always be a e_file when using this backend. */
+
+    return e_fs_backend_init(pProxyConfig->pBackend, pFS, pProxyConfig->pBackendConfig, pStream);
+}
+
+static void e_uninit_proxy(e_fs* pFS)
+{
+    e_fs_backend_uninit(e_fs_proxy_get_backend(pFS), pFS);
+}
+
+static e_result e_ioctl_proxy(e_fs* pFS, int command, void* pArgs)
+{
+    return e_fs_backend_ioctl(e_fs_proxy_get_backend(pFS), pFS, command, pArgs);
+}
+
+static e_result e_remove_proxy(e_fs* pFS, const char* pFilePath)
+{
+    return e_fs_backend_remove(e_fs_proxy_get_backend(pFS), pFS, pFilePath);
+}
+
+static e_result e_rename_proxy(e_fs* pFS, const char* pOldName, const char* pNewName)
+{
+    return e_fs_backend_rename(e_fs_proxy_get_backend(pFS), pFS, pOldName, pNewName);
+}
+
+static e_result e_mkdir_proxy(e_fs* pFS, const char* pPath)
+{
+    return e_fs_backend_mkdir(e_fs_proxy_get_backend(pFS), pFS, pPath);
+}
+
+static e_result e_info_proxy(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+{
+    return e_fs_backend_info(e_fs_proxy_get_backend(pFS), pFS, pPath, openMode, pInfo);
+}
+
+static size_t e_file_alloc_size_proxy(e_fs* pFS)
+{
+    return e_fs_backend_file_alloc_size(e_fs_proxy_get_backend(pFS), pFS);
+}
+
+static e_result e_file_open_proxy(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
+{
+    return e_fs_backend_file_open(e_fs_proxy_get_backend(pFS), pFS, pStream, pFilePath, openMode, pFile);
+}
+
+static e_result e_file_open_handle_proxy(e_fs* pFS, void* hBackendFile, e_file* pFile)
+{
+    return e_fs_backend_file_open_handle(e_fs_proxy_get_backend(pFS), pFS, hBackendFile, pFile);
+}
+
+static void e_file_close_proxy(e_file* pFile)
+{
+    e_fs_backend_file_close(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile);
+
+    /*
+    This right here is the entire reason the backend needs to be proxied. We need to intercept
+    calls to e_file_close() so we can then tell the FS that owns the archive to decrement the
+    reference count and potentially put the archive FS up for garbage collection.
+
+    You'll note that we don't have a corresponding call to e_open_archive() in the function
+    e_file_open_proxy() above. The reason is that e_open_archive() is called at a higher
+    level when the archive FS is being acquired in the first place.
+    */
+    if (e_file_proxy_get_unref_archive_on_close(pFile)) {
+        e_close_archive(e_file_get_fs(pFile));
+    }
+}
+
+static e_result e_file_read_proxy(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_fs_backend_file_read(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pDst, bytesToRead, pBytesRead);
+}
+
+static e_result e_file_write_proxy(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_fs_backend_file_write(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pSrc, bytesToWrite, pBytesWritten);
+}
+
+static e_result e_file_seek_proxy(e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    return e_fs_backend_file_seek(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, offset, origin);
+}
+
+static e_result e_file_tell_proxy(e_file* pFile, e_int64* pCursor)
+{
+    return e_fs_backend_file_tell(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pCursor);
+}
+
+static e_result e_file_flush_proxy(e_file* pFile)
+{
+    return e_fs_backend_file_flush(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile);
+}
+
+static e_result e_file_info_proxy(e_file* pFile, e_file_info* pInfo)
+{
+    return e_fs_backend_file_info(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pInfo);
+}
+
+static e_result e_file_duplicate_proxy(e_file* pFile, e_file* pDuplicatedFile)
+{
+    e_result result;
+    e_fs* pFS;
+
+    pFS = e_file_get_fs(pFile);
+    
+    result = e_fs_backend_file_duplicate(e_fs_proxy_get_backend(pFS), pFile, pDuplicatedFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    /* Increment the reference count of the opened archive if necessary. */
+    if (e_file_proxy_get_unref_archive_on_close(pFile)) {
+        e_fs* pOwnerFS;
+
+        e_file_proxy_set_unref_archive_on_close(pDuplicatedFile, E_TRUE);
+
+        pOwnerFS = e_fs_proxy_get_owner_fs(pFS);
+        if (pOwnerFS != NULL) {
+            e_increment_opened_archive_ref_count(pOwnerFS, pFS);
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+static e_fs_iterator* e_first_proxy(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+{
+    return e_fs_backend_first(e_fs_proxy_get_backend(pFS), pFS, pDirectoryPath, directoryPathLen);
+}
+
+static e_fs_iterator* e_next_proxy(e_fs_iterator* pIterator)
+{
+    return e_fs_backend_next(e_fs_proxy_get_backend(pIterator->pFS), pIterator);
+}
+
+static void e_free_iterator_proxy(e_fs_iterator* pIterator)
+{
+    e_fs_backend_free_iterator(e_fs_proxy_get_backend(pIterator->pFS), pIterator);
+}
+
+static e_fs_backend e_fs_proxy_backend =
+{
+    e_alloc_size_proxy,
+    e_init_proxy,
+    e_uninit_proxy,
+    e_ioctl_proxy,
+    e_remove_proxy,
+    e_rename_proxy,
+    e_mkdir_proxy,
+    e_info_proxy,
+    e_file_alloc_size_proxy,
+    e_file_open_proxy,
+    e_file_open_handle_proxy,
+    e_file_close_proxy,
+    e_file_read_proxy,
+    e_file_write_proxy,
+    e_file_seek_proxy,
+    e_file_tell_proxy,
+    e_file_flush_proxy,
+    e_file_info_proxy,
+    e_file_duplicate_proxy,
+    e_first_proxy,
+    e_next_proxy,
+    e_free_iterator_proxy
+};
+const e_fs_backend* E_PROXY = &e_fs_proxy_backend;
+
+
+/*
+This is the maximum number of ureferenced opened archive files that will be kept in memory
+before garbage collection of those archives is triggered.
+*/
+#ifndef E_DEFAULT_ARCHIVE_GC_THRESHOLD
+#define E_DEFAULT_ARCHIVE_GC_THRESHOLD 10
+#endif
+
+#define E_IS_OPAQUE(mode)      ((mode & E_OPAQUE) != 0)
+#define E_IS_VERBOSE(mode)     ((mode & E_VERBOSE) != 0)
+#define E_IS_TRANSPARENT(mode) ((mode & (E_OPAQUE | E_VERBOSE)) == 0)
+
+E_API e_fs_config e_config_init_default(void)
+{
+    e_fs_config config;
+
+    E_ZERO_OBJECT(&config);
+
+    return config;
+}
+
+E_API e_fs_config e_fs_config_init(const e_fs_backend* pBackend, void* pBackendConfig, e_stream* pStream)
+{
+    e_fs_config config = e_config_init_default();
+    config.pBackend       = pBackend;
+    config.pBackendConfig = pBackendConfig;
+    config.pStream        = pStream;
+
+    return config;
+}
+
+typedef struct e_opened_archive
+{
+    e_fs* pArchive;
+    size_t refCount;
+    char pPath[1];
+} e_opened_archive;
+
+typedef struct e_mount_point
+{
+    size_t pathOff;                     /* Points to a null terminated string containing the mounted path starting from the first byte after this struct. */
+    size_t pathLen;
+    size_t mountPointOff;               /* Points to a null terminated string containing the mount point starting from the first byte after this struct. */
+    size_t mountPointLen;
+    e_fs* pArchive;                       /* Can be null in which case the mounted path is a directory. */
+    e_bool32 closeArchiveOnUnmount;    /* If set to true, the archive FS will be closed when the mount point is unmounted. */
+    e_bool32 padding;
+} e_mount_point;
+
+typedef struct e_mount_list e_mount_list;
+
+struct e_fs
+{
+    const e_fs_backend* pBackend;
+    e_stream* pStream;
+    e_allocation_callbacks allocationCallbacks;
+    void* pArchiveTypes;    /* One heap allocation containing all extension registrations. Needs to be parsed in order to enumerate them. Structure is [const e_fs_backend*][extension][null-terminator][padding (aligned to E_SIZEOF_PTR)] */
+    size_t archiveTypesAllocSize;
+    e_bool32 isOwnerOfArchiveTypes;
+    size_t backendDataSize;
+    e_mutex archiveLock;     /* For use with e_open_archive() and e_close_archive(). */
+    void* pOpenedArchives;  /* One heap allocation. Structure is [e_fs*][refcount (size_t)][path][null-terminator][padding (aligned to E_SIZEOF_PTR)] */
+    size_t openedArchivesSize;
+    size_t openedArchivesCap;
+    size_t archiveGCThreshold;
+    e_mount_list* pReadMountPoints;
+    e_mount_list* pWriteMountPoints;
+};
+
+typedef struct e_file
+{
+    e_stream stream; /* Files are streams. This must be the first member so it can be cast. */
+    e_fs* pFS;
+    e_stream* pStreamForBackend;   /* The stream for use by the backend. Different to `stream`. This is a duplicate of the stream used by `pFS` so the backend can do reading. */
+    size_t backendDataSize;
+} e_file;
+
+
+static void e_gc_archives_nolock(e_fs* pFS, int policy); /* Defined further down in the file. */
+
+
+static size_t e_mount_point_size(size_t pathLen, size_t mountPointLen)
+{
+    return E_ALIGN(sizeof(e_mount_point) + pathLen + 1 + mountPointLen + 1, E_SIZEOF_PTR);
+}
+
+
+
+static size_t e_mount_list_get_header_size(void)
+{
+    return sizeof(size_t)*2;
+}
+
+static size_t e_mount_list_get_alloc_size(const e_mount_list* pList)
+{
+    if (pList == NULL) {
+        return 0;
+    }
+
+    return *(size_t*)E_OFFSET_PTR(pList, 0);
+}
+
+static size_t e_mount_list_get_alloc_cap(const e_mount_list* pList)
+{
+    if (pList == NULL) {
+        return 0;
+    }
+
+    return *(size_t*)E_OFFSET_PTR(pList, 1 * sizeof(size_t));
+}
+
+static void e_mount_list_set_alloc_size(e_mount_list* pList, size_t newSize)
+{
+    E_ASSERT(pList != NULL);
+    *(size_t*)E_OFFSET_PTR(pList, 0) = newSize;
+}
+
+static void e_mount_list_set_alloc_cap(e_mount_list* pList, size_t newCap)
+{
+    E_ASSERT(pList != NULL);
+    *(size_t*)E_OFFSET_PTR(pList, 1 * sizeof(size_t)) = newCap;
+}
+
+
+typedef struct e_mount_list_iterator
+{
+    const char* pPath;
+    const char* pMountPointPath;
+    e_fs* pArchive; /* Can be null. */
+    struct
+    {
+        e_mount_list* pList;
+        e_mount_point* pMountPoint;
+        size_t cursor;
+    } internal;
+} e_mount_list_iterator;
+
+static e_result e_mount_list_iterator_resolve_members(e_mount_list_iterator* pIterator, size_t cursor)
+{
+    E_ASSERT(pIterator != NULL);
+
+    if (cursor >= e_mount_list_get_alloc_size(pIterator->internal.pList)) {
+        return E_AT_END;
+    }
+
+    pIterator->internal.cursor      = cursor;
+    pIterator->internal.pMountPoint = (e_mount_point*)E_OFFSET_PTR(pIterator->internal.pList, e_mount_list_get_header_size() + pIterator->internal.cursor);
+    E_ASSERT(pIterator->internal.pMountPoint != NULL);
+
+    /* The content of the paths are stored at the end of the structure. */
+    pIterator->pPath           = (const char*)E_OFFSET_PTR(pIterator->internal.pMountPoint, sizeof(e_mount_point) + pIterator->internal.pMountPoint->pathOff);
+    pIterator->pMountPointPath = (const char*)E_OFFSET_PTR(pIterator->internal.pMountPoint, sizeof(e_mount_point) + pIterator->internal.pMountPoint->mountPointOff);
+    pIterator->pArchive        = pIterator->internal.pMountPoint->pArchive;
+
+    return E_SUCCESS;
+}
+
+static e_result e_mount_list_first(e_mount_list* pList, e_mount_list_iterator* pIterator)
+{
+    E_ASSERT(pIterator != NULL);
+
+    E_ZERO_OBJECT(pIterator);
+    pIterator->internal.pList = pList;
+
+    if (e_mount_list_get_alloc_size(pList) == 0) {
+        return E_AT_END;   /* No mount points. */
+    }
+
+    return e_mount_list_iterator_resolve_members(pIterator, 0);
+}
+
+static e_result e_mount_list_next(e_mount_list_iterator* pIterator)
+{
+    size_t newCursor;
+
+    E_ASSERT(pIterator != NULL);
+
+    /* For a bit of safety, lets go ahead and check if the cursor is already at the end and if so just abort early. */
+    if (pIterator->internal.cursor >= e_mount_list_get_alloc_size(pIterator->internal.pList)) {
+        return E_AT_END;
+    }
+
+    /* Move the cursor forward. If after advancing the cursor we are at the end we're done and we can free the mount point iterator and return. */
+    newCursor = pIterator->internal.cursor + e_mount_point_size(pIterator->internal.pMountPoint->pathLen, pIterator->internal.pMountPoint->mountPointLen);
+    E_ASSERT(newCursor <= e_mount_list_get_alloc_size(pIterator->internal.pList)); /* <-- If this assert fails, there's a bug in the packing of the structure.*/
+
+    return e_mount_list_iterator_resolve_members(pIterator, newCursor);
+}
+
+static e_mount_list* e_mount_list_alloc(e_mount_list* pList, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority, const e_allocation_callbacks* pAllocationCallbacks, e_mount_point** ppMountPoint)
+{
+    e_mount_point* pNewMountPoint = NULL;
+    size_t pathToMountLen;
+    size_t mountPointLen;
+    size_t mountPointAllocSize;
+
+    E_ASSERT(ppMountPoint != NULL);
+    *ppMountPoint = NULL;
+
+    pathToMountLen = strlen(pPathToMount);
+    mountPointLen  = strlen(pMountPoint);
+    mountPointAllocSize = e_mount_point_size(pathToMountLen, mountPointLen);
+
+    if (e_mount_list_get_alloc_cap(pList) < e_mount_list_get_alloc_size(pList) + mountPointAllocSize) {
+        size_t newCap;
+        e_mount_list* pNewList;
+
+        newCap = e_mount_list_get_alloc_cap(pList) * 2;
+        if (newCap < e_mount_list_get_alloc_size(pList) + mountPointAllocSize) {
+            newCap = e_mount_list_get_alloc_size(pList) + mountPointAllocSize;
+        }
+
+        pNewList = (e_mount_list*)e_realloc(pList, e_mount_list_get_header_size() + newCap, pAllocationCallbacks); /* Need room for leading size and cap variables. */
+        if (pNewList == NULL) {
+            return NULL;
+        }
+
+        /* Little bit awkward, but if the list is fresh we'll want to clear everything to zero. */
+        if (pList == NULL) {
+            E_ZERO_MEMORY(pNewList, e_mount_list_get_header_size());
+        }
+
+        pList = (e_mount_list*)pNewList;
+        e_mount_list_set_alloc_cap(pList, newCap);
+    }
+
+    /*
+    Getting here means we should have enough room in the buffer. Now we need to use the priority to determine where
+    we're going to place the new entry within the buffer.
+    */
+    if (priority == E_MOUNT_PRIORITY_LOWEST) {
+        /* The new entry goes to the end of the list. */
+        pNewMountPoint = (e_mount_point*)E_OFFSET_PTR(pList, e_mount_list_get_header_size() + e_mount_list_get_alloc_size(pList));
+    } else if (priority == E_MOUNT_PRIORITY_HIGHEST) {
+        /* The new entry goes to the start of the list. We'll need to move everything down. */
+        E_MOVE_MEMORY(E_OFFSET_PTR(pList, e_mount_list_get_header_size() + mountPointAllocSize), E_OFFSET_PTR(pList, e_mount_list_get_header_size()), e_mount_list_get_alloc_size(pList));
+        pNewMountPoint = (e_mount_point*)E_OFFSET_PTR(pList, e_mount_list_get_header_size());
+    } else {
+        E_ASSERT(!"Unknown mount priority.");
+        return NULL;
+    }
+
+    e_mount_list_set_alloc_size(pList, e_mount_list_get_alloc_size(pList) + mountPointAllocSize);
+
+    /* Now we can fill out the details of the new mount point. */
+    pNewMountPoint->pathOff       = 0;                  /* The path is always the first byte after the struct. */
+    pNewMountPoint->pathLen       = pathToMountLen;
+    pNewMountPoint->mountPointOff = pathToMountLen + 1; /* The mount point is always the first byte after the path to mount. */
+    pNewMountPoint->mountPointLen = mountPointLen;
+
+    memcpy(E_OFFSET_PTR(pNewMountPoint, sizeof(e_mount_point) + pNewMountPoint->pathOff),       pPathToMount, pathToMountLen + 1);
+    memcpy(E_OFFSET_PTR(pNewMountPoint, sizeof(e_mount_point) + pNewMountPoint->mountPointOff), pMountPoint,  mountPointLen  + 1);
+
+    *ppMountPoint = pNewMountPoint;
+    return pList;
+}
+
+static e_result e_mount_list_remove(e_mount_list* pList, e_mount_point* pMountPoint)
+{
+    size_t mountPointAllocSize = e_mount_point_size(pMountPoint->pathLen, pMountPoint->mountPointLen);
+    size_t newMountPointsAllocSize = e_mount_list_get_alloc_size(pList) - mountPointAllocSize;
+
+    E_MOVE_MEMORY
+    (
+        pMountPoint,
+        E_OFFSET_PTR(pList, e_mount_list_get_header_size() + mountPointAllocSize),
+        e_mount_list_get_alloc_size(pList) - ((e_uintptr)pMountPoint - (e_uintptr)E_OFFSET_PTR(pList, e_mount_list_get_header_size())) - mountPointAllocSize
+    );
+
+    e_mount_list_set_alloc_size(pList, newMountPointsAllocSize);
+
+    return E_SUCCESS;
+}
+
+
+
+static const e_fs_backend* e_get_backend_or_default(const e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return E_FS_STDIO;
+    } else {
+        return pFS->pBackend;
+    }
+}
+
+typedef struct e_registered_backend_iterator
+{
+    const e_fs* pFS;
+    size_t cursor;
+    const e_fs_backend* pBackend;
+    void* pBackendConfig;
+    const char* pExtension;
+    size_t extensionLen;
+} e_registered_backend_iterator;
+
+E_API e_result e_file_open_or_info(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile, e_file_info* pInfo);
+static e_result e_next_registered_backend(e_registered_backend_iterator* pIterator);
+
+static e_result e_first_registered_backend(e_fs* pFS, e_registered_backend_iterator* pIterator)
+{
+    E_ASSERT(pFS       != NULL);
+    E_ASSERT(pIterator != NULL);
+
+    E_ZERO_OBJECT(pIterator);
+    pIterator->pFS = pFS;
+
+    return e_next_registered_backend(pIterator);
+}
+
+static e_result e_next_registered_backend(e_registered_backend_iterator* pIterator)
+{
+    E_ASSERT(pIterator != NULL);
+
+    if (pIterator->cursor >= pIterator->pFS->archiveTypesAllocSize) {
+        return E_AT_END;
+    }
+
+    pIterator->pBackend       = *(const e_fs_backend**)E_OFFSET_PTR(pIterator->pFS->pArchiveTypes, pIterator->cursor);
+    pIterator->pBackendConfig =  NULL;   /* <-- I'm not sure how to deal with backend configs with this API. Putting this member in the iterator in case I want to support this later. */
+    pIterator->pExtension     =  (const char*       )E_OFFSET_PTR(pIterator->pFS->pArchiveTypes, pIterator->cursor + sizeof(e_fs_backend*));
+    pIterator->extensionLen   =  strlen(pIterator->pExtension);
+
+    pIterator->cursor += E_ALIGN(sizeof(e_fs_backend*) + pIterator->extensionLen + 1, E_SIZEOF_PTR);
+
+    return E_SUCCESS;
+}
+
+
+
+static e_opened_archive* e_find_opened_archive(e_fs* pFS, const char* pArchivePath, size_t archivePathLen)
+{
+    size_t cursor;
+
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    E_ASSERT(pArchivePath != NULL);
+    E_ASSERT(archivePathLen > 0);
+
+    cursor = 0;
+    while (cursor < pFS->openedArchivesSize) {
+        e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
+
+        if (e_strncmp(pOpenedArchive->pPath, pArchivePath, archivePathLen) == 0) {
+            return pOpenedArchive;
+        }
+
+        /* Getting here means this archive is not the one we're looking for. */
+        cursor += E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+    }
+
+    /* If we get here it means we couldn't find the archive by it's name. */
+    return NULL;
+}
+
+static e_opened_archive* e_find_opened_archive_by_fs(e_fs* pFS, e_fs* pArchive)
+{
+    size_t cursor;
+
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    E_ASSERT(pArchive != NULL);
+
+    cursor = 0;
+    while (cursor < pFS->openedArchivesSize) {
+        e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
+
+        if (pOpenedArchive->pArchive == pArchive) {
+            return pOpenedArchive;
+        }
+
+        /* Getting here means this archive is not the one we're looking for. */
+        cursor += E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+    }
+
+    /* If we get here it means we couldn't find the archive. */
+    return NULL;
+}
+
+static e_result e_add_opened_archive(e_fs* pFS, e_fs* pArchive, const char* pArchivePath, size_t archivePathLen)
+{
+    size_t openedArchiveSize;
+    e_opened_archive* pOpenedArchive;
+
+    E_ASSERT(pFS          != NULL);
+    E_ASSERT(pArchive     != NULL);
+    E_ASSERT(pArchivePath != NULL);
+
+    if (archivePathLen == E_NULL_TERMINATED) {
+        archivePathLen = strlen(pArchivePath);
+    }
+
+    openedArchiveSize = E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + archivePathLen + 1, E_SIZEOF_PTR);
+
+    if (pFS->openedArchivesSize + openedArchiveSize > pFS->openedArchivesCap) {
+        size_t newOpenedArchivesCap;
+        void* pNewOpenedArchives;
+
+        newOpenedArchivesCap = pFS->openedArchivesCap * 2;
+        if (newOpenedArchivesCap < pFS->openedArchivesSize + openedArchiveSize) {
+            newOpenedArchivesCap = pFS->openedArchivesSize + openedArchiveSize;
+        }
+
+        pNewOpenedArchives = e_realloc(pFS->pOpenedArchives, newOpenedArchivesCap, e_fs_get_allocation_callbacks(pFS));
+        if (pNewOpenedArchives == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        pFS->pOpenedArchives   = pNewOpenedArchives;
+        pFS->openedArchivesCap = newOpenedArchivesCap;
+    }
+
+    /* If we get here we should have enough room in the buffer to store the new archive details. */
+    E_ASSERT(pFS->openedArchivesSize + openedArchiveSize <= pFS->openedArchivesCap);
+
+    pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, pFS->openedArchivesSize);
+    pOpenedArchive->pArchive = pArchive;
+    pOpenedArchive->refCount = 0;
+    e_strncpy(pOpenedArchive->pPath, pArchivePath, archivePathLen);
+
+    pFS->openedArchivesSize += openedArchiveSize;
+
+    return E_SUCCESS;
+}
+
+static e_result e_remove_opened_archive(e_fs* pFS, e_opened_archive* pOpenedArchive)
+{
+    /* This is a simple matter of doing a memmove() to move memory down. pOpenedArchive should be an offset of pFS->pOpenedArchives. */
+    size_t openedArchiveSize;
+
+    openedArchiveSize = E_ALIGN(sizeof(e_opened_archive*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+
+    E_ASSERT(((e_uintptr)pOpenedArchive + openedArchiveSize) >  ((e_uintptr)pFS->pOpenedArchives));
+    E_ASSERT(((e_uintptr)pOpenedArchive + openedArchiveSize) <= ((e_uintptr)pFS->pOpenedArchives + pFS->openedArchivesSize));
+
+    E_MOVE_MEMORY(pOpenedArchive, E_OFFSET_PTR(pOpenedArchive, openedArchiveSize), (size_t)((((e_uintptr)pFS->pOpenedArchives + pFS->openedArchivesSize)) - ((e_uintptr)pOpenedArchive + openedArchiveSize)));
+    pFS->openedArchivesSize -= openedArchiveSize;
+
+    return E_SUCCESS;
+}
+
+static size_t e_increment_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive)
+{
+    e_opened_archive* pOpenedArchive = e_find_opened_archive_by_fs(pFS, pArchive);
+    if (pOpenedArchive != NULL) {
+        pOpenedArchive->refCount += 1;
+
+        /* If the owner FS is also an archive, increment it's reference counter as well. */
+        if (pFS->pBackend == E_PROXY) {
+            e_increment_opened_archive_ref_count(e_fs_proxy_get_owner_fs(pFS), pFS);
+        }
+
+        return pOpenedArchive->refCount;
+    }
+
+    return 0;
+}
+
+static size_t e_decrement_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive)
+{
+    e_opened_archive* pOpenedArchive = e_find_opened_archive_by_fs(pFS, pArchive);
+    if (pOpenedArchive != NULL) {
+        E_ASSERT(pOpenedArchive->refCount > 0);    /* <-- If this fails it means there's a bug in the library. Please report. */
+        pOpenedArchive->refCount -= 1;
+
+        /* If the owner FS is also an archive, decrement it's reference counter as well. */
+        if (pFS->pBackend == E_PROXY) {
+            e_decrement_opened_archive_ref_count(e_fs_proxy_get_owner_fs(pFS), pFS);
+        }
+
+        return pOpenedArchive->refCount;
+    }
+
+    return 0;
+}
+
+
+static size_t e_archive_type_sizeof(const e_archive_type* pArchiveType)
+{
+    return E_ALIGN(sizeof(pArchiveType->pBackend) + strlen(pArchiveType->pExtension) + 1, E_SIZEOF_PTR);
+}
+
+
+E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
+{
+    e_fs* pFS;
+    e_fs_config defaultConfig;
+    const e_fs_backend* pBackend = NULL;
+    size_t backendDataSizeInBytes = 0;
+    e_int64 initialStreamCursor = -1;
+    size_t archiveTypesAllocSize = 0;
+    size_t iArchiveType;
+
+    if (ppFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppFS = NULL;
+
+    if (pConfig == NULL) {
+        defaultConfig = e_config_init_default();
+        pConfig = &defaultConfig;
+    }
+
+    pBackend = pConfig->pBackend;
+    if (pBackend == NULL) {
+        pBackend = E_FS_STDIO;
+    }
+
+    /* If the backend is still null at this point it means the default backend has been disabled. */
+    if (pBackend == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pBackend->alloc_size != NULL) {
+        backendDataSizeInBytes = pBackend->alloc_size(pConfig->pBackendConfig);
+    } else {
+        backendDataSizeInBytes = 0;
+    }
+
+    /* We need to allocate space for the archive types which we place just after the "e_fs" struct. After that will be the backend data. */
+    for (iArchiveType = 0; iArchiveType < pConfig->archiveTypeCount; iArchiveType += 1) {
+        archiveTypesAllocSize += e_archive_type_sizeof(&pConfig->pArchiveTypes[iArchiveType]);
+    }
+
+    pFS = (e_fs*)e_calloc(sizeof(e_fs) + archiveTypesAllocSize + backendDataSizeInBytes, pConfig->pAllocationCallbacks);
+    if (pFS == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pBackend              = pBackend;
+    pFS->pStream               = pConfig->pStream; /* <-- This is allowed to be null, which will be the case for standard OS file system APIs like stdio. Streams are used for things like archives like Zip files, or in-memory file systems. */
+    pFS->allocationCallbacks   = e_allocation_callbacks_init_copy(pConfig->pAllocationCallbacks);
+    pFS->backendDataSize       = backendDataSizeInBytes;
+    pFS->isOwnerOfArchiveTypes = E_TRUE;
+    pFS->archiveGCThreshold    = E_DEFAULT_ARCHIVE_GC_THRESHOLD;
+    pFS->archiveTypesAllocSize = archiveTypesAllocSize;
+    pFS->pArchiveTypes         = (void*)E_OFFSET_PTR(pFS, sizeof(e_fs));
+
+    /* Archive types. */
+    if (pConfig->archiveTypeCount > 0) {
+        size_t cursor = 0;
+
+        for (iArchiveType = 0; iArchiveType < pConfig->archiveTypeCount; iArchiveType += 1) {
+            size_t extensionLength = strlen(pConfig->pArchiveTypes[iArchiveType].pExtension);
+
+            E_COPY_MEMORY(E_OFFSET_PTR(pFS->pArchiveTypes, cursor                      ), &pConfig->pArchiveTypes[iArchiveType].pBackend,   sizeof(e_fs_backend*));
+            E_COPY_MEMORY(E_OFFSET_PTR(pFS->pArchiveTypes, cursor + sizeof(e_fs_backend*)),  pConfig->pArchiveTypes[iArchiveType].pExtension, extensionLength + 1);
+
+            cursor += e_archive_type_sizeof(&pConfig->pArchiveTypes[iArchiveType]);
+        }
+    } else {
+        pFS->pArchiveTypes = NULL;
+        pFS->archiveTypesAllocSize = 0;
+    }
+
+    /*
+    If we were initialized with a stream we need to make sure we have a lock for it. This is needed for
+    archives which might have multiple files accessing a stream across different threads. The archive
+    will need to lock the stream so it doesn't get all mixed up between threads.
+    */
+    if (pConfig->pStream != NULL) {
+        /* We want to grab the initial cursor of the stream so we can restore it in the case of an error. */
+        if (e_stream_tell(pConfig->pStream, &initialStreamCursor) != E_SUCCESS) {
+            initialStreamCursor = -1;
+        }
+    }
+
+    /*
+    We need a mutex for e_open_archive() and e_close_archive(). This needs to be recursive because
+    during garbage collection we may end up closing archives in archives.
+    */
+    e_mutex_init(&pFS->archiveLock, E_MUTEX_TYPE_RECURSIVE);
+
+    /* We're now ready to initialize the backend. */
+    if (pBackend->init != NULL) {
+        e_result result = pBackend->init(pFS, pConfig->pBackendConfig, pConfig->pStream);
+        if (result != E_SUCCESS) {
+            /*
+            If we have a stream and the backend failed to initialize, it's possible that the cursor of the stream
+            was moved as a result. To keep this as clean as possible, we're going to seek the cursor back to the
+            initial position.
+            */
+            if (pConfig->pStream != NULL && initialStreamCursor != -1) {
+                e_stream_seek(pConfig->pStream, initialStreamCursor, E_SEEK_SET);
+            }
+
+            e_free(pFS, e_fs_get_allocation_callbacks(pFS));
+            return result;
+        }
+    } else {
+        /* Getting here means the backend does not implement an init() function. This is not mandatory so we just assume successful.*/
+    }
+
+    *ppFS = pFS;
+    return E_SUCCESS;
+}
+
+E_API void e_fs_uninit(e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return;
+    }
+
+    /*
+    We'll first garbage collect all archives. This should uninitialize any archives that are
+    still open but have no references. After this call any archives that are still being
+    referenced will remain open. Not quite sure what to do in this situation, but for now
+    I'll check if any archives are still open and throw an assert. Not sure if this is
+    overly aggressive - feedback welcome.
+    */
+    e_fs_gc_archives(pFS, E_GC_POLICY_FULL);
+
+    /* The caller has a bug if there are still outstanding archives. */
+    #if !defined(E_NO_OPENED_FILES_ASSERT)
+    {
+        if (pFS->openedArchivesSize > 0) {
+            E_ASSERT(!"You have outstanding opened files. You must close all files before uninitializing the e_fs object.");    /* <-- If you hit this assert but you're absolutely sure you've closed all your files, please submit a bug report with a reproducible test case. Define `E_NO_OPENED_FILES_ASSERT` to workaround the assert. */
+        }
+    }
+    #endif
+
+
+    if (pFS->pBackend->uninit != NULL) {
+        pFS->pBackend->uninit(pFS);
+    }
+
+    e_free(pFS->pReadMountPoints, &pFS->allocationCallbacks);
+    pFS->pReadMountPoints = NULL;
+
+    e_free(pFS->pWriteMountPoints, &pFS->allocationCallbacks);
+    pFS->pWriteMountPoints = NULL;
+
+    e_free(pFS->pOpenedArchives, &pFS->allocationCallbacks);
+    pFS->pOpenedArchives = NULL;
+
+    e_mutex_destroy(&pFS->archiveLock);
+
+    e_free(pFS, &pFS->allocationCallbacks);
+}
+
+E_API e_result e_fs_ioctl(e_fs* pFS, int request, void* pArg)
+{
+    if (pFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_fs_backend_ioctl(pFS->pBackend, pFS, request, pArg);
+}
+
+E_API e_result e_fs_remove(e_fs* pFS, const char* pFilePath)
+{
+    if (pFS == NULL || pFilePath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_fs_backend_remove(pFS->pBackend, pFS, pFilePath);
+}
+
+E_API e_result e_fs_rename(e_fs* pFS, const char* pOldName, const char* pNewName)
+{
+    if (pFS == NULL || pOldName == NULL || pNewName == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    return e_fs_backend_rename(pFS->pBackend, pFS, pOldName, pNewName);
+}
+
+E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
+{
+    char pRunningPathStack[1024];
+    char* pRunningPathHeap = NULL;
+    char* pRunningPath = pRunningPathStack;
+    size_t runningPathLen = 0;
+    e_path_iterator iSegment;
+    const e_fs_backend* pBackend;
+
+    pBackend = e_get_backend_or_default(pFS);
+
+    if (pBackend == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pPath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* We need to iterate over each segment and create the directory. If any of these fail we'll need to abort. */
+    if (e_path_first(pPath, E_NULL_TERMINATED, &iSegment) != E_SUCCESS) {
+        return E_SUCCESS;  /* It's an empty path. */
+    }
+
+    for (;;) {
+        e_result result;
+
+        if (runningPathLen + iSegment.segmentLength + 1 >= sizeof(pRunningPathStack)) {
+            if (pRunningPath == pRunningPathStack) {
+                pRunningPathHeap = (char*)e_malloc(runningPathLen + iSegment.segmentLength + 1, e_fs_get_allocation_callbacks(pFS));
+                if (pRunningPathHeap == NULL) {
+                    return E_OUT_OF_MEMORY;
+                }
+
+                E_COPY_MEMORY(pRunningPathHeap, pRunningPathStack, runningPathLen);
+                pRunningPath = pRunningPathHeap;
+            } else {
+                char* pNewRunningPathHeap;
+
+                pNewRunningPathHeap = (char*)e_realloc(pRunningPathHeap, runningPathLen + iSegment.segmentLength + 1, e_fs_get_allocation_callbacks(pFS));
+                if (pNewRunningPathHeap == NULL) {
+                    e_free(pRunningPathHeap, e_fs_get_allocation_callbacks(pFS));
+                    return E_OUT_OF_MEMORY;
+                }
+
+                pRunningPath = pNewRunningPathHeap;
+            }
+        }
+
+        E_COPY_MEMORY(pRunningPath + runningPathLen, iSegment.pFullPath + iSegment.segmentOffset, iSegment.segmentLength);
+        runningPathLen += iSegment.segmentLength;
+        pRunningPath[runningPathLen] = '\0';
+
+        result = e_fs_backend_mkdir(pBackend, pFS, pRunningPath);
+
+        /* We just pretend to be successful if the directory already exists. */
+        if (result == E_ALREADY_EXISTS) {
+            result = E_SUCCESS;
+        }
+
+        if (result != E_SUCCESS) {
+            if (pRunningPathHeap != NULL) {
+                e_free(pRunningPathHeap, e_fs_get_allocation_callbacks(pFS));
+            }
+
+            return result;
+        }
+
+        pRunningPath[runningPathLen] = '/';
+        runningPathLen += 1;
+
+        result = e_path_next(&iSegment);
+        if (result != E_SUCCESS) {
+            break;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_info(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+{
+    if (pInfo == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_ZERO_OBJECT(pInfo);
+
+    return e_file_open_or_info(pFS, pPath, openMode, NULL, pInfo);
+}
+
+E_API e_stream* e_fs_get_stream(e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    return pFS->pStream;
+}
+
+E_API const e_allocation_callbacks* e_fs_get_allocation_callbacks(e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    return &pFS->allocationCallbacks;
+}
+
+E_API void* e_fs_get_backend_data(e_fs* pFS)
+{
+    size_t offset = sizeof(e_fs);
+
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    if (pFS->isOwnerOfArchiveTypes) {
+        offset += pFS->archiveTypesAllocSize;
+    }
+
+    return E_OFFSET_PTR(pFS, offset);
+}
+
+E_API size_t e_fs_get_backend_data_size(e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return 0;
+    }
+
+    return pFS->backendDataSize;
+}
+
+
+
+static e_result e_open_archive_nolock(e_fs* pFS, const e_fs_backend* pBackend, void* pBackendConfig, const char* pArchivePath, size_t archivePathLen, int openMode, e_fs** ppArchive)
+{
+    e_result result;
+    e_fs* pArchive;
+    e_fs_config archiveConfig;
+    e_file* pArchiveFile;
+    char pArchivePathNTStack[1024];
+    char* pArchivePathNTHeap = NULL;    /* <-- Must be initialized to null. */
+    char* pArchivePathNT;
+    e_fs_proxy_config proxyConfig;
+    e_opened_archive* pOpenedArchive;
+
+    /*
+    The first thing to do is check if the archive has already been opened. If so, we just increment
+    the reference count and return the already-loaded e_fs object.
+    */
+    pOpenedArchive = e_find_opened_archive(pFS, pArchivePath, archivePathLen);
+    if (pOpenedArchive != NULL) {
+        if (pOpenedArchive->refCount == 0) {
+            pOpenedArchive->refCount += 1;
+        } else {
+            e_increment_opened_archive_ref_count(pFS, pOpenedArchive->pArchive);
+        }
+
+        *ppArchive = pOpenedArchive->pArchive;
+        return E_SUCCESS;
+    }
+
+    /*
+    Getting here means the archive is not cached. We'll need to open it. Unfortunately our path is
+    not null terminated so we'll need to do that now. We'll try to avoid a heap allocation if we
+    can.
+    */
+    if (archivePathLen == E_NULL_TERMINATED) {
+        pArchivePathNT = (char*)pArchivePath;   /* <-- Safe cast. We won't be modifying this. */
+    } else {
+        if (archivePathLen >= sizeof(pArchivePathNTStack)) {
+            pArchivePathNTHeap = (char*)e_malloc(archivePathLen + 1, e_fs_get_allocation_callbacks(pFS));
+            if (pArchivePathNTHeap == NULL) {
+                return E_OUT_OF_MEMORY;
+            }
+
+            pArchivePathNT = pArchivePathNTHeap;
+        } else {
+            pArchivePathNT = pArchivePathNTStack;
+        }
+
+        E_COPY_MEMORY(pArchivePathNT, pArchivePath, archivePathLen);
+        pArchivePathNT[archivePathLen] = '\0';
+    }
+
+    result = e_file_open(pFS, pArchivePathNT, openMode, &pArchiveFile);
+    if (result != E_SUCCESS) {
+        e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
+        return result;
+    }
+
+    proxyConfig.pBackend = pBackend;
+    proxyConfig.pBackendConfig = pBackendConfig;
+
+    archiveConfig = e_fs_config_init(E_PROXY, &proxyConfig, e_file_get_stream(pArchiveFile));
+    archiveConfig.pAllocationCallbacks = e_fs_get_allocation_callbacks(pFS);
+
+    result = e_fs_init(&archiveConfig, &pArchive);
+    e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
+
+    if (result != E_SUCCESS) { /* <-- This is the result of e_fs_init().*/
+        e_file_close(pArchiveFile);
+        return result;
+    }
+
+    /*
+    We need to support the ability to open archives within archives. To do this, the archive e_fs
+    object needs to inherit the registered archive types. Fortunately this is easy because we do
+    this as one single allocation which means we can just reference it directly. The API has a
+    restriction that archive type registration cannot be modified after a file has been opened.
+    */
+    pArchive->pArchiveTypes         = pFS->pArchiveTypes;
+    pArchive->archiveTypesAllocSize = pFS->archiveTypesAllocSize;
+    pArchive->isOwnerOfArchiveTypes = E_FALSE;
+
+    /* Add the new archive to the cache. */
+    result = e_add_opened_archive(pFS, pArchive, pArchivePath, archivePathLen);
+    if (result != E_SUCCESS) {
+        e_fs_uninit(pArchive);
+        e_file_close(pArchiveFile);
+        return result;
+    }
+
+    e_increment_opened_archive_ref_count(pFS, pArchive);
+
+    *ppArchive = pArchive;
+    return E_SUCCESS;
+}
+
+E_API e_result e_open_archive_ex(e_fs* pFS, const e_fs_backend* pBackend, void* pBackendConfig, const char* pArchivePath, size_t archivePathLen, int openMode, e_fs** ppArchive)
+{
+    e_result result;
+
+    if (ppArchive == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppArchive = NULL;
+
+    if (pFS == NULL || pBackend == NULL || pArchivePath == NULL || archivePathLen == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    It'd be nice to be able to resolve the path here to eliminate any "." and ".." segments thereby
+    making the path always consistent for a given archive. However, I cannot think of a way to do
+    this robustly without having a backend-specific function like a `resolve()` or whatnot. The
+    problem is that the path might be absolute, or it might be relative, and to get it right,
+    parcticularly when dealing with different operating systems' ways of specifying an absolute
+    path, you really need to have the support of the backend. I might add support for this later.
+    */
+
+    e_mutex_lock(&pFS->archiveLock);
+    {
+        result = e_open_archive_nolock(pFS, pBackend, pBackendConfig, pArchivePath, archivePathLen, openMode, ppArchive);
+    }
+    e_mutex_unlock(&pFS->archiveLock);
+
+    return result;
+}
+
+E_API e_result e_open_archive(e_fs* pFS, const char* pArchivePath, int openMode, e_fs** ppArchive)
+{
+    e_result backendIteratorResult;
+    e_registered_backend_iterator iBackend;
+    e_result result;
+
+    if (ppArchive == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppArchive = NULL;  /* Safety. */
+
+    if (pFS == NULL || pArchivePath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    There can be multiple backends registered to the same extension. We just iterate over each one in order
+    and use the first that works.
+    */
+    result = E_NO_BACKEND;
+    for (backendIteratorResult = e_first_registered_backend(pFS, &iBackend); backendIteratorResult == E_SUCCESS; backendIteratorResult = e_next_registered_backend(&iBackend)) {
+        if (e_path_extension_equal(pArchivePath, E_NULL_TERMINATED, iBackend.pExtension, iBackend.extensionLen)) {
+            result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, pArchivePath, E_NULL_TERMINATED, openMode, ppArchive);
+            if (result == E_SUCCESS) {
+                return E_SUCCESS;
+            }
+        }
+    }
+
+    /* Failed to open from any archive backend. */
+    return result;
+}
+
+E_API void e_close_archive(e_fs* pArchive)
+{
+    e_fs* pOwnerFS;
+
+    /* This function should only ever be called for archives that were opened with e_open_archive(). */
+    E_ASSERT(pArchive->pBackend == E_PROXY);
+
+    pOwnerFS = e_fs_proxy_get_owner_fs(pArchive);
+    E_ASSERT(pOwnerFS != NULL);
+
+    e_mutex_lock(&pOwnerFS->archiveLock);
+    {
+        e_decrement_opened_archive_ref_count(pOwnerFS, pArchive);
+    }
+    e_mutex_unlock(&pOwnerFS->archiveLock);
+
+    /*
+    Now we need to do a bit of garbage collection of opened archives. When files are opened sequentially
+    from a single archive, it's more efficient to keep the archive open for a bit rather than constantly
+    loading and unloading the archive for every single file. Zip, for example, can be inefficient because
+    it requires re-reading and processing the central directory every time you open the archive. The
+    issue is that we probably don't want to have too many archives open at a time since it's a bit
+    wasteful on memory.
+
+    What we're going to do is use a threshold of how many archives we want to keep open at any given
+    time. If we're over this threshold, we'll unload any archives that are no longer in use until we
+    get below the threshold.
+    */
+    e_fs_gc_archives(pOwnerFS, E_GC_POLICY_THRESHOLD);
+}
+
+static void e_gc_archives_nolock(e_fs* pFS, int policy)
+{
+    size_t unreferencedCount = 0;
+    size_t collectionCount = 0;
+    size_t cursor = 0;
+
+    E_ASSERT(pFS != NULL);
+
+    /*
+    If we're doing a full garbage collection we need to recursively run the garbage collection process
+    on opened archives.
+    */
+    if ((policy & E_GC_POLICY_FULL) != 0) {
+        cursor = 0;
+        while (cursor < pFS->openedArchivesSize) {
+            e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
+            E_ASSERT(pOpenedArchive != NULL);
+
+            e_fs_gc_archives(pOpenedArchive->pArchive, policy);
+            cursor += E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+        }
+    }
+
+
+    /* The first thing to do is count how many unreferenced archives there are. */
+    cursor = 0;
+    while (cursor < pFS->openedArchivesSize) {
+        e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
+
+        if (pOpenedArchive->refCount == 0) {
+            unreferencedCount += 1;
+        }
+
+        /* Getting here means this archive is not the one we're looking for. */
+        cursor += E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+    }
+
+    /* Now we need to determine how many archives we should unload. */
+    if ((policy & E_GC_POLICY_THRESHOLD) != 0) {
+        if (unreferencedCount > e_fs_get_archive_gc_threshold(pFS)) {
+            collectionCount = unreferencedCount - e_fs_get_archive_gc_threshold(pFS);
+        } else {
+            collectionCount = 0;    /* We're below the threshold. Don't collect anything. */
+        }
+    } else if ((policy & E_GC_POLICY_FULL) != 0) {
+        collectionCount = unreferencedCount;
+    } else {
+        E_ASSERT(!"Invalid GC policy.");
+    }
+
+    /* Now we need to unload the archives. */
+    cursor = 0;
+    while (collectionCount > 0 && cursor < pFS->openedArchivesSize) {
+        e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
+        if (pOpenedArchive->refCount == 0) {
+            e_file* pArchiveFile;
+
+            pArchiveFile = e_fs_proxy_get_archive_file(pOpenedArchive->pArchive);
+            E_ASSERT(pArchiveFile != NULL);
+
+            e_fs_uninit(pOpenedArchive->pArchive);
+            e_file_close(pArchiveFile);
+
+            /* We can remove the archive from the list only after it's been closed. */
+            e_remove_opened_archive(pFS, pOpenedArchive);
+
+            collectionCount -= 1;
+
+            /* Note that we're not advancing the cursor here because we just removed this entry. */
+        } else {
+            cursor += E_ALIGN(sizeof(e_fs*) + sizeof(size_t) + strlen(pOpenedArchive->pPath) + 1, E_SIZEOF_PTR);
+        }
+    }
+}
+
+E_API void e_fs_gc_archives(e_fs* pFS, int policy)
+{
+    if (pFS == NULL) {
+        return;
+    }
+
+    if (policy == 0 || ((policy & E_GC_POLICY_THRESHOLD) != 0 && (policy & E_GC_POLICY_FULL) != 0)) {
+        return; /* Invalid policy. Must specify E_GC_POLICY_THRESHOLD or E_GC_POLICY_FULL, but not both. */
+    }
+
+    e_mutex_lock(&pFS->archiveLock);
+    {
+        e_gc_archives_nolock(pFS, policy);
+    }
+    e_mutex_unlock(&pFS->archiveLock);
+}
+
+E_API void e_fs_set_archive_gc_threshold(e_fs* pFS, size_t threshold)
+{
+    if (pFS == NULL) {
+        return;
+    }
+
+    pFS->archiveGCThreshold = threshold;
+}
+
+E_API size_t e_fs_get_archive_gc_threshold(e_fs* pFS)
+{
+    if (pFS == NULL) {
+        return 0;
+    }
+
+    return pFS->archiveGCThreshold;
+}
+
+
+static size_t e_file_duplicate_alloc_size(e_fs* pFS)
+{
+    return sizeof(e_file) + e_fs_backend_file_alloc_size(e_get_backend_or_default(pFS), pFS);
+}
+
+static void e_file_preinit_no_stream(e_file* pFile, e_fs* pFS, size_t backendDataSize)
+{
+    E_ASSERT(pFile != NULL);
+
+    pFile->pFS = pFS;
+    pFile->backendDataSize = backendDataSize;
+}
+
+static void e_file_uninit(e_file* pFile);
+
+
+static e_result e_file_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    return e_file_read((e_file*)pStream, pDst, bytesToRead, pBytesRead);
+}
+
+static e_result e_file_stream_write(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    return e_file_write((e_file*)pStream, pSrc, bytesToWrite, pBytesWritten);
+}
+
+static e_result e_file_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin origin)
+{
+    return e_file_seek((e_file*)pStream, offset, origin);
+}
+
+static e_result e_file_stream_tell(e_stream* pStream, e_int64* pCursor)
+{
+    return e_file_tell((e_file*)pStream, pCursor);
+}
+
+static size_t e_file_stream_alloc_size(e_stream* pStream)
+{
+    return e_file_duplicate_alloc_size(e_file_get_fs((e_file*)pStream));
+}
+
+static e_result e_file_stream_duplicate(e_stream* pStream, e_stream* pDuplicatedStream)
+{
+    e_result result;
+    e_file* pStreamFile = (e_file*)pStream;
+    e_file* pDuplicatedStreamFile = (e_file*)pDuplicatedStream;
+
+    E_ASSERT(pStreamFile != NULL);
+    E_ASSERT(pDuplicatedStreamFile != NULL);
+
+    /* The stream will already have been initialized at a higher level in e_stream_duplicate(). */
+    e_file_preinit_no_stream(pDuplicatedStreamFile, e_file_get_fs(pStreamFile), pStreamFile->backendDataSize);
+
+    result = e_fs_backend_file_duplicate(e_get_backend_or_default(pStreamFile->pFS), pStreamFile, pDuplicatedStreamFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_file_stream_uninit(e_stream* pStream)
+{
+    /* We need to uninitialize the file, but *not* free it. Freeing will be done at a higher level in e_stream_delete_duplicate(). */
+    e_file_uninit((e_file*)pStream);
+}
+
+static e_stream_vtable e_file_stream_vtable =
+{
+    e_file_stream_read,
+    e_file_stream_write,
+    e_file_stream_seek,
+    e_file_stream_tell,
+    e_file_stream_alloc_size,
+    e_file_stream_duplicate,
+    e_file_stream_uninit
+};
+
+
+
+
+static const e_fs_backend* e_file_get_backend(e_file* pFile)
+{
+    return e_get_backend_or_default(e_file_get_fs(pFile));
+}
+
+static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile, e_file_info* pInfo)
+{
+    /*
+    NOTE: A lot of return values are E_DOES_NOT_EXIST. This is because this function will only be called
+    in response to a E_DOES_NOT_EXIST in the first call to e_file_open() which makes this a logical result.
+    */
+    e_result result;
+    e_path_iterator iFilePathSeg;
+    e_path_iterator iFilePathSegLast;
+
+    E_ASSERT(pFS != NULL);
+
+    /*
+    We can never open from an archive if we're opening in opaque mode. This mode is intended to
+    be used such that only files exactly represented in the file system can be opened.
+    */
+    if (E_IS_OPAQUE(openMode)) {    
+        return E_DOES_NOT_EXIST;
+    }
+
+    /* If no archive types have been configured we can abort early. */
+    if (pFS->archiveTypesAllocSize == 0) {
+        return E_DOES_NOT_EXIST;
+    }
+
+    /*
+    We need to iterate over each segment in the path and then iterate over each file in that folder and
+    check for archives. If we find an archive we simply try loading from that. Note that if the path
+    segment itself points to an archive, we *must* open it from that archive because the caller has
+    explicitly asked for that archive.
+    */
+    if (e_path_first(pFilePath, E_NULL_TERMINATED, &iFilePathSeg) != E_SUCCESS) {
+        return E_DOES_NOT_EXIST;
+    }
+
+    /* Grab the last part of the file path so we can check if we're up to the file name. */
+    e_path_last(pFilePath, E_NULL_TERMINATED, &iFilePathSegLast);
+
+    do
+    {
+        e_result backendIteratorResult;
+        e_registered_backend_iterator iBackend;
+        e_bool32 isArchive = E_FALSE;
+
+        /* Skip over "." and ".." segments. */
+        if (e_strncmp(iFilePathSeg.pFullPath, ".", iFilePathSeg.segmentLength) == 0) {
+            continue;
+        }
+        if (e_strncmp(iFilePathSeg.pFullPath, "..", iFilePathSeg.segmentLength) == 0) {
+            continue;
+        }
+
+        /* If an archive has been explicitly listed in the path, we must try loading from that. */
+        for (backendIteratorResult = e_first_registered_backend(pFS, &iBackend); backendIteratorResult == E_SUCCESS; backendIteratorResult = e_next_registered_backend(&iBackend)) {
+            if (e_path_extension_equal(iFilePathSeg.pFullPath + iFilePathSeg.segmentOffset, iFilePathSeg.segmentLength, iBackend.pExtension, iBackend.extensionLen)) {
+                isArchive = E_TRUE;
+
+                /* This path points to an explicit archive. If this is the file we're trying to actually load, we'll want to handle that too. */
+                if (e_path_iterators_compare(&iFilePathSeg, &iFilePathSegLast) == 0) {
+                    /*
+                    The archive file itself is the last segment in the path which means that's the file
+                    we're actually trying to load. We shouldn't need to try opening this here because if
+                    it existed and was able to be opened, it should have been done so at a higher level.
+                    */
+                    return E_DOES_NOT_EXIST;
+                } else {
+                    e_fs* pArchive;
+
+                    result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, iFilePathSeg.pFullPath, iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength, E_OPAQUE | openMode, &pArchive);
+                    if (result != E_SUCCESS) {
+                        /*
+                        We failed to open the archive. If it's due to the archive not existing we just continue searching. Otherwise
+                        a proper error code needs to be returned.
+                        */
+                        if (result != E_DOES_NOT_EXIST) {
+                            return result;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    result = e_file_open_or_info(pArchive, iFilePathSeg.pFullPath + iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1, openMode, ppFile, pInfo);
+                    if (result != E_SUCCESS) {
+                        e_close_archive(pArchive);
+                        return result;
+                    }
+
+                    if (ppFile != NULL) {
+                        /* The archive must be unreferenced when closing the file. */
+                        e_file_proxy_set_unref_archive_on_close(*ppFile, E_TRUE);
+                    } else {
+                        /* We were only grabbing file info. We can close the archive straight away. */
+                        e_close_archive(pArchive);
+                    }
+
+                    return E_SUCCESS;
+                }
+            }
+        }
+
+        /* If the path has an extension of an archive, but we still manage to get here, it means the archive doesn't exist. */
+        if (isArchive) {
+            return E_DOES_NOT_EXIST;
+        }
+
+        /*
+        Getting here means this part of the path does not look like an archive. We will assume it's a folder and try
+        iterating it using opaque mode to get the contents.
+        */
+        if (E_IS_VERBOSE(openMode)) {
+            /*
+            The caller has requested opening in verbose mode. In this case we don't want to be scanning for
+            archives. Instead, any archives will be explicitly listed in the path. We just skip this path in
+            this case.
+            */
+            continue;
+        } else {
+            /*
+            Getting here means we're opening in transparent mode. We'll need to search for archives and check
+            them one by one. This is the slow path.
+
+            To do this we opaquely iterate over each file in the currently iterated file path. If any of these
+            files are recognized as archives, we'll load up that archive and then try opening the file from
+            there. If it works we return, otherwise we unload that archive and keep trying.
+            */
+            e_fs_iterator* pIterator;
+
+            for (pIterator = e_fs_backend_first(e_get_backend_or_default(pFS), pFS, iFilePathSeg.pFullPath, iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength); pIterator != NULL; pIterator = e_fs_backend_next(e_get_backend_or_default(pFS), pIterator)) {
+                for (backendIteratorResult = e_first_registered_backend(pFS, &iBackend); backendIteratorResult == E_SUCCESS; backendIteratorResult = e_next_registered_backend(&iBackend)) {
+                    if (e_path_extension_equal(pIterator->pName, pIterator->nameLen, iBackend.pExtension, iBackend.extensionLen)) {
+                        /* Looks like an archive. We can load this one up and try opening from it. */
+                        e_fs* pArchive;
+                        char pArchivePathNTStack[1024];
+                        char* pArchivePathNTHeap = NULL;    /* <-- Must be initialized to null. */
+                        char* pArchivePathNT;
+                        size_t archivePathLen;
+
+                        archivePathLen = iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1 + pIterator->nameLen;
+                        if (archivePathLen >= sizeof(pArchivePathNTStack)) {
+                            pArchivePathNTHeap = (char*)e_malloc(archivePathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                            if (pArchivePathNTHeap == NULL) {
+                                e_fs_backend_free_iterator(e_get_backend_or_default(pFS), pIterator);
+                                return E_OUT_OF_MEMORY;
+                            }
+
+                            pArchivePathNT = pArchivePathNTHeap;
+                        } else {
+                            pArchivePathNT = pArchivePathNTStack;
+                        }
+
+                        E_COPY_MEMORY(pArchivePathNT, iFilePathSeg.pFullPath, iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength);
+                        pArchivePathNT[iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength] = '/';
+                        E_COPY_MEMORY(pArchivePathNT + iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1, pIterator->pName, pIterator->nameLen);
+                        pArchivePathNT[archivePathLen] = '\0';
+
+                        /* At this point we've constructed the archive name and we can now open it. */
+                        result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, pArchivePathNT, E_NULL_TERMINATED, E_OPAQUE | openMode, &pArchive);
+                        e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
+
+                        if (result != E_SUCCESS) { /* <-- This is checking the result of e_open_archive_ex(). */
+                            continue;   /* Failed to open this archive. Keep looking. */
+                        }
+
+                        /*
+                        Getting here means we've successfully opened the archive. We can now try opening the file
+                        from there. The path we load from will be the next segment in the path.
+                        */
+                        result = e_file_open_or_info(pArchive, iFilePathSeg.pFullPath + iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1, openMode, ppFile, pInfo);  /* +1 to skip the separator. */
+                        if (result != E_SUCCESS) {
+                            e_close_archive(pArchive);
+                            continue;  /* Failed to open the file. Keep looking. */
+                        }
+
+                        /* The iterator is no longer required. */
+                        e_fs_backend_free_iterator(e_get_backend_or_default(pFS), pIterator);
+                        pIterator = NULL;
+
+                        if (ppFile != NULL) {
+                            /* The archive must be unreferenced when closing the file. */
+                            e_file_proxy_set_unref_archive_on_close(*ppFile, E_TRUE);
+                        } else {
+                            /* We were only grabbing file info. We can close the archive straight away. */
+                            e_close_archive(pArchive);
+                        }
+
+                        /* Getting here means we successfully opened the file. We're done. */
+                        return E_SUCCESS;
+                    }
+                }
+
+                /*
+                Getting here means this file could not be loaded from any registered archive types. Just move on
+                to the next file.
+                */
+            }
+
+            /*
+            Getting here means we couldn't find the file within any known archives in this directory. From here
+            we just move onto the segment segment in the path and keep looking.
+            */
+        }
+    } while (e_path_next(&iFilePathSeg) == E_SUCCESS);
+    
+    /* Getting here means we reached the end of the path and never did find the file. */
+    return E_DOES_NOT_EXIST;
+}
+
+static e_result e_file_alloc(e_fs* pFS, e_file** ppFile)
+{
+    e_file* pFile;
+    e_result result;
+    const e_fs_backend* pBackend;
+    size_t backendDataSizeInBytes = 0;
+
+    E_ASSERT(ppFile != NULL);
+    E_ASSERT(*ppFile == NULL);  /* <-- File must not already be allocated when calling this. */
+
+    pBackend = e_get_backend_or_default(pFS);
+    E_ASSERT(pBackend != NULL);
+
+    backendDataSizeInBytes = e_fs_backend_file_alloc_size(pBackend, pFS);
+
+    pFile = (e_file*)e_calloc(sizeof(e_file) + backendDataSizeInBytes, e_fs_get_allocation_callbacks(pFS));
+    if (pFile == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    /* A file is a stream. */
+    result = e_stream_init(&e_file_stream_vtable, &pFile->stream);
+    if (result != 0) {
+        e_free(pFile, e_fs_get_allocation_callbacks(pFS));
+        return result;
+    }
+
+    pFile->pFS = pFS;
+    pFile->backendDataSize = backendDataSizeInBytes;
+
+    *ppFile = pFile;
+    return E_SUCCESS;
+}
+
+static e_result e_file_alloc_if_necessary(e_fs* pFS, e_file** ppFile)
+{
+    E_ASSERT(ppFile != NULL);
+
+    if (*ppFile == NULL) {
+        return e_file_alloc(pFS, ppFile);
+    } else {
+        return E_SUCCESS;
+    }
+}
+
+static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile, e_file_info* pInfo)
+{
+    e_result result;
+    const e_fs_backend* pBackend;
+
+    if (ppFile != NULL) {
+        result = e_file_alloc_if_necessary(pFS, ppFile);
+        if (result != E_SUCCESS) {
+            *ppFile = NULL;
+            return result;
+        }
+    }
+
+    pBackend = e_get_backend_or_default(pFS);
+
+    if (pBackend == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    Take a copy of the file system's stream if necessary. We only need to do this if we're opening the file, and if
+    the owner `e_fs` object `pFS` has itself has a stream.
+    */
+    if (pFS != NULL && ppFile != NULL) {
+        e_stream* pFSStream = pFS->pStream;
+        if (pFSStream != NULL) {
+            result = e_stream_duplicate(pFSStream, e_fs_get_allocation_callbacks(pFS), &(*ppFile)->pStreamForBackend);
+            if (result != E_SUCCESS) {
+                return result;
+            }
+        }
+    }
+
+    /*
+    This is the lowest level opening function. We never want to look at mounts when opening from here. The input
+    file path should already be prefixed with the mount point.
+
+    UPDATE: Actually don't want to explicitly append E_IGNORE_MOUNTS here because it can affect the behavior of
+    proxy and passthrough style backends. Some backends, particularly E_SUBFS, will call straight into the owner
+    `e_fs` object which might depend on those mounts being handled for correct behaviour.
+    */
+    /*openMode |= E_IGNORE_MOUNTS;*/
+
+    if (ppFile != NULL) {
+        /* Create the directory structure if necessary. */
+        if ((openMode & E_WRITE) != 0 && (openMode & E_NO_CREATE_DIRS) == 0) {
+            char pDirPathStack[1024];
+            char* pDirPathHeap = NULL;
+            char* pDirPath;
+            int dirPathLen;
+
+            dirPathLen = e_path_directory(pDirPathStack, sizeof(pDirPathStack), pFilePath, E_NULL_TERMINATED);
+            if (dirPathLen >= (int)sizeof(pDirPathStack)) {
+                pDirPathHeap = (char*)e_malloc(dirPathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                if (pDirPathHeap == NULL) {
+                    return E_OUT_OF_MEMORY;
+                }
+
+                dirPathLen = e_path_directory(pDirPathHeap, dirPathLen + 1, pFilePath, E_NULL_TERMINATED);
+                if (dirPathLen < 0) {
+                    e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+                    e_free(pDirPathHeap, e_fs_get_allocation_callbacks(pFS));
+                    return E_ERROR;    /* Should never hit this. */
+                }
+
+                pDirPath = pDirPathHeap;
+            } else {
+                pDirPath = pDirPathStack;
+            }
+
+            result = e_fs_mkdir(pFS, pDirPath);
+            if (result != E_SUCCESS) {
+                e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+                return result;
+            }
+        }
+
+        result = e_fs_backend_file_open(pBackend, pFS, (*ppFile)->pStreamForBackend, pFilePath, openMode, *ppFile);
+
+        if (result != E_SUCCESS) {
+            e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+        }
+
+        /* Grab the info from the opened file if we're also grabbing that. */
+        if (result == E_SUCCESS && pInfo != NULL) {
+            e_fs_backend_file_info(pBackend, *ppFile, pInfo);
+        }
+    } else {
+        if (pInfo != NULL) {
+            result = e_fs_backend_info(pBackend, pFS, pFilePath, openMode, pInfo);
+        } else {
+            result = E_INVALID_ARGS;
+        }
+    }
+
+    if (!E_IS_OPAQUE(openMode) && (openMode & E_WRITE) == 0) {
+        /*
+        If we failed to open the file because it doesn't exist we need to try loading it from an
+        archive. We can only do this if the file is being loaded by an explicitly initialized e_fs
+        object.
+        */
+        if (pFS != NULL && (result == E_DOES_NOT_EXIST || result == E_NOT_DIRECTORY)) {
+            if (ppFile != NULL) {
+                e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
+                *ppFile = NULL;
+            }
+
+            result = e_open_or_info_from_archive(pFS, pFilePath, openMode, ppFile, pInfo);
+        }
+    }
+
+    return result;
+}
+
+static e_result e_validate_path(const char* pPath, size_t pathLen, int mode)
+{
+    if ((mode & E_NO_SPECIAL_DIRS) != 0) {
+        e_path_iterator iPathSeg;
+        e_result result;
+
+        for (result = e_path_first(pPath, pathLen, &iPathSeg); result == E_SUCCESS; result = e_path_next(&iPathSeg)) {
+            if (e_strncmp(iPathSeg.pFullPath, ".", iPathSeg.segmentLength) == 0) {
+                return E_INVALID_ARGS;
+            }
+
+            if (e_strncmp(iPathSeg.pFullPath, "..", iPathSeg.segmentLength) == 0) {
+                return E_INVALID_ARGS;
+            }
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_file_open_or_info(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile, e_file_info* pInfo)
+{
+    e_result result;
+    e_result mountPointIerationResult;
+
+    if (ppFile == NULL && pInfo == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pFilePath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* The open mode cannot be 0 when opening a file. It can only be 0 when retrieving info. */
+    if (ppFile != NULL && openMode == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_validate_path(pFilePath, E_NULL_TERMINATED, openMode);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if ((openMode & E_WRITE) != 0) {
+        /*
+        Opening in write mode. We need to open from a mount point. This is a bit different from opening
+        in read mode because we want to use the mount point that most closely matches the start of the
+        file path. Consider, for example, the following mount points:
+
+            - config
+            - config/global
+
+        If we're trying to open "config/global/settings.cfg" we want to use the "config/global" mount
+        point, not the "config" mount point. This is because the "config/global" mount point is more
+        specific and therefore more likely to be the correct one.
+
+        We'll need to iterate over every mount point and keep track of the mount point with the longest
+        prefix that matches the start of the file path.
+        */
+        if (pFS != NULL) {
+            e_mount_list_iterator iMountPoint;
+            e_mount_point* pBestMountPoint = NULL;
+            const char* pBestMountPointPath = NULL;
+            const char* pBestMountPointFileSubPath = NULL;
+            
+            for (mountPointIerationResult = e_mount_list_first(pFS->pWriteMountPoints, &iMountPoint); mountPointIerationResult == E_SUCCESS; mountPointIerationResult = e_mount_list_next(&iMountPoint)) {
+                const char* pFileSubPath = e_path_trim_base(pFilePath, E_NULL_TERMINATED, iMountPoint.pMountPointPath, E_NULL_TERMINATED);
+                if (pFileSubPath == NULL) {
+                    continue;   /* The file path doesn't start with this mount point so skip. */
+                }
+
+                if (pBestMountPointFileSubPath == NULL || strlen(pFileSubPath) < strlen(pBestMountPointFileSubPath)) {
+                    pBestMountPoint = iMountPoint.internal.pMountPoint;
+                    pBestMountPointPath = iMountPoint.pPath;
+                    pBestMountPointFileSubPath = pFileSubPath;
+                }
+            }
+
+            if (pBestMountPoint != NULL) {
+                char pActualPathStack[1024];
+                char* pActualPathHeap = NULL;
+                char* pActualPath;
+                int actualPathLen;
+                char pActualPathCleanStack[1024];
+                char* pActualPathCleanHeap = NULL;
+                char* pActualPathClean;
+                int actualPathCleanLen;
+                unsigned int cleanOptions = (openMode & E_NO_ABOVE_ROOT_NAVIGATION);            
+
+                /* If the mount point starts with a root segment, i.e. "/", we cannot allow navigation above that. */
+                if (pBestMountPointPath[0] == '/' || pBestMountPointPath[0] == '\\') {
+                    cleanOptions |= E_NO_ABOVE_ROOT_NAVIGATION;
+                }
+
+
+                /* Here is where we append the cleaned sub-path to the mount points actual path. */
+                actualPathLen = e_path_append(pActualPathStack, sizeof(pActualPathStack), pBestMountPointPath, pBestMountPoint->pathLen, pBestMountPointFileSubPath, E_NULL_TERMINATED);
+                if (actualPathLen > 0 && (size_t)actualPathLen >= sizeof(pActualPathStack)) {
+                    /* Not enough room on the stack. Allocate on the heap. */
+                    pActualPathHeap = (char*)e_malloc(actualPathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                    if (pActualPathHeap == NULL) {
+                        return E_OUT_OF_MEMORY;
+                    }
+
+                    e_path_append(pActualPathHeap, actualPathLen + 1, pBestMountPointPath, pBestMountPoint->pathLen, pBestMountPointFileSubPath, E_NULL_TERMINATED);  /* <-- This should never fail. */
+                    pActualPath = pActualPathHeap;
+                } else {
+                    pActualPath = pActualPathStack;
+                }
+
+
+                /* Now we need to clean the path. */
+                actualPathCleanLen = e_path_normalize(pActualPathCleanStack, sizeof(pActualPathCleanStack), pActualPath, E_NULL_TERMINATED, cleanOptions);
+                if (actualPathCleanLen < 0) {
+                    e_free(pActualPathHeap, e_fs_get_allocation_callbacks(pFS));
+                    return E_INVALID_OPERATION;    /* Most likely violating E_NO_ABOVE_ROOT_NAVIGATION. */
+                }
+
+                if (actualPathCleanLen >= (int)sizeof(pActualPathCleanStack)) {
+                    pActualPathCleanHeap = (char*)e_malloc(actualPathCleanLen + 1, e_fs_get_allocation_callbacks(pFS));
+                    if (pActualPathCleanHeap == NULL) {
+                        e_free(pActualPathHeap, e_fs_get_allocation_callbacks(pFS));
+                        return E_OUT_OF_MEMORY;
+                    }
+
+                    e_path_normalize(pActualPathCleanHeap, actualPathCleanLen + 1, pActualPath, E_NULL_TERMINATED, cleanOptions);    /* <-- This should never fail. */
+                    pActualPathClean = pActualPathCleanHeap;
+                } else {
+                    pActualPathClean = pActualPathCleanStack;
+                }
+
+                e_free(pActualPathHeap, e_fs_get_allocation_callbacks(pFS));
+                pActualPathHeap = NULL;
+
+
+                /* We now have enough information to open the file. */
+                result = e_file_alloc_if_necessary_and_open_or_info(pFS, pActualPathClean, openMode, ppFile, pInfo);
+
+                e_free(pActualPathCleanHeap, e_fs_get_allocation_callbacks(pFS));
+                pActualPathCleanHeap = NULL;
+
+                if (result == E_SUCCESS) {
+                    return E_SUCCESS;
+                } else {
+                    return E_DOES_NOT_EXIST;   /* Couldn't find the file from the best mount point. */
+                }
+            } else {
+                return E_DOES_NOT_EXIST;   /* Couldn't find an appropriate mount point. */
+            }
+        } else {
+            /*
+            No "e_fs" object was supplied. Open using the default backend without using mount points. This is as if you were
+            opening a file using `fopen()`.
+            */
+            if ((openMode & E_ONLY_MOUNTS) == 0) {
+                return e_file_alloc_if_necessary_and_open_or_info(pFS, pFilePath, openMode, ppFile, pInfo);
+            } else {
+                /*
+                Getting here means only the mount points can be used to open the file (cannot open straight from
+                the file system natively).
+                */
+                return E_DOES_NOT_EXIST;
+            }
+        }
+    } else {
+        /* Opening in read mode. */
+        e_mount_list_iterator iMountPoint;
+
+        if (pFS != NULL && (openMode & E_IGNORE_MOUNTS) == 0) {
+            for (mountPointIerationResult = e_mount_list_first(pFS->pReadMountPoints, &iMountPoint); mountPointIerationResult == E_SUCCESS; mountPointIerationResult = e_mount_list_next(&iMountPoint)) {
+                /*
+                The first thing to do is check if the start of our file path matches the mount point. If it
+                doesn't match we just skip to the next mount point.
+                */
+                char  pFileSubPathCleanStack[1024];
+                char* pFileSubPathCleanHeap = NULL;
+                char* pFileSubPathClean;
+                int fileSubPathCleanLen;
+                unsigned int cleanOptions = (openMode & E_NO_ABOVE_ROOT_NAVIGATION);
+
+                const char* pFileSubPath = e_path_trim_base(pFilePath, E_NULL_TERMINATED, iMountPoint.pMountPointPath, E_NULL_TERMINATED);
+                if (pFileSubPath == NULL) {
+                    continue;
+                }
+
+
+                /* If the mount point starts with a root segment, i.e. "/", we cannot allow navigation above that. */
+                if (iMountPoint.pMountPointPath[0] == '/' || iMountPoint.pMountPointPath[0] == '\\') {
+                    cleanOptions |= E_NO_ABOVE_ROOT_NAVIGATION;
+                }
+
+                /* We need to clean the file sub-path, but can skip it if E_NO_SPECIAL_DIRS is specified since it's implied. */
+                if ((openMode & E_NO_SPECIAL_DIRS) == 0) {
+                    fileSubPathCleanLen = e_path_normalize(pFileSubPathCleanStack, sizeof(pFileSubPathCleanStack), pFileSubPath, E_NULL_TERMINATED, cleanOptions);
+                    if (fileSubPathCleanLen < 0) {
+                        continue;    /* Most likely violating E_NO_ABOVE_ROOT_NAVIGATION. Keep looking. */
+                    }
+
+                    if (fileSubPathCleanLen >= (int)sizeof(pFileSubPathCleanStack)) {
+                        pFileSubPathCleanHeap = (char*)e_malloc(fileSubPathCleanLen + 1, e_fs_get_allocation_callbacks(pFS));
+                        if (pFileSubPathCleanHeap == NULL) {
+                            return E_OUT_OF_MEMORY;
+                        }
+
+                        e_path_normalize(pFileSubPathCleanHeap, fileSubPathCleanLen + 1, pFileSubPath, E_NULL_TERMINATED, cleanOptions);    /* <-- This should never fail. */
+                        pFileSubPathClean = pFileSubPathCleanHeap;
+                    } else {
+                        pFileSubPathClean = pFileSubPathCleanStack;
+                    }
+                } else {
+                    pFileSubPathClean = (char*)pFileSubPath;  /* Safe cast. Will not be modified past this point. */
+                    fileSubPathCleanLen = (int)strlen(pFileSubPathClean);
+                }
+
+
+                /* The mount point could either be a directory or an archive. Both of these require slightly different handling. */
+                if (iMountPoint.pArchive != NULL) {
+                    /* The mount point is an archive. This is the simpler case. We just load the file directly from the archive. */
+                    result = e_file_open_or_info(iMountPoint.pArchive, pFileSubPathClean, openMode, ppFile, pInfo);
+                    if (result == E_SUCCESS) {
+                        /*
+                        The reference count of the archive must be incremented or else it'll get prematurely garbage collected. We only
+                        need to do this if we're opening the file. It's not necessary if we're just grabbing file info.
+                        */
+                        if (ppFile != NULL) {
+                            e_increment_opened_archive_ref_count(pFS, iMountPoint.pArchive);
+                        }
+
+                        return E_SUCCESS;
+                    } else {
+                        /* Failed to load from this archive. Keep looking. */
+                    }
+                } else {
+                    /* The mount point is a directory. We need to combine the sub-path with the mount point's original path and then load the file. */
+                    char  pActualPathStack[1024];
+                    char* pActualPathHeap = NULL;
+                    char* pActualPath;
+                    int actualPathLen;
+
+                    actualPathLen = e_path_append(pActualPathStack, sizeof(pActualPathStack), iMountPoint.pPath, E_NULL_TERMINATED, pFileSubPathClean, fileSubPathCleanLen);
+                    if (actualPathLen > 0 && (size_t)actualPathLen >= sizeof(pActualPathStack)) {
+                        /* Not enough room on the stack. Allocate on the heap. */
+                        pActualPathHeap = (char*)e_malloc(actualPathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                        if (pActualPathHeap == NULL) {
+                            return E_OUT_OF_MEMORY;
+                        }
+
+                        e_path_append(pActualPathHeap, actualPathLen + 1, iMountPoint.pPath, E_NULL_TERMINATED, pFileSubPathClean, fileSubPathCleanLen);   /* <-- This should never fail. */
+                        pActualPath = pActualPathHeap;
+                    } else {
+                        pActualPath = pActualPathStack;
+                    }
+
+                    result = e_file_alloc_if_necessary_and_open_or_info(pFS, pActualPath, openMode, ppFile, pInfo);
+
+                    if (pActualPathHeap != NULL) {
+                        e_free(pActualPathHeap, e_fs_get_allocation_callbacks(pFS));
+                        pActualPathHeap = NULL;
+                    }
+
+                    if (result == E_SUCCESS) {
+                        return E_SUCCESS;
+                    } else {
+                        /* Failed to load from this directory. Keep looking. */
+                    }
+                }
+            }
+        }
+
+        /* If we get here it means we couldn't find the file from our search paths. Try opening directly. */
+        if ((openMode & E_ONLY_MOUNTS) == 0) {
+            result = e_file_alloc_if_necessary_and_open_or_info(pFS, pFilePath, openMode, ppFile, pInfo);
+            if (result == E_SUCCESS) {
+                return E_SUCCESS;
+            }
+        } else {
+            /*
+            Getting here means only the mount points can be used to open the file (cannot open straight from
+            the file system natively) and the file was unable to be opened from any of them. We need to
+            return an error in this case.
+            */
+            result = E_DOES_NOT_EXIST;
+        }
+
+        /* Getting here means we couldn't open the file from any mount points, nor could we open it directly. */
+        if (ppFile != NULL) {
+            e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
+            *ppFile = NULL;
+        }
+    }
+
+    E_ASSERT(result != E_SUCCESS);
+    return result;
+}
+
+E_API e_result e_file_open(e_fs* pFS, const char* pFilePath, int openMode, e_file** ppFile)
+{
+    if (ppFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppFile = NULL;
+
+    return e_file_open_or_info(pFS, pFilePath, openMode, ppFile, NULL);
+}
+
+E_API e_result e_file_open_from_handle(e_fs* pFS, void* hBackendFile, e_file** ppFile)
+{
+    e_result result;
+
+    if (ppFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppFile = NULL;
+
+    result = e_file_alloc_if_necessary(pFS, ppFile);
+    if (result != E_SUCCESS) {
+        *ppFile = NULL;
+        return result;
+    }
+
+    result = e_fs_backend_file_open_handle(e_get_backend_or_default(pFS), pFS, hBackendFile, *ppFile);
+    if (result != E_SUCCESS) {
+        e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
+        *ppFile = NULL;
+    }
+
+    return E_SUCCESS;
+}
+
+static void e_file_uninit(e_file* pFile)
+{
+    e_fs_backend_file_close(e_get_backend_or_default(e_file_get_fs(pFile)), pFile);
+}
+
+E_API void e_file_close(e_file* pFile)
+{
+    const e_fs_backend* pBackend = e_file_get_backend(pFile);
+
+    E_ASSERT(pBackend != NULL);
+    (void)pBackend;
+
+    if (pFile == NULL) {
+        return;
+    }
+
+    e_file_uninit(pFile);
+
+    if (pFile->pStreamForBackend != NULL) {
+        e_stream_delete_duplicate(pFile->pStreamForBackend, e_fs_get_allocation_callbacks(pFile->pFS));
+    }
+
+    e_free(pFile, e_fs_get_allocation_callbacks(pFile->pFS));
+}
+
+E_API e_result e_file_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    e_result result;
+    size_t bytesRead;
+    const e_fs_backend* pBackend;
+
+    if (pFile == NULL || pDst == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    bytesRead = 0;  /* <-- Just in case the backend doesn't clear this to zero. */
+    result = e_fs_backend_file_read(pBackend, pFile, pDst, bytesToRead, &bytesRead);
+
+    if (pBytesRead != NULL) {
+        *pBytesRead = bytesRead;
+    }
+
+    if (result != E_SUCCESS) {
+        /* We can only return E_AT_END if the number of bytes read was 0. */
+        if (result == E_AT_END) {
+            if (bytesRead > 0) {
+                result = E_SUCCESS;
+            }
+        }
+
+        return result;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_file_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+{
+    e_result result;
+    size_t bytesWritten;
+    const e_fs_backend* pBackend;
+
+    if (pFile == NULL || pSrc == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    bytesWritten = 0;  /* <-- Just in case the backend doesn't clear this to zero. */
+    result = e_fs_backend_file_write(pBackend, pFile, pSrc, bytesToWrite, &bytesWritten);
+
+    if (pBytesWritten != NULL) {
+        *pBytesWritten = bytesWritten;
+    }
+
+    return result;
+}
+
+E_API e_result e_file_writef(e_file* pFile, const char* fmt, ...)
+{
+    va_list args;
+    e_result result;
+
+    va_start(args, fmt);
+    result = e_file_writefv(pFile, fmt, args);
+    va_end(args);
+
+    return result;
+}
+
+E_API e_result e_file_writefv(e_file* pFile, const char* fmt, va_list args)
+{
+    return e_stream_writefv(e_file_get_stream(pFile), fmt, args);
+}
+
+E_API e_result e_file_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
+{
+    const e_fs_backend* pBackend;
+
+    if (pFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    return e_fs_backend_file_seek(pBackend, pFile, offset, origin);
+}
+
+E_API e_result e_file_tell(e_file* pFile, e_int64* pOffset)
+{
+    const e_fs_backend* pBackend;
+
+    if (pOffset == NULL) {
+        return E_INVALID_ARGS;  /* Doesn't make sense to be calling this without an output parameter. */
+    }
+
+    *pOffset = 0;
+
+    if (pFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    return e_fs_backend_file_tell(pBackend, pFile, pOffset);
+}
+
+E_API e_result e_file_flush(e_file* pFile)
+{
+    const e_fs_backend* pBackend;
+
+    if (pFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    return e_fs_backend_file_flush(pBackend, pFile);
+}
+
+E_API e_result e_file_get_info(e_file* pFile, e_file_info* pInfo)
+{
+    const e_fs_backend* pBackend;
+
+    if (pInfo == NULL) {
+        return E_INVALID_ARGS;  /* It doesn't make sense to call this without an info parameter. */
+    }
+
+    memset(pInfo, 0, sizeof(*pInfo));
+
+    if (pFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pBackend = e_file_get_backend(pFile);
+    E_ASSERT(pBackend != NULL);
+
+    return e_fs_backend_file_info(pBackend, pFile, pInfo);
+}
+
+E_API e_result e_file_duplicate(e_file* pFile, e_file** ppDuplicate)
+{
+    e_result result;
+
+    if (ppDuplicate == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    *ppDuplicate = NULL;
+
+    if (pFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_file_alloc(pFile->pFS, ppDuplicate);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    return e_fs_backend_file_duplicate(e_get_backend_or_default(e_file_get_fs(pFile)), pFile, *ppDuplicate);
+}
+
+E_API void* e_file_get_backend_data(e_file* pFile)
+{
+    if (pFile == NULL) {
+        return NULL;
+    }
+
+    return E_OFFSET_PTR(pFile, sizeof(e_file));
+}
+
+E_API size_t e_file_get_backend_data_size(e_file* pFile)
+{
+    if (pFile == NULL) {
+        return 0;
+    }
+
+    return pFile->backendDataSize;
+}
+
+E_API e_stream* e_file_get_stream(e_file* pFile)
+{
+    return (e_stream*)pFile;
+}
+
+E_API e_fs* e_file_get_fs(e_file* pFile)
+{
+    if (pFile == NULL) {
+        return NULL;
+    }
+
+    return pFile->pFS;
+}
+
+
+typedef struct e_iterator_item
+{
+    size_t nameLen;
+    e_file_info info;
+} e_iterator_item;
+
+typedef struct e_iterator_internal
+{
+    e_fs_iterator base;
+    size_t itemIndex;   /* The index of the current item we're iterating. */
+    size_t itemCount;
+    size_t itemDataSize;
+    size_t dataSize;
+    size_t allocSize;
+    e_iterator_item** ppItems;
+} e_iterator_internal;
+
+static size_t e_iterator_item_sizeof(size_t nameLen)
+{
+    return E_ALIGN(sizeof(e_iterator_item) + nameLen + 1, E_SIZEOF_PTR);   /* +1 for the null terminator. */
+}
+
+static char* e_iterator_item_name(e_iterator_item* pItem)
+{
+    return (char*)pItem + sizeof(*pItem);
+}
+
+static void e_iterator_internal_resolve_public_members(e_iterator_internal* pIterator)
+{
+    E_ASSERT(pIterator != NULL);
+
+    pIterator->base.pName   = e_iterator_item_name(pIterator->ppItems[pIterator->itemIndex]);
+    pIterator->base.nameLen = pIterator->ppItems[pIterator->itemIndex]->nameLen;
+    pIterator->base.info    = pIterator->ppItems[pIterator->itemIndex]->info;
+}
+
+static e_iterator_item* e_iterator_internal_find(e_iterator_internal* pIterator, const char* pName)
+{
+    /*
+    We cannot use ppItems here because this function will be called before that has been set up. Instead we need
+    to use a cursor and run through each item linearly. This is unsorted.
+    */
+    size_t iItem;
+    size_t cursor = 0;
+
+    for (iItem = 0; iItem < pIterator->itemCount; iItem += 1) {
+        e_iterator_item* pItem = (e_iterator_item*)E_OFFSET_PTR(pIterator, sizeof(e_iterator_internal) + cursor);
+        if (e_strncmp(e_iterator_item_name(pItem), pName, pItem->nameLen) == 0) {
+            return pItem;
+        }
+
+        cursor += e_iterator_item_sizeof(pItem->nameLen);
+    }
+
+    return NULL;
+}
+
+static e_iterator_internal* e_iterator_internal_append(e_iterator_internal* pIterator, e_fs_iterator* pOther, e_fs* pFS, int mode)
+{
+    size_t newItemSize;
+    e_iterator_item* pNewItem;
+
+    E_ASSERT(pOther != NULL);
+
+    /* Skip over any "." and ".." entries. */
+    if ((pOther->pName[0] == '.' && pOther->pName[1] == 0) || (pOther->pName[0] == '.' && pOther->pName[1] == '.' && pOther->pName[2] == 0)) {
+        return pIterator;
+    }
+
+
+    /* If we're in transparent mode, we don't want to add any archives. Instead we want to open them and iterate them recursively. */
+    (void)mode;
+
+
+    /* Check if the item already exists. If so, skip it. */
+    if (pIterator != NULL) {
+        pNewItem = e_iterator_internal_find(pIterator, pOther->pName);
+        if (pNewItem != NULL) {
+            return pIterator;   /* Already exists. Skip it. */
+        }
+    }
+
+    /* At this point we're ready to append the item. */
+    newItemSize = e_iterator_item_sizeof(pOther->nameLen);
+    if (pIterator == NULL || pIterator->dataSize + newItemSize + sizeof(e_iterator_item*) > pIterator->allocSize) {
+        e_iterator_internal* pNewIterator;
+        size_t newAllocSize;
+
+        if (pIterator == NULL) {
+            newAllocSize = 4096;
+            if (newAllocSize < (sizeof(*pIterator) + newItemSize + sizeof(e_iterator_item*))) {
+                newAllocSize = (sizeof(*pIterator) + newItemSize + sizeof(e_iterator_item*));
+            }
+        } else {
+            newAllocSize = pIterator->allocSize * 2;
+            if (newAllocSize < (pIterator->dataSize + newItemSize + sizeof(e_iterator_item*))) {
+                newAllocSize = (pIterator->dataSize + newItemSize + sizeof(e_iterator_item*));
+            }
+        }
+
+        pNewIterator = (e_iterator_internal*)e_realloc(pIterator, newAllocSize, e_fs_get_allocation_callbacks(pFS));
+        if (pNewIterator == NULL) {
+            return pIterator;
+        }
+
+        if (pIterator == NULL) {
+            E_ZERO_MEMORY(pNewIterator, sizeof(e_iterator_internal));
+            pNewIterator->dataSize = sizeof(e_iterator_internal);
+        }
+
+        pIterator = pNewIterator;
+        pIterator->allocSize = newAllocSize;
+    }
+
+    /* We can now copy the information over to the information. */
+    pNewItem = (e_iterator_item*)E_OFFSET_PTR(pIterator, sizeof(e_iterator_internal) + pIterator->itemDataSize);
+    E_COPY_MEMORY(e_iterator_item_name(pNewItem), pOther->pName, pOther->nameLen + 1);   /* +1 for the null terminator. */
+    pNewItem->nameLen = pOther->nameLen;
+    pNewItem->info    = pOther->info;
+
+    pIterator->itemDataSize += newItemSize;
+    pIterator->dataSize     += newItemSize + sizeof(e_iterator_item*);
+    pIterator->itemCount    += 1;
+
+    return pIterator;
+}
+
+
+static int e_iterator_item_compare(void* pUserData, const void* pA, const void* pB)
+{
+    e_iterator_item* pItemA = *(e_iterator_item**)pA;
+    e_iterator_item* pItemB = *(e_iterator_item**)pB;
+    const char* pNameA = e_iterator_item_name(pItemA);
+    const char* pNameB = e_iterator_item_name(pItemB);
+    int compareResult;
+
+    (void)pUserData;
+
+    compareResult = e_strncmp(pNameA, pNameB, E_MIN(pItemA->nameLen, pItemB->nameLen));
+    if (compareResult == 0) {
+        if (pItemA->nameLen < pItemB->nameLen) {
+            compareResult = -1;
+        } else if (pItemA->nameLen > pItemB->nameLen) {
+            compareResult =  1;
+        }
+    }
+
+    return compareResult;
+}
+
+static void e_iterator_internal_sort(e_iterator_internal* pIterator)
+{
+    e_sort(pIterator->ppItems, pIterator->itemCount, sizeof(e_iterator_item*), e_iterator_item_compare, NULL);
+}
+
+static e_iterator_internal* e_iterator_internal_gather(e_iterator_internal* pIterator, const e_fs_backend* pBackend, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, int mode)
+{
+    e_result result;
+    e_fs_iterator* pInnerIterator;
+
+    E_ASSERT(pBackend != NULL);
+
+    /* Regular files take priority. */
+    for (pInnerIterator = e_fs_backend_first(pBackend, pFS, pDirectoryPath, directoryPathLen); pInnerIterator != NULL; pInnerIterator = e_fs_backend_next(pBackend, pInnerIterator)) {
+        pIterator = e_iterator_internal_append(pIterator, pInnerIterator, pFS, mode);
+    }
+
+    /* Now we need to gather from archives, but only if we're not in opaque mode. */
+    if (pFS != NULL && !E_IS_OPAQUE(mode)) {
+        e_path_iterator iDirPathSeg;
+
+        /* If no archive types have been configured we can abort early. */
+        if (pFS->archiveTypesAllocSize == 0) {
+            return pIterator;
+        }
+
+        /*
+        Just like when opening a file we need to inspect each segment of the path. For each segment
+        we need to check for archives. This is where transparent mode becomes very slow because it
+        needs to scan every archive. For opaque mode we need only check for explicitly listed archives
+        in the search path.
+        */
+        if (e_path_first(pDirectoryPath, directoryPathLen, &iDirPathSeg) != E_SUCCESS) {
+            return pIterator;
+        }
+
+        do
+        {
+            e_result backendIteratorResult;
+            e_registered_backend_iterator iBackend;
+            e_bool32 isArchive = E_FALSE;
+            size_t dirPathRemainingLen;
+
+            /* Skip over "." and ".." segments. */
+            if (e_strncmp(iDirPathSeg.pFullPath, ".", iDirPathSeg.segmentLength) == 0) {
+                continue;
+            }
+            if (e_strncmp(iDirPathSeg.pFullPath, "..", iDirPathSeg.segmentLength) == 0) {
+                continue;
+            }
+
+            if (e_path_is_last(&iDirPathSeg)) {
+                dirPathRemainingLen = 0;
+            } else {
+                if (directoryPathLen == E_NULL_TERMINATED) {
+                    dirPathRemainingLen = E_NULL_TERMINATED;
+                } else {
+                    dirPathRemainingLen = directoryPathLen - (iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength + 1);
+                }
+            }
+
+            /* If an archive has been explicitly listed in the path, we must try iterating from that. */
+            for (backendIteratorResult = e_first_registered_backend(pFS, &iBackend); backendIteratorResult == E_SUCCESS; backendIteratorResult = e_next_registered_backend(&iBackend)) {
+                if (e_path_extension_equal(iDirPathSeg.pFullPath + iDirPathSeg.segmentOffset, iDirPathSeg.segmentLength, iBackend.pExtension, iBackend.extensionLen)) {
+                    e_fs* pArchive;
+                    e_fs_iterator* pArchiveIterator;
+
+                    isArchive = E_TRUE;
+
+                    result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, iDirPathSeg.pFullPath, iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength, E_READ | E_IGNORE_MOUNTS | mode, &pArchive);
+                    if (result != E_SUCCESS) {
+                        /*
+                        We failed to open the archive. If it's due to the archive not existing we just continue searching. Otherwise
+                        we just bomb out.
+                        */
+                        if (result != E_DOES_NOT_EXIST) {
+                            e_close_archive(pArchive);
+                            return pIterator;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    if (dirPathRemainingLen == 0) {
+                        pArchiveIterator = e_fs_first_ex(pArchive, "", 0, mode);
+                    } else {
+                        pArchiveIterator = e_fs_first_ex(pArchive, iDirPathSeg.pFullPath + iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength + 1, dirPathRemainingLen, mode);
+                    }
+
+                    while (pArchiveIterator != NULL) {
+                        pIterator = e_iterator_internal_append(pIterator, pArchiveIterator, pFS, mode);
+                        pArchiveIterator = e_fs_next(pArchiveIterator);
+                    }
+
+                    e_close_archive(pArchive);
+                    break;
+                }
+            }
+
+            /* If the path has an extension of an archive, but we still manage to get here, it means the archive doesn't exist. */
+            if (isArchive) {
+                return pIterator;
+            }
+
+            /*
+            Getting here means this part of the path does not look like an archive. We will assume it's a folder and try
+            iterating it using opaque mode to get the contents.
+            */
+            if (E_IS_VERBOSE(mode)) {
+                /*
+                The caller has requested opening in verbose mode. In this case we don't want to be scanning for
+                archives. Instead, any archives will be explicitly listed in the path. We just skip this path in
+                this case.
+                */
+                continue;
+            } else {
+                /*
+                Getting here means we're in transparent mode. We'll need to search for archives and check them one
+                by one. This is the slow path.
+
+                To do this we opaquely iterate over each file in the currently iterated file path. If any of these
+                files are recognized as archives, we'll load up that archive and then try iterating from there.
+                */
+                for (pInnerIterator = e_fs_backend_first(pBackend, pFS, iDirPathSeg.pFullPath, iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength); pInnerIterator != NULL; pInnerIterator = e_fs_backend_next(pBackend, pInnerIterator)) {
+                    for (backendIteratorResult = e_first_registered_backend(pFS, &iBackend); backendIteratorResult == E_SUCCESS; backendIteratorResult = e_next_registered_backend(&iBackend)) {
+                        if (e_path_extension_equal(pInnerIterator->pName, pInnerIterator->nameLen, iBackend.pExtension, iBackend.extensionLen)) {
+                            /* Looks like an archive. We can load this one up and try iterating from it. */
+                            e_fs* pArchive;
+                            e_fs_iterator* pArchiveIterator;
+                            char pArchivePathNTStack[1024];
+                            char* pArchivePathNTHeap = NULL;    /* <-- Must be initialized to null. */
+                            char* pArchivePathNT;
+                            size_t archivePathLen;
+
+                            archivePathLen = iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength + 1 + pInnerIterator->nameLen;
+                            if (archivePathLen >= sizeof(pArchivePathNTStack)) {
+                                pArchivePathNTHeap = (char*)e_malloc(archivePathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                                if (pArchivePathNTHeap == NULL) {
+                                    e_fs_backend_free_iterator(pBackend, pInnerIterator);
+                                    return pIterator;
+                                }
+
+                                pArchivePathNT = pArchivePathNTHeap;
+                            } else {
+                                pArchivePathNT = pArchivePathNTStack;
+                            }
+
+                            E_COPY_MEMORY(pArchivePathNT, iDirPathSeg.pFullPath, iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength);
+                            pArchivePathNT[iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength] = '/';
+                            E_COPY_MEMORY(pArchivePathNT + iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength + 1, pInnerIterator->pName, pInnerIterator->nameLen);
+                            pArchivePathNT[archivePathLen] = '\0';
+
+                            /* At this point we've constructed the archive name and we can now open it. */
+                            result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, pArchivePathNT, E_NULL_TERMINATED, E_READ | E_IGNORE_MOUNTS | mode, &pArchive);
+                            e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
+
+                            if (result != E_SUCCESS) { /* <-- This is checking the result of e_open_archive_ex(). */
+                                continue;   /* Failed to open this archive. Keep looking. */
+                            }
+
+
+                            if (dirPathRemainingLen == 0) {
+                                pArchiveIterator = e_fs_first_ex(pArchive, "", 0, mode);
+                            } else {
+                                pArchiveIterator = e_fs_first_ex(pArchive, iDirPathSeg.pFullPath + iDirPathSeg.segmentOffset + iDirPathSeg.segmentLength + 1, dirPathRemainingLen, mode);
+                            }
+
+                            while (pArchiveIterator != NULL) {
+                                pIterator = e_iterator_internal_append(pIterator, pArchiveIterator, pFS, mode);
+                                pArchiveIterator = e_fs_next(pArchiveIterator);
+                            }
+
+                            e_close_archive(pArchive);
+                            break;
+                        }
+                    }
+                }
+            }
+        } while (e_path_next(&iDirPathSeg) == E_SUCCESS);
+    }
+
+    return pIterator;
+}
+
+E_API e_fs_iterator* e_fs_first_ex(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, int mode)
+{
+    e_iterator_internal* pIterator = NULL;  /* This is the iterator we'll eventually be returning. */
+    const e_fs_backend* pBackend;
+    e_fs_iterator* pBackendIterator;
+    e_result result;
+    size_t cursor;
+    size_t iItem;
+    
+    if (pDirectoryPath == NULL) {
+        pDirectoryPath = "";
+    }
+
+    result = e_validate_path(pDirectoryPath, directoryPathLen, mode);
+    if (result != E_SUCCESS) {
+        return NULL;    /* Invalid path. */
+    }
+
+    pBackend = e_get_backend_or_default(pFS);
+    if (pBackend == NULL) {
+        return NULL;
+    }
+
+    if (directoryPathLen == E_NULL_TERMINATED) {
+        directoryPathLen = strlen(pDirectoryPath);
+    }
+
+    /*
+    The first thing we need to do is gather files and directories from the backend. This needs to be done in the
+    same order that we attempt to load files for reading:
+
+        1) From all mounts.
+        2) Directly from the file system.
+
+    With each of the steps above, the relevant open mode flags must be respected as well because we want iteration
+    to be consistent with what would happen when opening files.
+    */
+    /* Gather files. */
+    {
+        e_result mountPointIerationResult;
+        e_mount_list_iterator iMountPoint;
+
+        /* Check mount points. */
+        if (pFS != NULL && (mode & E_IGNORE_MOUNTS) == 0) {
+            for (mountPointIerationResult = e_mount_list_first(pFS->pReadMountPoints, &iMountPoint); mountPointIerationResult == E_SUCCESS; mountPointIerationResult = e_mount_list_next(&iMountPoint)) {
+                /*
+                Just like when opening a file, we need to check that the directory path starts with the mount point. If it
+                doesn't match we just skip to the next mount point.
+                */
+                char  pDirSubPathCleanStack[1024];
+                char* pDirSubPathCleanHeap = NULL;
+                char* pDirSubPathClean;
+                int dirSubPathCleanLen;
+                unsigned int cleanOptions = (mode & E_NO_ABOVE_ROOT_NAVIGATION);
+
+                size_t dirSubPathLen;
+                const char* pDirSubPath = e_path_trim_base(pDirectoryPath, directoryPathLen, iMountPoint.pMountPointPath, E_NULL_TERMINATED);
+                if (pDirSubPath == NULL) {
+                    continue;
+                }
+
+                dirSubPathLen = directoryPathLen - (size_t)(pDirSubPath - pDirectoryPath); 
+
+
+                /* If the mount point starts with a root segment, i.e. "/", we cannot allow navigation above that. */
+                if (iMountPoint.pMountPointPath[0] == '/' || iMountPoint.pMountPointPath[0] == '\\') {
+                    cleanOptions |= E_NO_ABOVE_ROOT_NAVIGATION;
+                }
+
+                /* We need to clean the file sub-path, but can skip it if E_NO_SPECIAL_DIRS is specified since it's implied. */
+                if ((mode & E_NO_SPECIAL_DIRS) == 0) {
+                    dirSubPathCleanLen = e_path_normalize(pDirSubPathCleanStack, sizeof(pDirSubPathCleanStack), pDirSubPath, dirSubPathLen, cleanOptions);
+                    if (dirSubPathCleanLen < 0) {
+                        continue;    /* Most likely violating E_NO_ABOVE_ROOT_NAVIGATION. */
+                    }
+
+                    if (dirSubPathCleanLen >= (int)sizeof(pDirSubPathCleanStack)) {
+                        pDirSubPathCleanHeap = (char*)e_malloc(dirSubPathCleanLen + 1, e_fs_get_allocation_callbacks(pFS));
+                        if (pDirSubPathCleanHeap == NULL) {
+                            return NULL;    /* Out of memory. */
+                        }
+
+                        e_path_normalize(pDirSubPathCleanHeap, dirSubPathCleanLen + 1, pDirSubPath, dirSubPathLen, cleanOptions);    /* <-- This should never fail. */
+                        pDirSubPathClean = pDirSubPathCleanHeap;
+                    } else {
+                        pDirSubPathClean = pDirSubPathCleanStack;
+                    }
+                } else {
+                    pDirSubPathClean = (char*)pDirSubPath;  /* Safe cast. Will not be modified past this point. */
+                    dirSubPathCleanLen = (int)dirSubPathLen;
+                }
+
+                
+                if (iMountPoint.pArchive != NULL) {
+                    /* The mount point is an archive. We need to iterate over the contents of the archive. */
+                    pBackendIterator = e_fs_first_ex(iMountPoint.pArchive, pDirSubPathClean, dirSubPathCleanLen, mode);
+                    while (pBackendIterator != NULL) {
+                        pIterator = e_iterator_internal_append(pIterator, pBackendIterator, pFS, mode);
+                        pBackendIterator = e_fs_next(pBackendIterator);
+                    }
+                } else {
+                    /*
+                    The mount point is a directory. We need to construct a path that is the concatenation of the mount point's internal path and
+                    our input directory. This is the path we'll be using to iterate over the contents of the directory.
+                    */
+                    char pInterpolatedPathStack[1024];
+                    char* pInterpolatedPathHeap = NULL;
+                    char* pInterpolatedPath;
+                    int interpolatedPathLen;
+
+                    interpolatedPathLen = e_path_append(pInterpolatedPathStack, sizeof(pInterpolatedPathStack), iMountPoint.pPath, E_NULL_TERMINATED, pDirSubPathClean, dirSubPathCleanLen);
+                    if (interpolatedPathLen > 0 && (size_t)interpolatedPathLen >= sizeof(pInterpolatedPathStack)) {
+                        /* Not enough room on the stack. Allocate on the heap. */
+                        pInterpolatedPathHeap = (char*)e_malloc(interpolatedPathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                        if (pInterpolatedPathHeap == NULL) {
+                            e_fs_free_iterator((e_fs_iterator*)pIterator);
+                            return NULL;    /* Out of memory. */
+                        }
+
+                        e_path_append(pInterpolatedPathHeap, interpolatedPathLen + 1, iMountPoint.pPath, E_NULL_TERMINATED, pDirSubPathClean, dirSubPathCleanLen);    /* <-- This should never fail. */
+                        pInterpolatedPath = pInterpolatedPathHeap;
+                    } else {
+                        pInterpolatedPath = pInterpolatedPathStack;
+                    }
+
+                    pIterator = e_iterator_internal_gather(pIterator, pBackend, pFS, pInterpolatedPath, E_NULL_TERMINATED, mode);
+
+                    if (pInterpolatedPathHeap != NULL) {
+                        e_free(pInterpolatedPathHeap, e_fs_get_allocation_callbacks(pFS));
+                        pInterpolatedPathHeap = NULL;
+                    }
+                }
+            }
+        }
+
+        /* Check for files directly in the file system. */
+        if ((mode & E_ONLY_MOUNTS) == 0) {
+            pIterator = e_iterator_internal_gather(pIterator, pBackend, pFS, pDirectoryPath, directoryPathLen, mode);
+        }
+    }
+
+    /* If after the gathering step we don't have an iterator we can just return null. It just means nothing was found. */
+    if (pIterator == NULL) {
+        return NULL;
+    }
+
+    /* Set up pointers. The list of pointers is located at the end of the array. */
+    pIterator->ppItems = (e_iterator_item**)E_OFFSET_PTR(pIterator, pIterator->dataSize - (pIterator->itemCount * sizeof(e_iterator_item*)));
+
+    cursor = 0;
+    for (iItem = 0; iItem < pIterator->itemCount; iItem += 1) {
+        pIterator->ppItems[iItem] = (e_iterator_item*)E_OFFSET_PTR(pIterator, sizeof(e_iterator_internal) + cursor);
+        cursor += e_iterator_item_sizeof(pIterator->ppItems[iItem]->nameLen);
+    }
+
+    /* We want to sort items in the iterator to make it consistent across platforms. */
+    e_iterator_internal_sort(pIterator);
+
+    /* Post-processing setup. */
+    pIterator->base.pFS  = pFS;
+    pIterator->itemIndex = 0;
+    e_iterator_internal_resolve_public_members(pIterator);
+
+    return (e_fs_iterator*)pIterator;
+}
+
+E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, int mode)
+{
+    return e_fs_first_ex(pFS, pDirectoryPath, E_NULL_TERMINATED, mode);
+}
+
+E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator)
+{
+    e_iterator_internal* pIteratorInternal = (e_iterator_internal*)pIterator;
+
+    if (pIteratorInternal == NULL) {
+        return NULL;
+    }
+
+    pIteratorInternal->itemIndex += 1;
+
+    if (pIteratorInternal->itemIndex == pIteratorInternal->itemCount) {
+        e_fs_free_iterator(pIterator);
+        return NULL;
+    }
+
+    e_iterator_internal_resolve_public_members(pIteratorInternal);
+
+    return pIterator;
+}
+
+E_API void e_fs_free_iterator(e_fs_iterator* pIterator)
+{
+    if (pIterator == NULL) {
+        return;
+    }
+
+    e_free(pIterator, e_fs_get_allocation_callbacks(pIterator->pFS));
+}
+
+
+E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority)
+{
+    e_result result;
+    e_mount_list_iterator iterator;
+    e_result iteratorResult;
+    e_mount_list* pMountPoints;
+    e_mount_point* pNewMountPoint;
+    e_file_info fileInfo;
+    int openMode;
+
+    if (pFS == NULL || pPathToMount == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pMountPoint == NULL) {
+        pMountPoint = "";
+    }
+
+    /*
+    The first thing we're going to do is check for duplicates. We allow for the same path to be mounted
+    to different mount points, and different paths to be mounted to the same mount point, but we don't
+    want to have any duplicates where the same path is mounted to the same mount point.
+    */
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (strcmp(pPathToMount, iterator.pPath) == 0 && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
+            return E_SUCCESS;  /* Just pretend we're successful. */
+        }
+    }
+
+    /*
+    Getting here means we're not mounting a duplicate so we can now add it. We'll be either adding it to
+    the end of the list, or to the beginning of the list depending on the priority.
+    */
+    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, pPathToMount, pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    if (pMountPoints == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pReadMountPoints = pMountPoints;
+
+    /*
+    We need to determine if we're mounting a directory or an archive. If it's an archive, we need to
+    open it.
+    */
+    openMode = E_READ | E_VERBOSE;
+
+    /* Must use e_fs_backend_info() instead of e_fs_info() because otherwise e_fs_info() will attempt to read from mounts when we're in the process of trying to add one (this function). */
+    result = e_fs_backend_info(e_get_backend_or_default(pFS), pFS, (pPathToMount[0] != '\0') ? pPathToMount : ".", E_IGNORE_MOUNTS, &fileInfo);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    if (fileInfo.directory) {
+        pNewMountPoint->pArchive = NULL;
+        pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
+    } else {
+        result = e_open_archive(pFS, pPathToMount, openMode, &pNewMountPoint->pArchive);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+
+        pNewMountPoint->closeArchiveOnUnmount = E_TRUE;
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+
+    if (pFS == NULL || pPathToMount_NotMountPoint == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; /*iteratorResult = e_mount_list_next(&iterator)*/) {
+        if (strcmp(pPathToMount_NotMountPoint, iterator.pPath) == 0) {
+            if (iterator.internal.pMountPoint->closeArchiveOnUnmount) {
+                e_close_archive(iterator.pArchive);
+            }
+
+            e_mount_list_remove(pFS->pReadMountPoints, iterator.internal.pMountPoint);
+
+            /*
+            Since we just removed this item we don't want to advance the cursor. We do, however, need to re-resolve
+            the members in preparation for the next iteration.
+            */
+            e_mount_list_iterator_resolve_members(&iterator, iterator.internal.cursor);
+        } else {
+            iteratorResult = e_mount_list_next(&iterator);
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pMountPoint, e_mount_priority priority)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+    e_mount_list* pMountPoints;
+    e_mount_point* pNewMountPoint;
+
+    if (pFS == NULL || pOtherFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pMountPoint == NULL) {
+        pMountPoint = "";
+    }
+
+    /*
+    We don't allow duplicates. An archive can be bound to multiple mount points, but we don't want to have the same
+    archive mounted to the same mount point multiple times.
+    */
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (pOtherFS == iterator.pArchive && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
+            return E_SUCCESS;  /* Just pretend we're successful. */
+        }
+    }
+
+    /*
+    Getting here means we're not mounting a duplicate so we can now add it. We'll be either adding it to
+    the end of the list, or to the beginning of the list depending on the priority.
+    */
+    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, "", pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    if (pMountPoints == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pReadMountPoints = pMountPoints;
+
+    pNewMountPoint->pArchive = pOtherFS;
+    pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+
+    if (pFS == NULL || pOtherFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (iterator.pArchive == pOtherFS) {
+            e_mount_list_remove(pFS->pReadMountPoints, iterator.internal.pMountPoint);
+            return E_SUCCESS;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+
+E_API e_result e_fs_mount_write(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority)
+{
+    e_mount_list_iterator iterator;
+    e_result iteratorResult;
+    e_mount_point* pNewMountPoint;
+    e_mount_list* pMountList;
+
+    if (pFS == NULL || pPathToMount == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pMountPoint == NULL) {
+        pMountPoint = "";
+    }
+
+    /* Like with regular read mount points we'll want to check for duplicates. */
+    for (iteratorResult = e_mount_list_first(pFS->pWriteMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (strcmp(pPathToMount, iterator.pPath) == 0 && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
+            return E_SUCCESS;  /* Just pretend we're successful. */
+        }
+    }
+
+    /* Getting here means we're not mounting a duplicate so we can now add it. */
+    pMountList = e_mount_list_alloc(pFS->pWriteMountPoints, pPathToMount, pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    if (pMountList == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pWriteMountPoints = pMountList;
+    
+    /* We don't support mounting archives. Explicitly disable this. */
+    pNewMountPoint->pArchive = NULL;
+    pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_unmount_write(e_fs* pFS, const char* pPathToMount_NotMountPoint)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+
+    if (pFS == NULL || pPathToMount_NotMountPoint == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    for (iteratorResult = e_mount_list_first(pFS->pWriteMountPoints, &iterator); iteratorResult == E_SUCCESS; /*iteratorResult = e_mount_list_next(&iterator)*/) {
+        if (strcmp(pPathToMount_NotMountPoint, iterator.pPath) == 0) {
+            e_mount_list_remove(pFS->pWriteMountPoints, iterator.internal.pMountPoint);
+
+            /*
+            Since we just removed this item we don't want to advance the cursor. We do, however, need to re-resolve
+            the members in preparation for the next iteration.
+            */
+            e_mount_list_iterator_resolve_members(&iterator, iterator.internal.cursor);
+        } else {
+            iteratorResult = e_mount_list_next(&iterator);
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_file_read_to_end(e_file* pFile, e_stream_data_format format, void** ppData, size_t* pDataSize)
+{
+    return e_stream_read_to_end(e_file_get_stream(pFile), format, e_fs_get_allocation_callbacks(e_file_get_fs(pFile)), ppData, pDataSize);
+}
+
+E_API e_result e_file_open_and_read(e_fs* pFS, const char* pFilePath, e_stream_data_format format, void** ppData, size_t* pDataSize)
+{
+    e_result result;
+    e_file* pFile;
+
+    if (pFilePath == NULL || ppData == NULL || pDataSize == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_file_open(pFS, pFilePath, E_READ, &pFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_file_read_to_end(pFile, format, ppData, pDataSize);
+
+    e_file_close(pFile);
+
+    return result;
+}
+
+E_API e_result e_file_open_and_write(e_fs* pFS, const char* pFilePath, void* pData, size_t dataSize)
+{
+    e_result result;
+    e_file* pFile;
+
+    if (pFilePath == NULL || pData == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    result = e_file_open(pFS, pFilePath, E_TRUNCATE, &pFile);
+    if (result != E_SUCCESS) {
+        return result;
+    }
+
+    result = e_file_write(pFile, pData, dataSize, NULL);
+
+    e_file_close(pFile);
+
+    return result;
+}
+
+
+
+/******************************************************************************
+*
+*
+* stdio Backend
+*
+*
+******************************************************************************/
+#ifndef E_NO_STDIO
+#include <stdio.h>
+#include <wchar.h>     /* For wcstombs(). */
 #include <sys/stat.h>
 
-typedef struct
-{
-    e_file base;
-    FILE* pFILE;
-} e_file_default;
+#if defined(_WIN32)
+#include <direct.h>     /* For _mkdir() */
+#endif
 
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
 
-static e_result e_fopen(FILE** ppFile, const char* pFilePath, const char* pOpenMode)
+#ifndef S_ISLNK
+    #if defined(_WIN32)
+        #define S_ISLNK(m) (0)
+    #else
+        #define S_ISLNK(m) (((m) & _S_IFMT) == _S_IFLNK)
+    #endif
+#endif
+
+static int e_fopen(FILE** ppFile, const char* pFilePath, const char* pOpenMode)
 {
 #if defined(_MSC_VER) && _MSC_VER >= 1400
-    errno_t err;
+    int err;
 #endif
 
     if (ppFile != NULL) {
@@ -6738,13 +10184,13 @@ static e_result e_fopen(FILE** ppFile, const char* pFilePath, const char* pOpenM
     }
 
     if (pFilePath == NULL || pOpenMode == NULL || ppFile == NULL) {
-        return E_INVALID_ARGS;
+        return EINVAL;
     }
 
 #if defined(_MSC_VER) && _MSC_VER >= 1400
     err = fopen_s(ppFile, pFilePath, pOpenMode);
     if (err != 0) {
-        return e_result_from_errno(err);
+        return err;
     }
 #else
 #if defined(_WIN32) || defined(__APPLE__)
@@ -6757,9 +10203,9 @@ static e_result e_fopen(FILE** ppFile, const char* pFilePath, const char* pOpenM
     #endif
 #endif
     if (*ppFile == NULL) {
-        e_result result = e_result_from_errno(errno);
-        if (result == E_SUCCESS) {
-            result = E_ERROR;   /* Just a safety check to make sure we never ever return success when pFile == NULL. */
+        int result = errno;
+        if (result == 0) {
+            result = ENOENT;   /* Just a safety check to make sure we never ever return success when pFile == NULL. */
         }
 
         return result;
@@ -6769,127 +10215,517 @@ static e_result e_fopen(FILE** ppFile, const char* pFilePath, const char* pOpenM
     return E_SUCCESS;
 }
 
+/*
+_wfopen() isn't always available in all compilation environments.
 
-static e_result e_fs_alloc_size_default(void* pUserData, size_t* pSize)
+    * Windows only.
+    * MSVC seems to support it universally as far back as VC6 from what I can tell (haven't checked further back).
+    * MinGW-64 (both 32- and 64-bit) seems to support it.
+    * MinGW wraps it in !defined(__STRICT_ANSI__).
+    * OpenWatcom wraps it in !defined(_NO_EXT_KEYS).
+
+This can be reviewed as compatibility issues arise. The preference is to use _wfopen_s() and _wfopen() as opposed to the wcsrtombs()
+fallback, so if you notice your compiler not detecting this properly I'm happy to look at adding support.
+*/
+#if defined(_WIN32)
+    #if defined(_MSC_VER) || defined(__MINGW64__) || (!defined(__STRICT_ANSI__) && !defined(_NO_EXT_KEYS))
+        #define E_HAS_WFOPEN
+    #endif
+#endif
+
+int e_wfopen(FILE** ppFile, const wchar_t* pFilePath, const wchar_t* pOpenMode)
 {
-    E_ASSERT(pSize != NULL);
-    E_UNUSED(pUserData);
+    if (ppFile != NULL) {
+        *ppFile = NULL;  /* Safety. */
+    }
 
-    *pSize = sizeof(e_file_default);
+    if (pFilePath == NULL || pOpenMode == NULL || ppFile == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    #if defined(E_HAS_WFOPEN)
+    {
+        /* Use _wfopen() on Windows. */
+        #if defined(_MSC_VER) && _MSC_VER >= 1400
+        {
+            errno_t err = _wfopen_s(ppFile, pFilePath, pOpenMode);
+            if (err != 0) {
+                return err;
+            }
+        }
+        #else
+        {
+            *ppFile = _wfopen(pFilePath, pOpenMode);
+            if (*ppFile == NULL) {
+                return errno;
+            }
+        }
+        #endif
+    }
+    #else
+    {
+        /*
+        Use fopen() on anything other than Windows. Requires a conversion. This is annoying because fopen() is locale specific. The only real way I can
+        think of to do this is with wcsrtombs(). Note that wcstombs() is apparently not thread-safe because it uses a static global mbstate_t object for
+        maintaining state. I've checked this with -std=c89 and it works, but if somebody get's a compiler error I'll look into improving compatibility.
+        */
+        mbstate_t mbs;
+        size_t lenMB;
+        const wchar_t* pFilePathTemp = pFilePath;
+        char* pFilePathMB = NULL;
+        char pOpenModeMB[32] = {0};
+
+        /* Get the length first. */
+        E_ZERO_OBJECT(&mbs);
+        lenMB = wcsrtombs(NULL, &pFilePathTemp, 0, &mbs);
+        if (lenMB == (size_t)-1) {
+            return errno;
+        }
+
+        pFilePathMB = (char*)e_malloc(lenMB + 1, NULL);
+        if (pFilePathMB == NULL) {
+            return ENOMEM;
+        }
+
+        pFilePathTemp = pFilePath;
+        E_ZERO_OBJECT(&mbs);
+        wcsrtombs(pFilePathMB, &pFilePathTemp, lenMB + 1, &mbs);
+
+        /* The open mode should always consist of ASCII characters so we should be able to do a trivial conversion. */
+        {
+            size_t i = 0;
+            for (;;) {
+                if (pOpenMode[i] == 0) {
+                    pOpenModeMB[i] = '\0';
+                    break;
+                }
+
+                pOpenModeMB[i] = (char)pOpenMode[i];
+                i += 1;
+            }
+        }
+
+        *ppFile = fopen(pFilePathMB, pOpenModeMB);
+
+        e_free(pFilePathMB, NULL);
+
+        if (*ppFile == NULL) {
+            return errno;
+        }
+    }
+    #endif
+
+    return 0;
+}
+
+
+static e_file_info e_file_info_from_stat(struct stat* pStat)
+{
+    e_file_info info;
+
+    E_ZERO_OBJECT(&info);
+    info.size             = pStat->st_size;
+    info.lastAccessTime   = pStat->st_atime;
+    info.lastModifiedTime = pStat->st_mtime;
+    info.directory        = S_ISDIR(pStat->st_mode) != 0;
+    info.symlink          = S_ISLNK(pStat->st_mode) != 0;
+
+    return info;
+}
+
+#if defined(_WIN32)
+static e_uint64 e_FILETIME_to_unix(const FILETIME* pFT)
+{
+    ULARGE_INTEGER li;
+
+    li.HighPart = pFT->dwHighDateTime;
+    li.LowPart  = pFT->dwLowDateTime;
+
+    return (e_uint64)(li.QuadPart / 10000000UL - 11644473600UL);   /* Convert from Windows epoch to Unix epoch. */
+}
+
+static e_file_info e_file_info_from_WIN32_FIND_DATAW(const WIN32_FIND_DATAW* pFD)
+{
+    e_file_info info;
+
+    E_ZERO_OBJECT(&info);
+    info.size             = ((e_uint64)pFD->nFileSizeHigh << 32) | (e_uint64)pFD->nFileSizeLow;
+    info.lastModifiedTime = e_FILETIME_to_unix(&pFD->ftLastWriteTime);
+    info.lastAccessTime   = e_FILETIME_to_unix(&pFD->ftLastAccessTime);
+    info.directory        = (pFD->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)     != 0;
+    info.symlink          = (pFD->dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+
+    return info;
+}
+#endif
+
+
+typedef struct e_stdio_registered_file
+{
+    size_t pathLen;
+    FILE* pFile;
+} e_stdio_registered_file;
+
+typedef struct e_stdio
+{
+    int _unused;
+} e_stdio;
+
+static size_t e_alloc_size_stdio(const void* pBackendConfig)
+{
+    E_UNUSED(pBackendConfig);
+
+    return sizeof(e_stdio);
+}
+
+static e_result e_init_stdio(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
+{
+    E_UNUSED(pFS);
+    E_UNUSED(pBackendConfig);
+    E_UNUSED(pStream);
 
     return E_SUCCESS;
 }
 
-static e_result e_fs_open_default(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
+static void e_uninit_stdio(e_fs* pFS)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
-    e_result result;
-    char openModeStr[4];
-
-    E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
     E_UNUSED(pFS);
-    E_UNUSED(pAllocationCallbacks);
+    return;
+}
 
-    if ((openMode & E_OPEN_MODE_WRITE) != 0) {
-        if ((openMode & E_OPEN_MODE_READ) != 0) {
+static e_result e_ioctl_stdio(e_fs* pFS, int op, void* pArgs)
+{
+    E_UNUSED(pFS);
+    E_UNUSED(op);
+    E_UNUSED(pArgs);
+
+    /* Not used by the stdio backend. */
+    return E_INVALID_OPERATION;
+}
+
+static e_result e_remove_stdio(e_fs* pFS, const char* pFilePath)
+{
+    int result = remove(pFilePath);
+    if (result != 0) {
+        return e_result_from_errno(errno);
+    }
+
+    E_UNUSED(pFS);
+
+    return E_SUCCESS;
+}
+
+static e_result e_rename_stdio(e_fs* pFS, const char* pOldName, const char* pNewName)
+{
+    int result = rename(pOldName, pNewName);
+    if (result != 0) {
+        return e_result_from_errno(errno);
+    }
+
+    E_UNUSED(pFS);
+
+    return E_SUCCESS;
+}
+
+
+#if defined(_WIN32)
+static e_result e_mkdir_stdio_win32(const char* pPath)
+{
+    int result = _mkdir(pPath);
+    if (result != 0) {
+        return e_result_from_errno(errno);
+    }
+
+    return E_SUCCESS;
+}
+#else
+static e_result e_mkdir_stdio_posix(const char* pPath)
+{
+    int result = mkdir(pPath, S_IRWXU);
+    if (result != 0) {
+        return e_result_from_errno(errno);
+    }
+
+    return E_SUCCESS;
+}
+#endif
+
+static e_result e_mkdir_stdio(e_fs* pFS, const char* pPath)
+{
+    e_result result;
+
+    E_UNUSED(pFS);
+
+#if defined(_WIN32)
+    result = e_mkdir_stdio_win32(pPath);
+#else
+    result = e_mkdir_stdio_posix(pPath);
+#endif
+
+    if (result == E_DOES_NOT_EXIST) {
+        result =  E_SUCCESS;
+    }
+
+    return result;
+}
+
+static e_result e_info_stdio(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+{
+    /* We don't want to use stat() with Win32 because, from what I can tell, there's no way to determine if it's a symbolic link. S_IFLNK does not seem to be defined. */
+    #if defined(_WIN32)
+    {
+        int pathLen;
+        wchar_t  pPathWStack[1024];
+        wchar_t* pPathWHeap = NULL;
+        wchar_t* pPathW;
+        HANDLE hFind;
+        WIN32_FIND_DATAW fd;
+
+        /* Use Win32 to convert from UTF-8 to wchar_t. */
+        pathLen = MultiByteToWideChar(CP_UTF8, 0, pPath, -1, NULL, 0);
+        if (pathLen == 0) {
+            return e_result_from_errno(GetLastError());
+        }
+
+        if (pathLen <= (int)E_COUNTOF(pPathWStack)) {
+            pPathW = pPathWStack;
+        } else {
+            pPathWHeap = (wchar_t*)e_malloc(pathLen * sizeof(wchar_t), e_fs_get_allocation_callbacks(pFS));  /* pathLen includes the null terminator. */
+            if (pPathWHeap == NULL) {
+                return E_OUT_OF_MEMORY;
+            }
+
+            pPathW = pPathWHeap;
+        }
+
+        MultiByteToWideChar(CP_UTF8, 0, pPath, -1, pPathW, pathLen);
+
+        hFind = FindFirstFileW(pPathW, &fd);
+
+        e_free(pPathWHeap, e_fs_get_allocation_callbacks(pFS));
+        pPathWHeap = NULL;
+
+        *pInfo = e_file_info_from_WIN32_FIND_DATAW(&fd);
+    }
+    #else
+    {
+        struct stat info;
+
+        E_UNUSED(pFS);
+
+        if (stat(pPath, &info) != 0) {
+            return e_result_from_errno(errno);
+        }
+
+        *pInfo = e_file_info_from_stat(&info);
+    }
+    #endif
+
+    (void)openMode;
+
+    return E_SUCCESS;
+}
+
+
+typedef struct e_file_stdio
+{
+    FILE* pFile;
+    char openMode[4];   /* For duplication. */
+    e_bool32 isRegisteredOrHandle; /* When set to true, will not be closed with e_file_close(). */
+} e_file_stdio;
+
+static size_t e_file_alloc_size_stdio(e_fs* pFS)
+{
+    E_UNUSED(pFS);
+    return sizeof(e_file_stdio);
+}
+
+static e_result e_file_open_stdio(e_fs* pFS, e_stream* pStream, const char* pPath, int openMode, e_file* pFile)
+{
+    e_file_stdio* pFileStdio;
+    int result;
+
+    E_UNUSED(pFS);
+    E_UNUSED(pStream);
+
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    if (pFileStdio == NULL) {
+        return E_INVALID_ARGS;
+    }
+    
+    if ((openMode & E_WRITE) != 0) {
+        if ((openMode & E_READ) != 0) {
             /* Read and write. */
-            if ((openMode & E_OPEN_MODE_APPEND) != 0) {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "a+b");   /* Read-and-write, appending. */
-            } else if ((openMode & E_OPEN_MODE_TRUNCATE) != 0) {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "w+b");   /* Read-and-write, truncating. */
+            if ((openMode & E_APPEND) == E_APPEND) {
+                pFileStdio->openMode[0] = 'a'; pFileStdio->openMode[1] = '+'; pFileStdio->openMode[2] = 'b'; pFileStdio->openMode[3] = 0;   /* Read-and-write, appending. */
+            } else if ((openMode & E_OVERWRITE) == E_OVERWRITE) {
+                pFileStdio->openMode[0] = 'r'; pFileStdio->openMode[1] = '+'; pFileStdio->openMode[2] = 'b'; pFileStdio->openMode[3] = 0;   /* Read-and-write, overwriting. */
             } else {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "r+b");   /* Read-and-write, overwriting. */
+                pFileStdio->openMode[0] = 'w'; pFileStdio->openMode[1] = '+'; pFileStdio->openMode[2] = 'b'; pFileStdio->openMode[3] = 0;   /* Read-and-write, truncating. */
             }
         } else {
             /* Write-only. */
-            if ((openMode & E_OPEN_MODE_APPEND) != 0) {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "ab");    /* Write-only, appending. */
-            } else if ((openMode & E_OPEN_MODE_TRUNCATE) != 0) {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "wb");    /* Write-only, truncating. */
+            if ((openMode & E_APPEND) == E_APPEND) {
+                pFileStdio->openMode[0] = 'a'; pFileStdio->openMode[1] = 'b'; pFileStdio->openMode[2] = 0; /* Write-only, appending. */
+            } else if ((openMode & E_OVERWRITE) == E_OVERWRITE) {
+                pFileStdio->openMode[0] = 'r'; pFileStdio->openMode[1] = '+'; pFileStdio->openMode[2] = 'b'; pFileStdio->openMode[3] = 0;   /* Write-only, overwriting. Need to use the "+" option here because there does not appear to be an option for a write-only overwrite mode. */
             } else {
-                c89str_strcpy_s(openModeStr, sizeof(openModeStr), "r+b");   /* Write-only, overwriting. Need to use the "+" option here because there does not appear to be an option for a write-only overwrite mode. */
+                pFileStdio->openMode[0] = 'w'; pFileStdio->openMode[1] = 'b'; pFileStdio->openMode[2] = 0; /* Write-only, truncating. */
             }
         }
     } else {
-        if ((openMode & E_OPEN_MODE_READ) != 0) {
-            c89str_strcpy_s(openModeStr, sizeof(openModeStr), "rb");    /* Read-only. */
+        if ((openMode & E_READ) != 0) {
+            pFileStdio->openMode[0] = 'r'; pFileStdio->openMode[1] = 'b'; pFileStdio->openMode[2] = 0;    /* Read-only. */
         } else {
             return E_INVALID_ARGS;
         }
     }
 
-    result = e_fopen(&pFileDefault->pFILE, pFilePath, openModeStr);
-    if (result != E_SUCCESS) {
-        return result;
+    #if defined(_WIN32) && defined(E_HAS_WFOPEN)
+    {
+        size_t i;
+        int pathLen;
+        wchar_t  pOpenModeW[4];
+        wchar_t  pFilePathWStack[1024];
+        wchar_t* pFilePathWHeap = NULL;
+        wchar_t* pFilePathW;
+
+        /* Use Win32 to convert from UTF-8 to wchar_t. */
+        pathLen = MultiByteToWideChar(CP_UTF8, 0, pPath, -1, NULL, 0);
+        if (pathLen > 0) {
+            if (pathLen <= (int)E_COUNTOF(pFilePathWStack)) {
+                pFilePathW = pFilePathWStack;
+            } else {
+                pFilePathWHeap = (wchar_t*)e_malloc(pathLen * sizeof(wchar_t), e_fs_get_allocation_callbacks(pFS));
+                if (pFilePathWHeap == NULL) {
+                    return E_OUT_OF_MEMORY;
+                }
+
+                pFilePathW = pFilePathWHeap;
+            }
+
+            MultiByteToWideChar(CP_UTF8, 0, pPath, -1, pFilePathW, pathLen);
+            
+            for (i = 0; i < E_COUNTOF(pOpenModeW); i += 1) {
+                pOpenModeW[i] = (wchar_t)pFileStdio->openMode[i];
+            }
+
+            result = e_wfopen(&pFileStdio->pFile, pFilePathW, pOpenModeW);
+
+            e_free(pFilePathWHeap, e_fs_get_allocation_callbacks(pFS));
+            pFilePathWHeap = NULL;
+
+            if (result == 0) {
+                return E_SUCCESS;
+            }
+        }
+    }
+    #endif
+
+    /* Getting here means we're either not opening with wfopen(), or wfopen() failed (or the conversion from char to wchar_t). */
+    result = e_fopen(&pFileStdio->pFile, pPath, pFileStdio->openMode);
+    if (result != 0) {
+        return e_result_from_errno(result);
     }
 
     return E_SUCCESS;
 }
 
-static void e_fs_close_default(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
+static e_result e_file_open_handle_stdio(e_fs* pFS, void* hBackendFile, e_file* pFile)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
+    e_file_stdio* pFileStdio;
 
-    E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
-    E_UNUSED(pAllocationCallbacks);
+    E_UNUSED(pFS);
 
-    fclose(pFileDefault->pFILE);
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    if (pFileStdio == NULL) {
+        return E_INVALID_ARGS;
+    }
+    
+    pFileStdio->pFile = (FILE*)hBackendFile;
+    pFileStdio->isRegisteredOrHandle = E_TRUE;
+
+    return E_SUCCESS;
 }
 
-static e_result e_fs_read_default(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+static void e_file_close_stdio(e_file* pFile)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
-    size_t result;
+    e_file_stdio* pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    if (pFileStdio == NULL) {
+        return;
+    }
 
-    E_ASSERT(pFile != NULL);
-    E_ASSERT(pDst != NULL);
+    if (!pFileStdio->isRegisteredOrHandle) {
+        fclose(pFileStdio->pFile);
+    }
+}
+
+static e_result e_file_read_stdio(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+{
+    size_t bytesRead;
+    e_file_stdio* pFileStdio;
+
+    /* These were all validated at a higher level. */
+    E_ASSERT(pFile      != NULL);
+    E_ASSERT(pDst       != NULL);
     E_ASSERT(pBytesRead != NULL);
-    E_UNUSED(pUserData);
 
-    result = fread(pDst, 1, bytesToRead, pFileDefault->pFILE);
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
-    *pBytesRead = result;
+    bytesRead = fread(pDst, 1, bytesToRead, pFileStdio->pFile);
 
-    if (result != bytesToRead) {
-        if (result == 0 && feof(pFileDefault->pFILE)) {
-            return E_AT_END;
+    *pBytesRead = bytesRead;
+    
+    /* If the value returned by fread is less than the bytes requested, it was either EOF or an error. We don't return EOF unless the number of bytes read is 0. */
+    if (bytesRead != bytesToRead) {
+        if (feof(pFileStdio->pFile)) {
+            if (bytesRead == 0) {
+                return E_AT_END;
+            }
         } else {
-            return e_result_from_errno(ferror(pFileDefault->pFILE));
+            return e_result_from_errno(ferror(pFileStdio->pFile));
         }
     }
 
     return E_SUCCESS;
 }
 
-static e_result e_fs_write_default(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+static e_result e_file_write_stdio(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
-    size_t result;
+    size_t bytesWritten;
+    e_file_stdio* pFileStdio;
 
-    E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
+    /* These were all validated at a higher level. */
+    E_ASSERT(pFile         != NULL);
+    E_ASSERT(pSrc          != NULL);
+    E_ASSERT(pBytesWritten != NULL);
 
-    result = fwrite(pSrc, 1, bytesToWrite, pFileDefault->pFILE);
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
-    *pBytesWritten = result;
+    bytesWritten = fwrite(pSrc, 1, bytesToWrite, pFileStdio->pFile);
 
-    if (result != bytesToWrite) {
-        return e_result_from_errno(ferror(pFileDefault->pFILE));
+    *pBytesWritten = bytesWritten;
+
+    if (bytesWritten != bytesToWrite) {
+        return e_result_from_errno(ferror(pFileStdio->pFile));
     }
 
     return E_SUCCESS;
 }
 
-static e_result e_fs_seek_default(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin)
+static e_result e_file_seek_stdio(e_file* pFile, e_int64 offset, e_seek_origin origin)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
+    e_file_stdio* pFileStdio;
     int result;
     int whence;
 
+    /* These were all validated at a higher level. */
     E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
+    
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
     if (origin == E_SEEK_SET) {
         whence = SEEK_SET;
@@ -6901,42 +10737,45 @@ static e_result e_fs_seek_default(void* pUserData, e_file* pFile, e_int64 offset
 
 #if defined(_WIN32)
     #if defined(_MSC_VER) && _MSC_VER > 1200
-        result = _fseeki64(pFileDefault->pFILE, offset, whence);
+        result = _fseeki64(pFileStdio->pFile, offset, whence);
     #else
         /* No _fseeki64() so restrict to 31 bits. */
         if (origin > 0x7FFFFFFF) {
             return E_OUT_OF_RANGE;
         }
 
-        result = fseek(pFileDefault->pFILE, (int)offset, whence);
+        result = fseek(pFileStdio->pFile, (int)offset, whence);
     #endif
 #else
-    result = fseek(pFileDefault->pFILE, (long int)offset, whence);
+    result = fseek(pFileStdio->pFile, (long int)offset, whence);
 #endif
     if (result != 0) {
-        return E_ERROR;
+        return e_result_from_errno(errno);
     }
 
     return E_SUCCESS;
 }
 
-static e_result e_fs_tell_default(void* pUserData, e_file* pFile, e_int64* pCursor)
+static e_result e_file_tell_stdio(e_file* pFile, e_int64* pCursor)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
+    e_file_stdio* pFileStdio;
     e_int64 result;
 
-    E_ASSERT(pFile != NULL);
+    /* These were all validated at a higher level. */
+    E_ASSERT(pFile   != NULL);
     E_ASSERT(pCursor != NULL);
-    E_UNUSED(pUserData);
+
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
 #if defined(_WIN32)
     #if defined(_MSC_VER) && _MSC_VER > 1200
-        result = _ftelli64(pFileDefault->pFILE);
+        result = _ftelli64(pFileStdio->pFile);
     #else
-        result = ftell(pFileDefault->pFILE);
+        result = ftell(pFileStdio->pFile);
     #endif
 #else
-    result = ftell(pFileDefault->pFILE);
+    result = ftell(pFileStdio->pFile);
 #endif
 
     *pCursor = result;
@@ -6944,305 +10783,310 @@ static e_result e_fs_tell_default(void* pUserData, e_file* pFile, e_int64* pCurs
     return E_SUCCESS;
 }
 
-static e_result e_fs_flush_default(void* pUserData, e_file* pFile)
+static e_result e_file_flush_stdio(e_file* pFile)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
+    e_file_stdio* pFileStdio;
+    int result;
 
+    /* These were all validated at a higher level. */
     E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
 
-    if (fflush(pFileDefault->pFILE) != 0) {
-        return e_result_from_errno(ferror(pFileDefault->pFILE));
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
+
+    result = fflush(pFileStdio->pFile);
+    if (result != 0) {
+        return e_result_from_errno(ferror(pFileStdio->pFile));
     }
 
     return E_SUCCESS;
 }
 
 
-#if !defined(_MSC_VER) && !((defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 1) || defined(_XOPEN_SOURCE) || defined(_POSIX_SOURCE)) && !defined(E_BSD)
+/* Please submit a bug report if you get an error about fileno(). */
+#if !defined(_MSC_VER) && !((defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 1) || defined(_XOPEN_SOURCE) || defined(_POSIX_SOURCE)) && !(defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__))
 int fileno(FILE *stream);
 #endif
 
-static e_result e_fs_info_default(void* pUserData, e_file* pFile, e_file_info* pInfo)
+static e_result e_file_info_stdio(e_file* pFile, e_file_info* pInfo)
 {
-    e_file_default* pFileDefault = (e_file_default*)pFile;
+    e_file_stdio* pFileStdio;
     int fd;
     struct stat info;
 
+    /* These were all validated at a higher level. */
     E_ASSERT(pFile != NULL);
-    E_UNUSED(pUserData);
+    E_ASSERT(pInfo != NULL);
+
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
 #if defined(_MSC_VER)
-    fd = _fileno(pFileDefault->pFILE);
+    fd = _fileno(pFileStdio->pFile);
 #else
-    fd =  fileno(pFileDefault->pFILE);
+    fd =  fileno(pFileStdio->pFile);
 #endif
 
     if (fstat(fd, &info) != 0) {
+        return e_result_from_errno(ferror(pFileStdio->pFile));
+    }
+
+    *pInfo = e_file_info_from_stat(&info);
+
+    return E_SUCCESS;
+}
+
+/* Iteration is platform-specific. */
+#define E_STDIO_MIN_ITERATOR_ALLOCATION_SIZE 1024
+
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+
+E_API e_result e_file_duplicate_stdio(e_file* pFile, e_file* pDuplicatedFile)
+{
+    e_file_stdio* pFileStdio;
+    e_file_stdio* pDuplicatedFileStdio;
+    int fd;
+    int fdDuplicate;
+    HANDLE hFile;
+    HANDLE hFileDuplicate;
+
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
+
+    pDuplicatedFileStdio = (e_file_stdio*)e_file_get_backend_data(pDuplicatedFile);
+    E_ASSERT(pDuplicatedFileStdio != NULL);
+
+    fd = _fileno(pFileStdio->pFile);
+    if (fd == -1) {
         return e_result_from_errno(errno);
     }
 
-    pInfo->size = info.st_size;
+    hFile = (HANDLE)_get_osfhandle(fd);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return e_result_from_errno(errno);
+    }
+
+    if (!DuplicateHandle(GetCurrentProcess(), hFile, GetCurrentProcess(), &hFileDuplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        return e_result_from_errno(GetLastError());
+    }
+
+    fdDuplicate = _open_osfhandle((e_intptr)hFileDuplicate, _O_RDONLY);
+    if (fdDuplicate == -1) {
+        CloseHandle(hFileDuplicate);
+        return e_result_from_errno(errno);
+    }
+
+    pDuplicatedFileStdio->pFile = _fdopen(fdDuplicate, pFileStdio->openMode);
+    if (pDuplicatedFileStdio->pFile == NULL) {
+        _close(fdDuplicate);
+        return e_result_from_errno(errno);
+    }
 
     return E_SUCCESS;
 }
 
 
-
-/* Unfortunately file iteration is platform-specific. */
-#if defined(E_WIN32)
-typedef struct
+typedef struct e_iterator_stdio
 {
     e_fs_iterator iterator;
     HANDLE hFind;
-} e_fs_iterator_default;
+} e_iterator_stdio;
 
-static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+E_API void e_free_iterator_stdio(e_fs_iterator* pIterator)
 {
-    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+    e_iterator_stdio* pIteratorStdio = (e_iterator_stdio*)pIterator;
 
-    E_ASSERT(pIteratorDefault != NULL);
-    E_UNUSED(pUserData);
-
-    FindClose(pIteratorDefault->hFind);
-    e_free(pIteratorDefault, pAllocationCallbacks);
+    FindClose(pIteratorStdio->hFind);
+    e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pIterator->pFS));
 }
 
-static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
+static e_fs_iterator* e_iterator_stdio_resolve(e_iterator_stdio* pIteratorStdio, e_fs* pFS, HANDLE hFind, const WIN32_FIND_DATAW* pFD)
 {
-    c89str_allocation_callbacks cstr89AllocationCallbacks = e_allocation_callbacks_to_c89str(pAllocationCallbacks);
-    wchar_t* queryW = NULL;
-    size_t queryWLen;
-    c89str query = NULL;
-    size_t queryLen;
+    e_iterator_stdio* pNewIteratorStdio;
+    size_t allocSize;
+    int nameLen;
+
+    /*
+    The name is stored at the end of the struct. In order to know how much memory to allocate we'll
+    need to calculate the length of the name.
+    */
+    nameLen = WideCharToMultiByte(CP_UTF8, 0, pFD->cFileName, -1, NULL, 0, NULL, NULL);
+    if (nameLen == 0) {
+        e_free_iterator_stdio((e_fs_iterator*)pIteratorStdio);
+        return NULL;
+    }
+
+    allocSize = E_MAX(sizeof(e_iterator_stdio) + nameLen, E_STDIO_MIN_ITERATOR_ALLOCATION_SIZE);    /* "nameLen" includes the null terminator. 1KB just to try to avoid excessive internal reallocations inside realloc(). */
+
+    pNewIteratorStdio = (e_iterator_stdio*)e_realloc(pIteratorStdio, allocSize, e_fs_get_allocation_callbacks(pFS));
+    if (pNewIteratorStdio == NULL) {
+        e_free_iterator_stdio((e_fs_iterator*)pIteratorStdio);
+        return NULL;
+    }
+
+    pNewIteratorStdio->iterator.pFS = pFS;
+    pNewIteratorStdio->hFind        = hFind;
+
+    /* Name. */
+    pNewIteratorStdio->iterator.pName   = (char*)pNewIteratorStdio + sizeof(e_iterator_stdio);
+    pNewIteratorStdio->iterator.nameLen = (size_t)nameLen - 1;  /* nameLen includes the null terminator. */
+    WideCharToMultiByte(CP_UTF8, 0, pFD->cFileName, -1, (char*)pNewIteratorStdio->iterator.pName, nameLen, NULL, NULL);  /* const-cast is safe here. */
+
+    /* Info. */
+    pNewIteratorStdio->iterator.info = e_file_info_from_WIN32_FIND_DATAW(pFD);
+
+    return (e_fs_iterator*)pNewIteratorStdio;
+}
+
+E_API e_fs_iterator* e_first_stdio(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+{
+    size_t i;
+    int queryLen;
+    int cbMultiByte;
+    wchar_t  pQueryStack[1024];
+    wchar_t* pQueryHeap = NULL;
+    wchar_t* pQuery;
     HANDLE hFind;
-    WIN32_FIND_DATAW findData;
-    size_t fileNameLenIncludingNullTerminator;
-    e_fs_iterator_default* pIterator;
+    WIN32_FIND_DATAW fd;
 
-    E_ASSERT(pDirectoryPath != NULL);
-    E_UNUSED(pUserData);
+    /* An empty path means the current directory. Win32 will want us to specify "." in this case. */
+    if (pDirectoryPath == NULL || pDirectoryPath[0] == '\0') {
+        pDirectoryPath = ".";
+        directoryPathLen = 1;
+    }
 
-    /*
-    A few notes here. We want to use FindFirstFileW() and not FindFirstFileA() for two reasons:
+    if (directoryPathLen == E_NULL_TERMINATED) {
+        cbMultiByte = -1;
+    } else {
+        if (directoryPathLen > 0xFFFFFFFF) {
+            return NULL;
+        }
 
-        1) We want to support Unicode paths for non-English languages
-        2) We want to support paths longer than MAX_PATH
+        cbMultiByte = (int)directoryPathLen;
+    }
 
-    To support longer file paths, we need to prepend "\\?\" to the path.
-
-    For FindFirstFileW() to work, we need to ensure we normalize our slashes to backslashes. We also need to ensure
-    we remove the trailing slash.
-
-    In addition, FindFirstFileW() uses wildcards to determine what to search for. We need to append "\*" to the end
-    of the query so that everything is returned.
-
-    Our iteration system does not include the "." and ".." directories, so they'll need to be skipped as well.
-
-    EDIT: It turns out that it appears that \\?\ can only be used for absolute paths. For now just not supporting
-    long file paths.
-    */
-
-    /* First thing is to append the directory path we originally specified. */
-    query = c89str_newn(&cstr89AllocationCallbacks, pDirectoryPath, directoryPathLen);
-    if (query == NULL) {
+    /* When iterating over files using Win32 you specify a wildcard pattern. The "+ 3" you see in the code below is for the wildcard pattern. We also need to make everything a backslash. */
+    queryLen = MultiByteToWideChar(CP_UTF8, 0, pDirectoryPath, cbMultiByte, NULL, 0);
+    if (queryLen == 0) {
         return NULL;
     }
 
-    /* Next we need to normalize the slashes. */
-    query = c89str_replace_all(query, &cstr89AllocationCallbacks, "/", 1, "\\", 1);    /* This will not fail. */
+    if ((queryLen + 3) > (int)E_COUNTOF(pQueryStack)) {
+        pQueryHeap = (wchar_t*)e_malloc((queryLen + 3) * sizeof(wchar_t), e_fs_get_allocation_callbacks(pFS));
+        if (pQueryHeap == NULL) {
+            return NULL;
+        }
 
-    /* Next we need to remove the trailing slash. */
-    queryLen = c89str_len(query);  /* This will not fail. */
-    if (queryLen > 0) {
-        if (query[queryLen-1] == '/' || query[queryLen-1] == '\\') {
-            query = c89str_remove(query, &cstr89AllocationCallbacks, queryLen-1, 1);    /* This will not fail. */
+        pQuery = pQueryHeap;
+    }
+    else {
+        pQuery = pQueryStack;
+    }
+
+    MultiByteToWideChar(CP_UTF8, 0, pDirectoryPath, cbMultiByte, pQuery, queryLen);
+
+    if (directoryPathLen == E_NULL_TERMINATED) {
+        queryLen -= 1;  /* Remove the null terminator. Will not include the null terminator if the input string is not null terminated, hence why this is inside the conditional. */
+    }
+
+    /* Remove the trailing slash, if any. */
+    if (pQuery[queryLen - 1] == L'\\' || pQuery[queryLen - 1] == L'/') {
+        queryLen -= 1;
+    }
+
+    pQuery[queryLen + 0] = L'\\';
+    pQuery[queryLen + 1] = L'*';
+    pQuery[queryLen + 2] = L'\0';
+
+    /* Convert to backslashes. */
+    for (i = 0; i < (size_t)queryLen; i += 1) {
+        if (pQuery[i] == L'/') {
+            pQuery[i] = L'\\';
         }
     }
 
-    /* Now we need to append the wildcard. */
-    query = c89str_catn(query, &cstr89AllocationCallbacks, "\\*", 2);
-    if (e_result_from_errno(c89str_result(query)) != E_SUCCESS) {
-        c89str_delete(query, &cstr89AllocationCallbacks);
-        return NULL;
-    }
+    hFind = FindFirstFileW(pQuery, &fd);
+    e_free(pQueryHeap, e_fs_get_allocation_callbacks(pFS));
 
-    /*
-    Disabling long file paths for now. See note above. Should probably check if the path is absolute, and if
-    so prepend "\\?\".
-    */
-#if 0
-    /* Now we need to prepend the "\\?\" to the path. */
-    query = c89str_prependn(query, &cstr89AllocationCallbacks, "\\\\?\\", 4);
-    if (e_result_from_errno(c89str_result(query)) != E_SUCCESS) {
-        c89str_delete(query, &cstr89AllocationCallbacks);
-        return NULL;
-    }
-#endif
-
-    /*
-    Before we can call FindFirstFileW() we need to convert the string to wide characters using
-    MultiByteToWideChar(). The first step is to calculate the length.
-    */
-    queryWLen = MultiByteToWideChar(CP_UTF8, 0, query, -1, NULL, 0);    /* -1 because our string is null terminated. */
-    if (queryWLen == 0) {
-        c89str_delete(query, &cstr89AllocationCallbacks);
-        return NULL;
-    }
-
-    queryW = (wchar_t*)e_malloc(sizeof(*queryW) * (queryWLen+1), pAllocationCallbacks); /* +1 for the null terminator. */
-    if (queryW == NULL) {
-        c89str_delete(query, &cstr89AllocationCallbacks);
-        return NULL;
-    }
-
-    queryWLen = MultiByteToWideChar(CP_UTF8, 0, query, -1, queryW, (int)queryWLen); /* -1 because our string is null terminated. */
-    if (queryWLen == 0) {
-        e_free(queryW, pAllocationCallbacks);
-        return NULL;
-    }
-
-    /* We're done with the UT8-8 query. From here on out queryW will be used. */
-    c89str_delete(query, &cstr89AllocationCallbacks);
-    query = NULL;
-
-    /*
-    We can now call into FindFirstFileW(). We can't allocate the iterator until we know the name of
-    the first file because we'll be allocating the memory for the name at the end of the struct.
-    */
-    hFind = FindFirstFileW(queryW, &findData);
     if (hFind == INVALID_HANDLE_VALUE) {
-        e_free(queryW, pAllocationCallbacks);
         return NULL;
     }
 
-    /* We're done with the wide character query. */
-    e_free(queryW, pAllocationCallbacks);
-    queryW = NULL;
-
-    /* Before we can allocate the iterator we need to convert the file name to UTF-8. */
-    fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, NULL, 0, NULL, NULL); /* -1 because our string is null terminated. */
-    if (fileNameLenIncludingNullTerminator == 0) {
-        FindClose(hFind);
-        return NULL;
-    }
-
-    /* Now that we have the length of the file name, we can allocate the iterator. */
-    pIterator = (e_fs_iterator_default*)e_malloc(sizeof(*pIterator) + fileNameLenIncludingNullTerminator, pAllocationCallbacks);
-    if (pIterator == NULL) {
-        FindClose(hFind);
-        return NULL;
-    }
-
-    pIterator->iterator.pFS = pFS;
-
-    /* The name will be stored at the end of the struct. */
-    pIterator->iterator.pName = (char*)pIterator + sizeof(*pIterator);
-    pIterator->iterator.nameLen = fileNameLenIncludingNullTerminator - 1; /* -1 because we don't want to include the null terminator. */
-
-    /* We can now convert the file name to UTF-8. */
-    fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, (char*)pIterator->iterator.pName, (int)fileNameLenIncludingNullTerminator, NULL, NULL); /* -1 because our string is null terminated. */
-    if (fileNameLenIncludingNullTerminator == 0) {
-        e_free(pIterator, pAllocationCallbacks);
-        FindClose(hFind);
-        return NULL;
-    }
-
-    /* The file info will be located in fileData. We'll need to copy over the relevant details. */
-    E_ZERO_OBJECT(&pIterator->iterator.info);
-    pIterator->iterator.info.directory        = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-    pIterator->iterator.info.size             = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
-    pIterator->iterator.info.lastModifiedTime = ((e_uint64)findData.ftLastWriteTime.dwHighDateTime  << 32) | findData.ftLastWriteTime.dwLowDateTime;
-    pIterator->iterator.info.lastAccessTime   = ((e_uint64)findData.ftLastAccessTime.dwHighDateTime << 32) | findData.ftLastAccessTime.dwLowDateTime;
-
-    /* Now just write out hFind item to the iterator so we have a hold of it for later and we're finally done. */
-    pIterator->hFind = hFind;
-
-    return (e_fs_iterator*)pIterator;
+    return e_iterator_stdio_resolve(NULL, pFS, hFind, &fd);
 }
 
-static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+E_API e_fs_iterator* e_next_stdio(e_fs_iterator* pIterator)
 {
-    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
-    WIN32_FIND_DATAW findData;
+    e_iterator_stdio* pIteratorStdio = (e_iterator_stdio*)pIterator;
+    WIN32_FIND_DATAW fd;
 
-    E_ASSERT(pIteratorDefault != NULL);
-    E_UNUSED(pUserData);
-
-    /* We need to call FindNextFileW() to get the next file. */
-    if (FindNextFileW(pIteratorDefault->hFind, &findData)) {
-        e_fs_iterator_default* pNewIteratorDefault;
-
-        /* We need to convert the file name to UTF-8. We'll first need to grab the length. */
-        int fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, NULL, 0, NULL, NULL); /* -1 because our string is null terminated. */
-        if (fileNameLenIncludingNullTerminator == 0) {
-            return NULL;
-        }
-
-        /* We need to reallocate the iterator to accomodate the length of the new file name. */
-        pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIterator, sizeof(*pNewIteratorDefault) + fileNameLenIncludingNullTerminator, pAllocationCallbacks);
-        if (pNewIteratorDefault == NULL) {
-            return NULL;
-        }
-
-        pNewIteratorDefault->iterator.pName = (char*)pNewIteratorDefault + sizeof(*pNewIteratorDefault);
-        pNewIteratorDefault->iterator.nameLen = fileNameLenIncludingNullTerminator - 1; /* -1 because we don't want to include the null terminator. */
-
-        /* We can now convert the file name to UTF-8. */
-        fileNameLenIncludingNullTerminator = WideCharToMultiByte(CP_UTF8, 0, findData.cFileName, -1, (char*)pNewIteratorDefault->iterator.pName, (int)fileNameLenIncludingNullTerminator, NULL, NULL); /* -1 because our string is null terminated. */
-        if (fileNameLenIncludingNullTerminator == 0) {
-            return NULL;
-        }
-
-        /* The file info will be located in fileData. We'll need to copy over the relevant details. */
-        E_ZERO_OBJECT(&pNewIteratorDefault->iterator.info);
-        pNewIteratorDefault->iterator.info.directory        = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        pNewIteratorDefault->iterator.info.size             = ((e_uint64)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
-        pNewIteratorDefault->iterator.info.lastModifiedTime = ((e_uint64)findData.ftLastWriteTime.dwHighDateTime  << 32) | findData.ftLastWriteTime.dwLowDateTime;
-        pNewIteratorDefault->iterator.info.lastAccessTime   = ((e_uint64)findData.ftLastAccessTime.dwHighDateTime << 32) | findData.ftLastAccessTime.dwLowDateTime;
-
-        return (e_fs_iterator*)pNewIteratorDefault;
+    if (!FindNextFileW(pIteratorStdio->hFind, &fd)) {
+        e_free_iterator_stdio(pIterator);
+        return NULL;
     }
 
-    /* Getting here means the iterator is done. We can uninitialize it and return null. */
-    e_fs_free_iterator_default(pUserData, pIterator, pAllocationCallbacks);
-
-    return NULL;
+    return e_iterator_stdio_resolve(pIteratorStdio, pIterator->pFS, pIteratorStdio->hFind, &fd);
 }
-#endif
-
-#if defined(E_POSIX)
+#else
+#include <unistd.h>
 #include <dirent.h>
 
-typedef struct
+E_API e_result e_file_duplicate_stdio(e_file* pFile, e_file* pDuplicatedFile)
 {
-    e_fs_iterator iterator;
-    DIR* dir;
-    char* pFullFilePath;        /* Points to the end of the structure. */
-    size_t directoryPathLen;    /* The length of the directory section. */
-} e_fs_iterator_default;
+    e_file_stdio* pFileStdio;
+    e_file_stdio* pDuplicatedFileStdio;
+    FILE* pDuplicatedFileHandle;
 
-static void e_fs_free_iterator_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+    /* These were all validated at a higher level. */
+    E_ASSERT(pFile           != NULL);
+    E_ASSERT(pDuplicatedFile != NULL);
 
-    E_ASSERT(pIteratorDefault != NULL);
-    E_UNUSED(pUserData);
+    pFileStdio = (e_file_stdio*)e_file_get_backend_data(pFile);
+    E_ASSERT(pFileStdio != NULL);
 
-    closedir(pIteratorDefault->dir);
-    e_free(pIteratorDefault, pAllocationCallbacks);
+    pDuplicatedFileStdio = (e_file_stdio*)e_file_get_backend_data(pDuplicatedFile);
+    E_ASSERT(pDuplicatedFileStdio != NULL);
+
+    pDuplicatedFileHandle = fdopen(dup(fileno(pFileStdio->pFile)), pFileStdio->openMode);
+    if (pDuplicatedFileHandle == NULL) {
+        return e_result_from_errno(errno);
+    }
+
+    pDuplicatedFileStdio->pFile = pDuplicatedFileHandle;
+    E_COPY_MEMORY(pDuplicatedFileStdio->openMode, pFileStdio->openMode, sizeof(pFileStdio->openMode));
+
+    return E_SUCCESS;
 }
 
-static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
+
+typedef struct e_iterator_stdio
 {
-    e_fs_iterator_default* pIteratorDefault;
+    e_fs_iterator iterator;
+    DIR* pDir;
+    char* pFullFilePath;        /* Points to the end of the structure. */
+    size_t directoryPathLen;    /* The length of the directory section. */
+} e_iterator_stdio;
+
+E_API void e_free_iterator_stdio(e_fs_iterator* pIterator)
+{
+    e_iterator_stdio* pIteratorStdio = (e_iterator_stdio*)pIterator;
+
+    E_ASSERT(pIteratorStdio != NULL);
+
+    closedir(pIteratorStdio->pDir);
+    e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pIterator->pFS));
+}
+
+E_API e_fs_iterator* e_first_stdio(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+{
+    e_iterator_stdio* pIteratorStdio;
     struct dirent* info;
     struct stat statInfo;
     size_t fileNameLen;
 
     E_ASSERT(pDirectoryPath != NULL);
-    E_UNUSED(pUserData);
-    E_UNUSED(pFS);
 
     /*
     Our input string isn't necessarily null terminated so we'll need to make a copy. This isn't
@@ -7256,43 +11100,49 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     including the separating slash. Then we copy the file name portion over to the buffer.
     */
 
+    if (directoryPathLen == 0 || pDirectoryPath[0] == '\0') {
+        directoryPathLen = 1;
+        pDirectoryPath = ".";
+    }
+
     /* The first step is to calculate the length of the path if we need to. */
     if (directoryPathLen == (size_t)-1) {
-        directoryPathLen = c89str_strlen(pDirectoryPath);
+        directoryPathLen = strlen(pDirectoryPath);
     }
+
 
     /*
     Now that we know the length of the directory we can allocate space for the iterator. The
     directory path will be placed at the end of the structure.
     */
-    pIteratorDefault = (e_fs_iterator_default*)e_malloc(sizeof(*pIteratorDefault) + directoryPathLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
-    if (pIteratorDefault == NULL) {
+    pIteratorStdio = (e_iterator_stdio*)e_malloc(E_MAX(sizeof(*pIteratorStdio) + directoryPathLen + 1, E_STDIO_MIN_ITERATOR_ALLOCATION_SIZE), e_fs_get_allocation_callbacks(pFS));    /* +1 for null terminator. */
+    if (pIteratorStdio == NULL) {
         return NULL;
     }
 
     /* Point pFullFilePath to the end of structure to where the path is located. */
-    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
-    pIteratorDefault->directoryPathLen = directoryPathLen;
+    pIteratorStdio->pFullFilePath = (char*)pIteratorStdio + sizeof(*pIteratorStdio);
+    pIteratorStdio->directoryPathLen = directoryPathLen;
 
     /* We can now copy over the directory path. This will null terminate the path which will allow us to call opendir(). */
-    c89str_strncpy_s(pIteratorDefault->pFullFilePath, directoryPathLen + 1, pDirectoryPath, directoryPathLen);
+    e_strncpy_s(pIteratorStdio->pFullFilePath, directoryPathLen + 1, pDirectoryPath, directoryPathLen);
 
     /* We can now open the directory. */
-    pIteratorDefault->dir = opendir(pIteratorDefault->pFullFilePath);
-    if (pIteratorDefault->dir == NULL) {
-        e_free(pIteratorDefault, pAllocationCallbacks);
+    pIteratorStdio->pDir = opendir(pIteratorStdio->pFullFilePath);
+    if (pIteratorStdio->pDir == NULL) {
+        e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pFS));
         return NULL;
     }
-
 
     /* We now need to get information about the first file. */
-    info = readdir(pIteratorDefault->dir);
+    info = readdir(pIteratorStdio->pDir);
     if (info == NULL) {
-        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        closedir(pIteratorStdio->pDir);
+        e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pFS));
         return NULL;
     }
 
-    fileNameLen = c89str_strlen(info->d_name);
+    fileNameLen = strlen(info->d_name);
 
     /*
     Now that we have the file name we need to append it to the full file path in the iterator. To do
@@ -7300,3149 +11150,116 @@ static e_fs_iterator* e_fs_first_default(void* pUserData, e_fs* pFS, const char*
     separating slash.
     */
     {
-        e_fs_iterator_default* pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIteratorDefault, sizeof(*pIteratorDefault) + directoryPathLen + 1 + fileNameLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
-        if (pNewIteratorDefault == NULL) {
-            e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        e_iterator_stdio* pNewIteratorStdio= (e_iterator_stdio*)e_realloc(pIteratorStdio, E_MAX(sizeof(*pIteratorStdio) + directoryPathLen + 1 + fileNameLen + 1, E_STDIO_MIN_ITERATOR_ALLOCATION_SIZE), e_fs_get_allocation_callbacks(pFS));    /* +1 for null terminator. */
+        if (pNewIteratorStdio == NULL) {
+            closedir(pIteratorStdio->pDir);
+            e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pFS));
             return NULL;
         }
 
-        pIteratorDefault = pNewIteratorDefault;
+        pIteratorStdio = pNewIteratorStdio;
     }
 
     /* Memory has been allocated. Copy over the separating slash and file name. */
-    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
-    pIteratorDefault->pFullFilePath[directoryPathLen] = '/';
-    c89str_strcpy(pIteratorDefault->pFullFilePath + directoryPathLen + 1, info->d_name);
+    pIteratorStdio->pFullFilePath = (char*)pIteratorStdio + sizeof(*pIteratorStdio);
+    pIteratorStdio->pFullFilePath[directoryPathLen] = '/';
+    e_strcpy(pIteratorStdio->pFullFilePath + directoryPathLen + 1, info->d_name);
 
     /* The pFileName member of the base iterator needs to be set to the file name. */
-    pIteratorDefault->iterator.pName   = pIteratorDefault->pFullFilePath + directoryPathLen + 1;
-    pIteratorDefault->iterator.nameLen = fileNameLen;
+    pIteratorStdio->iterator.pName   = pIteratorStdio->pFullFilePath + directoryPathLen + 1;
+    pIteratorStdio->iterator.nameLen = fileNameLen;
 
     /* We can now get the file information. */
-    if (stat(pIteratorDefault->pFullFilePath, &statInfo) != 0) {
-        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+    if (stat(pIteratorStdio->pFullFilePath, &statInfo) != 0) {
+        closedir(pIteratorStdio->pDir);
+        e_free(pIteratorStdio, e_fs_get_allocation_callbacks(pFS));
         return NULL;
     }
 
-    E_ZERO_OBJECT(&pIteratorDefault->iterator.info);
-    pIteratorDefault->iterator.info.size             = statInfo.st_size;
-    pIteratorDefault->iterator.info.lastModifiedTime = statInfo.st_mtime;
-    pIteratorDefault->iterator.info.lastAccessTime   = statInfo.st_atime;
-    pIteratorDefault->iterator.info.directory        = S_ISDIR(statInfo.st_mode) != 0;
+    pIteratorStdio->iterator.info = e_file_info_from_stat(&statInfo);
 
-    return (e_fs_iterator*)pIteratorDefault;
+    return (e_fs_iterator*)pIteratorStdio;
 }
 
-static e_fs_iterator* e_fs_next_default(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
+E_API e_fs_iterator* e_next_stdio(e_fs_iterator* pIterator)
 {
-    e_fs_iterator_default* pIteratorDefault = (e_fs_iterator_default*)pIterator;
+    e_iterator_stdio* pIteratorStdio = (e_iterator_stdio*)pIterator;
     struct dirent* info;
     struct stat statInfo;
     size_t fileNameLen;
 
-    E_ASSERT(pIteratorDefault != NULL);
-    E_UNUSED(pUserData);
+    E_ASSERT(pIteratorStdio != NULL);
 
     /* We need to get information about the next file. */
-    info = readdir(pIteratorDefault->dir);
+    info = readdir(pIteratorStdio->pDir);
     if (info == NULL) {
-        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        e_free_iterator_stdio((e_fs_iterator*)pIteratorStdio);
         return NULL;    /* The end of the directory. */
     }
 
-    fileNameLen = c89str_strlen(info->d_name);
+    fileNameLen = strlen(info->d_name);
 
     /* We need to reallocate the iterator to account for the new file name. */
     {
-        e_fs_iterator_default* pNewIteratorDefault = (e_fs_iterator_default*)e_realloc(pIteratorDefault, sizeof(*pIteratorDefault) + pIteratorDefault->directoryPathLen + 1 + fileNameLen + 1, pAllocationCallbacks);    /* +1 for null terminator. */
-        if (pNewIteratorDefault == NULL) {
-            e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+        e_iterator_stdio* pNewIteratorStdio = (e_iterator_stdio*)e_realloc(pIteratorStdio, E_MAX(sizeof(*pIteratorStdio) + pIteratorStdio->directoryPathLen + 1 + fileNameLen + 1, E_STDIO_MIN_ITERATOR_ALLOCATION_SIZE), e_fs_get_allocation_callbacks(pIterator->pFS));    /* +1 for null terminator. */
+        if (pNewIteratorStdio == NULL) {
+            e_free_iterator_stdio((e_fs_iterator*)pIteratorStdio);
             return NULL;
         }
 
-        pIteratorDefault = pNewIteratorDefault;
+        pIteratorStdio = pNewIteratorStdio;
     }
 
     /* Memory has been allocated. Copy over the file name. */
-    pIteratorDefault->pFullFilePath = (char*)pIteratorDefault + sizeof(*pIteratorDefault);
-    c89str_strcpy(pIteratorDefault->pFullFilePath + pIteratorDefault->directoryPathLen + 1, info->d_name);
+    pIteratorStdio->pFullFilePath = (char*)pIteratorStdio + sizeof(*pIteratorStdio);
+    e_strcpy(pIteratorStdio->pFullFilePath + pIteratorStdio->directoryPathLen + 1, info->d_name);
 
     /* The pFileName member of the base iterator needs to be set to the file name. */
-    pIteratorDefault->iterator.pName   = pIteratorDefault->pFullFilePath + pIteratorDefault->directoryPathLen + 1;
-    pIteratorDefault->iterator.nameLen = fileNameLen;
+    pIteratorStdio->iterator.pName   = pIteratorStdio->pFullFilePath + pIteratorStdio->directoryPathLen + 1;
+    pIteratorStdio->iterator.nameLen = fileNameLen;
 
     /* We can now get the file information. */
-    if (stat(pIteratorDefault->pFullFilePath, &statInfo) != 0) {
-        e_fs_free_iterator_default(pUserData, (e_fs_iterator*)pIteratorDefault, pAllocationCallbacks);
+    if (stat(pIteratorStdio->pFullFilePath, &statInfo) != 0) {
+        e_free_iterator_stdio((e_fs_iterator*)pIteratorStdio);
         return NULL;
     }
 
-    E_ZERO_OBJECT(&pIteratorDefault->iterator.info);
-    pIteratorDefault->iterator.info.size             = statInfo.st_size;
-    pIteratorDefault->iterator.info.lastModifiedTime = statInfo.st_mtime;
-    pIteratorDefault->iterator.info.lastAccessTime   = statInfo.st_atime;
-    pIteratorDefault->iterator.info.directory        = S_ISDIR(statInfo.st_mode) != 0;
+    pIteratorStdio->iterator.info = e_file_info_from_stat(&statInfo);
 
-    return (e_fs_iterator*)pIteratorDefault;
+    return (e_fs_iterator*)pIteratorStdio;
 }
 #endif
 
-
-static e_fs_vtable e_gDefaultFSVTable =
+e_fs_backend e_stdio_backend =
 {
-    e_fs_alloc_size_default,
-    e_fs_open_default,
-    e_fs_close_default,
-    e_fs_read_default,
-    e_fs_write_default,
-    e_fs_seek_default,
-    e_fs_tell_default,
-    e_fs_flush_default,
-    e_fs_info_default,
-    e_fs_first_default,
-    e_fs_next_default,
-    e_fs_free_iterator_default
+    e_alloc_size_stdio,
+    e_init_stdio,
+    e_uninit_stdio,
+    e_ioctl_stdio,
+    e_remove_stdio,
+    e_rename_stdio,
+    e_mkdir_stdio,
+    e_info_stdio,
+    e_file_alloc_size_stdio,
+    e_file_open_stdio,
+    e_file_open_handle_stdio,
+    e_file_close_stdio,
+    e_file_read_stdio,
+    e_file_write_stdio,
+    e_file_seek_stdio,
+    e_file_tell_stdio,
+    e_file_flush_stdio,
+    e_file_info_stdio,
+    e_file_duplicate_stdio,
+    e_first_stdio,
+    e_next_stdio,
+    e_free_iterator_stdio
 };
-
-
-static e_result e_file_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    return e_fs_read((e_file*)pStream, pDst, bytesToRead, pBytesRead);
-}
-
-static e_result e_file_stream_write(e_stream* pStream, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    return e_fs_write((e_file*)pStream, pSrc, bytesToWrite, pBytesWritten);
-}
-
-static e_result e_file_stream_seek(e_stream* pStream, e_int64 offset, e_seek_origin origin)
-{
-    return e_fs_seek((e_file*)pStream, offset, origin);
-}
-
-static e_result e_file_stream_tell(e_stream* pStream, e_int64* pCursor)
-{
-    return e_fs_tell((e_file*)pStream, pCursor);
-}
-
-static e_stream_vtable e_gFileStreamVTable =
-{
-    e_file_stream_read,
-    e_file_stream_write,
-    e_file_stream_seek,
-    e_file_stream_tell,
-    NULL,
-    NULL,
-    NULL
-};
-
-
-E_API e_fs_config e_fs_config_init(const e_fs_vtable* pVTable, void* pVTableUserData)
-{
-    e_fs_config config;
-
-    E_ZERO_OBJECT(&config);
-    config.pVTable         = pVTable;
-    config.pVTableUserData = pVTableUserData;
-
-    return config;
-}
-
-
-E_API e_result e_fs_init_preallocated(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs* pFS)
-{
-    e_fs_config config;
-
-    /* Not using allocation callbacks right now, but leaving here in case it's needed later. */
-    E_UNUSED(pAllocationCallbacks);
-
-    if (pFS == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ZERO_OBJECT(pFS);
-
-    if (pConfig != NULL) {
-        config = *pConfig;
-        pConfig = NULL;
-    } else {
-        config = e_fs_config_init(NULL, NULL);
-    }
-
-    /* If we weren't given a vtable we need to use the default. Make sure the vtable is always set. */
-    if (config.pVTable == NULL) {
-        config.pVTable = &e_gDefaultFSVTable;
-        config.pVTableUserData = NULL;
-    }
-
-    pFS->pVTable = config.pVTable;
-    pFS->pVTableUserData = config.pVTableUserData;
-
-    /* Must always have a vtable. */
-    E_ASSERT(pFS->pVTable != NULL);
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_init(const e_fs_config* pConfig, const e_allocation_callbacks* pAllocationCallbacks, e_fs** ppFS)
-{
-    e_result result;
-    e_fs* pFS;
-
-    if (ppFS == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *ppFS = NULL;
-
-    pFS = (e_fs*)e_malloc(sizeof(*pFS), pAllocationCallbacks);
-    if (pFS == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    result = e_fs_init_preallocated(pConfig, pAllocationCallbacks, pFS);
-    if (result != E_SUCCESS) {
-        e_free(pFS, pAllocationCallbacks);
-        return result;
-    }
-
-    pFS->freeOnUninit = E_TRUE;
-
-    *ppFS = pFS;
-    return E_SUCCESS;
-}
-
-E_API void e_fs_uninit(e_fs* pFS, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pFS == NULL) {
-        return;
-    }
-
-    /* Opened archives need to be closed. */
-    while (pFS->openedArchiveCount > 0) {
-        pFS->openedArchiveCount -= 1;
-        e_archive_uninit(pFS->pOpenedArchives[pFS->openedArchiveCount].pArchive, pAllocationCallbacks);
-        e_free(pFS->pOpenedArchives[pFS->openedArchiveCount].pFilePath, pAllocationCallbacks);
-    }
-    e_free(pFS->pOpenedArchives, pAllocationCallbacks);
-
-    /* Archive extensions need to be freed. */
-    e_free(pFS->pArchiveExtensions, pAllocationCallbacks);
-
-    if (pFS->freeOnUninit) {
-        e_free(pFS, pAllocationCallbacks);
-    }
-}
-
-static e_result e_fs_open_archive(e_fs* pFS, const char* pArchiveFilePath, size_t archiveFilePathLen, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
-{
-    /* If the archive is already open, just return the existing archive. */
-    e_result result;
-    size_t iArchive;
-    size_t iArchiveExtension;
-    /* */ char* pArchiveFilePathCopy;
-    const char* pArchiveFilePathExtension;
-    size_t archiveFilePathExtensionLen;
-    e_archive_extension* pArchiveExtension = NULL;
-    e_archive* pArchive;
-
-    for (iArchive = 0; iArchive < pFS->openedArchiveCount; iArchive += 1) {
-        if (c89str_strncmp(pFS->pOpenedArchives[iArchive].pFilePath, pArchiveFilePath, archiveFilePathLen) == 0) {
-            *ppArchive = pFS->pOpenedArchives[iArchive].pArchive;
-            return E_SUCCESS;
-        }
-    }
-
-    /*
-    Getting here means the archive isn't already open. We need to open it and add it to our
-    internal list. In order to open the archive we need to know what vtable to use. To determine
-    the vtable we need to inspect the extension.
-    */
-    if (archiveFilePathLen == (size_t)-1) {
-        archiveFilePathLen = c89str_strlen(pArchiveFilePath);
-    }
-
-    pArchiveFilePathExtension = c89str_path_extension(pArchiveFilePath, archiveFilePathLen);
-    if (pArchiveFilePathExtension == NULL) {
-        return E_INVALID_ARGS;  /* No extension. */
-    }
-
-    archiveFilePathExtensionLen = archiveFilePathLen - (pArchiveFilePathExtension - pArchiveFilePath);
-
-    for (iArchiveExtension = 0; iArchiveExtension < pFS->archiveExtensionCount; iArchiveExtension += 1) {
-        size_t extensionLen = c89str_strlen(pFS->pArchiveExtensions[iArchiveExtension].pExtension);
-        if (extensionLen != archiveFilePathExtensionLen) {
-            continue;   /* Extension lengths are different. Cannot be this one. */
-        }
-
-        if (c89str_strnicmp(pArchiveFilePathExtension, pFS->pArchiveExtensions[iArchiveExtension].pExtension, extensionLen) != 0) {
-            continue;   /* Extensions don't match. */
-        }
-
-        /* We have a match. */
-        pArchiveExtension = &pFS->pArchiveExtensions[iArchiveExtension];
-        break;
-    }
-
-    if (pArchiveExtension == NULL) {
-        return E_DOES_NOT_EXIST;    /* Couldn't find a matching extension for this archive. Don't think we should ever hit this in practice because it should be checked at a higher level. */
-    }
-
-    /* At this point we should have the vtable so we can now try opening it. The path needs to be null terminated. */
-    pArchiveFilePathCopy = (char*)e_malloc(archiveFilePathLen + 1, pAllocationCallbacks);
-    if (pArchiveFilePathCopy == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    c89str_strncpy_s(pArchiveFilePathCopy, archiveFilePathLen + 1, pArchiveFilePath, archiveFilePathLen);
-
-    result = e_archive_init_from_file(pArchiveExtension->pArchiveVTable, pArchiveExtension->pArchiveVTableUserData, pFS, pArchiveFilePathCopy, pAllocationCallbacks, &pArchive);
-    if (result != E_SUCCESS) {
-        e_free(pArchiveFilePathCopy, pAllocationCallbacks);
-        return result;
-    }
-
-    /* The new archive should inherit any archive extensions so it can work recursively. */
-    for (iArchiveExtension = 0; iArchiveExtension < pFS->archiveExtensionCount; iArchiveExtension += 1) {
-        result = e_fs_register_archive_extension((e_fs*)pArchive, pFS->pArchiveExtensions[iArchiveExtension].pArchiveVTable, pFS->pArchiveExtensions[iArchiveExtension].pArchiveVTableUserData, pFS->pArchiveExtensions[iArchiveExtension].pExtension, pAllocationCallbacks);
-        if (result != E_SUCCESS) {
-            e_archive_uninit(pArchive, pAllocationCallbacks);
-            e_free(pArchiveFilePathCopy, pAllocationCallbacks);
-            return result;
-        }
-    }
-
-    /* We need to add the archive to our internal list. */
-    if (pFS->openedArchiveCount == pFS->openedArchiveCap) {
-        e_fs_opened_archive* pNewOpenedArchives;
-        size_t newCapacity = pFS->openedArchiveCap * 2;
-        if (newCapacity == 0) {
-            newCapacity = 1;
-        }
-    
-        pNewOpenedArchives = (e_fs_opened_archive*)e_realloc(pFS->pOpenedArchives, sizeof(*pNewOpenedArchives) * newCapacity, pAllocationCallbacks);
-        if (pNewOpenedArchives == NULL) {
-            e_archive_uninit(pArchive, pAllocationCallbacks);
-            e_free(pArchiveFilePathCopy, pAllocationCallbacks);
-            return E_OUT_OF_MEMORY;
-        }
-    
-        pFS->pOpenedArchives = pNewOpenedArchives;
-        pFS->openedArchiveCap = newCapacity;
-    }
-
-    pFS->pOpenedArchives[pFS->openedArchiveCount].pArchive = pArchive;
-    pFS->pOpenedArchives[pFS->openedArchiveCount].pFilePath = pArchiveFilePathCopy;
-    pFS->openedArchiveCount += 1;
-
-    *ppArchive = pArchive;
-    return E_SUCCESS;
-}
-
-static e_result e_fs_open_from_archive(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
-{
-    /*
-    This is the main function we use for opening from an archive. We need to iterate over each
-    segment in the file path and then iterate over the files within that directory. For each
-    file in the directory that looks like an archive, we need to open that archive and try opening
-    the file from there.
-    */
-    e_result result;
-    c89str_path_iterator iFilePathSegment;
-
-    /* Start iterating over each segment in the file path. */
-    result = e_result_from_errno(c89str_path_first(pFilePath, (size_t)-1, &iFilePathSegment));
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    do
-    {
-        /*
-        If this segment of the path points to an explicit archive then we *must* try loading from
-        the archive at all times. We cannot be attempting to search all other archives or else
-        we'll risk opening the wrong file.
-        */
-        if (e_fs_is_path_archive(pFS, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset, iFilePathSegment.segmentLength)) {
-            /* It's an explicit archive. We must try loading from this path. */
-            e_archive* pArchive;
-            result = e_fs_open_archive(pFS, iFilePathSegment.pFullPath, iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength, pAllocationCallbacks, &pArchive);
-            if (result != E_SUCCESS) {
-                return result;  /* Failed to open the archive. We cannot continue since this was explicitly asked for. */
-            }
-
-            /* We have the archive. We need to try opening the file from it. */
-            result = e_fs_open((e_fs*)pArchive, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1, openMode, pAllocationCallbacks, ppFile);
-            if (result != E_SUCCESS) {
-                return result;  /* Failed to open the file. */
-            }
-
-            return E_SUCCESS;
-        } else {
-            /* This part of the segment is not asking for an explicit archive. We need to iterate over all the archives in this directory and try loading from each one. */
-            e_fs_iterator* pFileIterator;
-            for (pFileIterator = e_fs_first(pFS, iFilePathSegment.pFullPath, iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength, pAllocationCallbacks); pFileIterator != NULL; pFileIterator = e_fs_next(pFileIterator, pAllocationCallbacks)) {
-                if (e_fs_is_path_archive(pFS, pFileIterator->pName, pFileIterator->nameLen)) {
-                    /* It's an archive. Try loading from it. */
-                    e_file* pFile;
-                    e_archive* pArchive;
-
-                    /* To load from the archive we actually need to construct a string. */
-                    char  pArchiveFilePathStack[1024];
-                    char* pArchiveFilePathHeap = NULL;
-                    char* pArchiveFilePath;
-
-                    /* Try using the stack buffer first. */
-                    if (c89str_snprintf(pArchiveFilePathStack, sizeof(pArchiveFilePathStack), "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName) < (int)sizeof(pArchiveFilePathStack)) {
-                        /* It does not fit in the stack buffer. Fall back to a heap allocation. */
-                        pArchiveFilePath = pArchiveFilePathStack;
-                    } else {
-                        pArchiveFilePathHeap = (char*)e_malloc(iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1 + pFileIterator->nameLen + 1, pAllocationCallbacks);
-                        if (pArchiveFilePathHeap == NULL) {
-                            return E_OUT_OF_MEMORY;
-                        }
-
-                        c89str_sprintf(pArchiveFilePathHeap, "%.*s/%.*s", (int)(iFilePathSegment.segmentLength + iFilePathSegment.segmentOffset), iFilePathSegment.pFullPath, (int)pFileIterator->nameLen, pFileIterator->pName);
-                        pArchiveFilePath = pArchiveFilePathHeap;
-                    }
-
-                    result = e_fs_open_archive(pFS, pArchiveFilePath, (size_t)-1, pAllocationCallbacks, &pArchive);
-                    e_free(pArchiveFilePathHeap, pAllocationCallbacks);
-
-                    if (result == E_SUCCESS) {
-                        /* We have the archive. We need to try opening the file from it. */
-                        result = e_fs_open((e_fs*)pArchive, iFilePathSegment.pFullPath + iFilePathSegment.segmentOffset + iFilePathSegment.segmentLength + 1, openMode, pAllocationCallbacks, &pFile);
-                        if (result == E_SUCCESS) {
-                            /* The file was opened successfully. We're done. */
-                            *ppFile = pFile;
-                            return E_SUCCESS;
-                        } else {
-                            /* Getting here means the file could not be found in this archive. Keep searching. */
-                        }
-                    } else {
-                        /* Getting here means we couldn't open the archive. */
-                    }
-                } else {
-                    /* It's not an archive. Keep searching. */
-                }
-            }
-        }
-    } while (e_result_from_errno(c89str_path_next(&iFilePathSegment)) == E_SUCCESS);
-
-    /* Getting here means we could not find the file. */
-    return E_DOES_NOT_EXIST;
-}
-
-E_API e_result e_fs_open(e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
-{
-    e_result result;
-    size_t allocSize;
-    e_file* pFile;
-    const e_fs_vtable* pVTable;
-    void* pVTableUserData;
-
-    if (ppFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *ppFile = NULL; /* For safety in case an error occurs. Want to make sure the caller doesn't try calling into an invalid file handle. */
-
-    if (c89str_is_null_or_empty(pFilePath)) {
-        return E_INVALID_ARGS;
-    }
-
-    /* Some quick open mode validation. */
-    if (openMode == 0) {
-        return E_INVALID_ARGS;  /* No open mode specified. */
-    }
-    if ((openMode & E_OPEN_MODE_READ) == 0 && (openMode & E_OPEN_MODE_WRITE) == 0) {
-        return E_INVALID_ARGS;  /* Must specify at least one of READ or WRITE. */
-    }
-    if ((openMode & E_OPEN_MODE_APPEND) != 0 && (openMode & E_OPEN_MODE_TRUNCATE) != 0) {
-        return E_INVALID_ARGS;  /* Both APPEND and TRUNCATE have been specified which does not make sense. */
-    }
-
-    /* The file system can be null in which case the default is used and will work just like normal fopen(). */
-    if (pFS == NULL) {
-        pVTable = &e_gDefaultFSVTable;
-        pVTableUserData = NULL;
-    } else {
-        pVTable = pFS->pVTable;
-        pVTableUserData = pFS->pVTableUserData;
-    }
-
-    /* We should be able to assume that we always have a vtable at this point. */
-    E_ASSERT(pVTable != NULL);
-
-    result = pVTable->file_alloc_size(pVTableUserData, &allocSize);
-    if (result != E_SUCCESS) {
-        return result;  /* Failed to retrieve the size fo the e_file allocation. */
-    }
-
-    pFile = (e_file*)e_calloc(allocSize, pAllocationCallbacks);
-    if (pFile == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    result = pVTable->open(pVTableUserData, pFS, pFilePath, openMode, pAllocationCallbacks, pFile);
-    if (result != E_SUCCESS) {
-        e_free(pFile, pAllocationCallbacks);
-
-        /*
-        If we failed to open the file because it doesn't exist we need to try loading it from an
-        archive, but only if we're not trying to open the file in write mode. We're currently only
-        supporting read mode with archives.
-        */
-        if (result == E_DOES_NOT_EXIST && (openMode & E_OPEN_MODE_WRITE) == 0) {
-            result = e_fs_open_from_archive(pFS, pFilePath, openMode, pAllocationCallbacks, ppFile);
-        }
-
-        return result;
-    }
-
-    /* Getting here means we were able to open the file directly from this FS (not from an archive - that will have handled earlier in a separate path). */
-
-    /* We need to make sure the file is given the vtable that was used to initialize it. This is because pFS is allowed to be null. */
-    pFile->pFS = pFS;
-    pFile->pVTable = pVTable;
-    pFile->pVTableUserData = pVTableUserData;
-
-    /* Files are streams which means they can be plugged into anything that takes a e_stream pointer. We need to get this set up now. */
-    result = e_stream_init(&e_gFileStreamVTable, (e_stream*)pFile);
-    if (result != E_SUCCESS) {
-        e_fs_close(pFile, pAllocationCallbacks);
-        return result;
-    }
-
-    *ppFile = pFile;
-
-    return E_SUCCESS;
-}
-
-E_API void e_fs_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pFile == NULL) {
-        return;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    pFile->pVTable->close(pFile->pVTableUserData, pFile, pAllocationCallbacks);
-
-    e_free(pFile, pAllocationCallbacks);
-}
-
-E_API e_result e_fs_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    e_result result;
-    size_t bytesRead;
-
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->read(pFile->pVTableUserData, pFile, pDst, bytesToRead, &bytesRead);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    if (pBytesRead != NULL) {
-        *pBytesRead = bytesRead;
-    }
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    e_result result;
-    size_t bytesWritten;
-
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->write(pFile->pVTableUserData, pFile, pSrc, bytesToWrite, &bytesWritten);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    if (pBytesWritten != NULL) {
-        *pBytesWritten = bytesWritten;
-    }
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
-{
-    e_result result;
-    
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->seek(pFile->pVTableUserData, pFile, offset, origin);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    return result;
-}
-
-E_API e_result e_fs_tell(e_file* pFile, e_int64* pCursor)
-{
-    e_result result;
-
-    if (pCursor == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *pCursor = 0;
-
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->tell(pFile->pVTableUserData, pFile, pCursor);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_flush(e_file* pFile)
-{
-    e_result result;
-
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->flush(pFile->pVTableUserData, pFile);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_info(e_file* pFile, e_file_info* pInfo)
-{
-    e_result result;
-
-    if (pInfo == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ZERO_OBJECT(pInfo);
-
-    if (pFile == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    E_ASSERT(pFile->pVTable != NULL);
-    result = pFile->pVTable->info(pFile->pVTableUserData, pFile, pInfo);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    return E_SUCCESS;
-}
-
-E_API e_stream* e_fs_file_stream(e_file* pFile)
-{
-    return &pFile->stream;
-}
-
-E_API e_fs* e_fs_get(e_file* pFile)
-{
-    return pFile->pFS;
-}
-
-E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_fs_iterator* pIterator;
-    const e_fs_vtable* pVTable = &e_gDefaultFSVTable;
-    void* pVTableUserData = NULL;
-
-    if (pFS != NULL) {
-        pVTable         = pFS->pVTable;
-        pVTableUserData = pFS->pVTableUserData;
-    }
-
-    if (pDirectoryPath == NULL) {
-        pDirectoryPath = "";
-    }
-
-    if (pVTable->first_file == NULL) {
-        return NULL;
-    }
-
-    pIterator = pVTable->first_file(pVTableUserData, pFS, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
-
-    /* Just make double sure the FS information is set in case the backend doesn't do it. */
-    if (pIterator != NULL) {
-        pIterator->pFS = pFS;
-        pIterator->pFSVTable = pVTable;
-        pIterator->pFSVTableUserData = pVTableUserData;
-    }
-
-    /* We want to skip over any "." and ".." directories. */
-    while (pIterator != NULL && (c89str_strcmp(pIterator->pName, ".") == 0 || c89str_strcmp(pIterator->pName, "..") == 0)) {
-        pIterator = e_fs_next(pIterator, pAllocationCallbacks);
-    }
-
-    return pIterator;
-}
-
-E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pIterator == NULL) {
-        return NULL;
-    }
-
-    if (pIterator->pFSVTable->next_file == NULL) {
-        return NULL;
-    }
-
-    /* We don't want to include any "." and ".." directories. */
-    do
-    {
-        pIterator = pIterator->pFSVTable->next_file(pIterator->pFSVTableUserData, pIterator, pAllocationCallbacks);
-    } while (pIterator != NULL && (c89str_strcmp(pIterator->pName, ".") == 0 || c89str_strcmp(pIterator->pName, "..") == 0));
-
-    return pIterator;
-}
-
-E_API void e_fs_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    if (pIterator == NULL) {
-        return;
-    }
-
-    if (pIterator->pFSVTable->free_iterator == NULL) {
-        return;
-    }
-
-    pIterator->pFSVTable->free_iterator(pIterator->pFSVTableUserData, pIterator, pAllocationCallbacks);
-}
-
-E_API e_result e_fs_register_archive_extension(e_fs* pFS, e_archive_vtable* pArchiveVTable, void* pArchiveVTableUserData, const char* pExtension, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_archive_extension* pNewExtension;
-    size_t extensionLen;
-
-    if (pFS == NULL || pArchiveVTable == NULL || pExtension == NULL || pExtension[0] == '\0') {
-        return E_INVALID_ARGS;
-    }
-
-    /* The length of the extension cannot exceed the buffer we'll be storing it in. */
-    extensionLen = c89str_strlen(pExtension);
-    if (extensionLen+1 > sizeof(pNewExtension->pExtension)) {   /* +1 to account for the null terminator. */
-        return E_INVALID_ARGS;
-    }
-
-    /* We need to append the extension to the end of the list. */
-    pNewExtension = (e_archive_extension*)e_realloc(pFS->pArchiveExtensions, sizeof(*pFS->pArchiveExtensions) * (pFS->archiveExtensionCount + 1), pAllocationCallbacks);
-    if (pNewExtension == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    pFS->pArchiveExtensions = pNewExtension;
-
-    /* We can now initialize the new extension. */
-    pNewExtension[pFS->archiveExtensionCount].pArchiveVTable = pArchiveVTable;
-    pNewExtension[pFS->archiveExtensionCount].pArchiveVTableUserData = pArchiveVTableUserData;
-    c89str_strncpy_s(pNewExtension[pFS->archiveExtensionCount].pExtension, sizeof(pNewExtension[pFS->archiveExtensionCount].pExtension), pExtension, extensionLen);
-
-    /* We're done so we can commit the new extension by incrementing the counter. */
-    pFS->archiveExtensionCount += 1;
-
-    return E_SUCCESS;
-}
-
-E_API e_bool32 e_fs_is_path_archive(e_fs* pFS, const char* pFilePath, size_t filePathLen)
-{
-    size_t iExtension;
-
-    if (pFS == NULL || pFilePath == NULL) {
-        return E_FALSE;
-    }
-
-    if (filePathLen == 0 || filePathLen == (size_t)-1) {
-        filePathLen = c89str_strlen(pFilePath);
-    }
-
-    /* We need to loop through each extension and check if the file path ends with it. */
-    for (iExtension = 0; iExtension < pFS->archiveExtensionCount; ++iExtension) {
-        size_t extensionLen = c89str_strlen(pFS->pArchiveExtensions[iExtension].pExtension);
-
-        /* The extension must be shorter than the file path. */
-        if (extensionLen > filePathLen) {
-            continue;
-        }
-
-        /* We need to check if the file path ends with the extension. We're going case-sensitive here for the momemnt. I'm not sure yet what the correct approach would be. */
-        if (c89str_strnicmp(pFilePath + (filePathLen - extensionLen), pFS->pArchiveExtensions[iExtension].pExtension, extensionLen) == 0) {
-            return E_TRUE;
-        }
-    }
-
-    return E_FALSE;
-}
-
-static e_result e_fs_open_and_read_with_extra_byte(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_result result;
-    e_file* pFile;
-    e_file_info info;
-    void* pData;
-    size_t bytesRead;
-
-    if (ppData == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *ppData = NULL;
-
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    result = e_fs_info(pFile, &info);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    if (info.size > E_SIZE_MAX) {
-        e_fs_close(pFile, pAllocationCallbacks);
-        return E_OUT_OF_MEMORY; /* The file is too big to be loaded fully into memory. */
-    }
-
-    pData = e_malloc(info.size + 1, pAllocationCallbacks);
-    if (pData == NULL) {
-        e_fs_close(pFile, pAllocationCallbacks);
-        return E_OUT_OF_MEMORY;
-    }
-
-    result = e_fs_read(pFile, pData, info.size, &bytesRead);
-    e_fs_close(pFile, pAllocationCallbacks);
-
-    if (result != E_SUCCESS) {  /* <-- This is checking the result of e_fs_read(). */
-        e_free(pData, pAllocationCallbacks);
-        return result;
-    }
-
-    /* The extra byte needs to be cleared to zero for safety and consistent output. It also allows use to use this for null terminating text files. */
-    ((char*)pData)[bytesRead] = '\0';
-
-    if (pSize != NULL) {
-        *pSize = bytesRead;
-    }
-
-    *ppData = pData;
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_open_and_read(e_fs* pFS, const char* pFilePath, void** ppData, size_t* pSize, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_fs_open_and_read_with_extra_byte(pFS, pFilePath, ppData, pSize, pAllocationCallbacks);
-}
-
-E_API e_result e_fs_open_and_read_text(e_fs* pFS, const char* pFilePath, char** ppStr, size_t* pLength, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_fs_open_and_read_with_extra_byte(pFS, pFilePath, (void**)ppStr, pLength, pAllocationCallbacks);
-}
-
-E_API e_result e_fs_open_and_write(e_fs* pFS, const char* pFilePath, const void* pData, size_t dataSize, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_result result;
-    e_file* pFile;
-    
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_WRITE | E_OPEN_MODE_TRUNCATE, pAllocationCallbacks, &pFile);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    result = e_fs_write(pFile, pData, dataSize, NULL);
-    e_fs_close(pFile, pAllocationCallbacks);
-
-    if (result != E_SUCCESS) {    
-        return result;
-    }
-
-    return E_SUCCESS;
-}
-
-
-E_API e_result e_fs_gather_files_in_directory(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks, char*** pppFileNames, size_t** ppFileNameLengths, e_file_info** ppFileInfos, size_t* pFileCount)
-{
-    e_fs_iterator* pFileIterator;
-    char** ppFileNames;
-    size_t* pFileNameLengths;
-    e_file_info* pFileInfos;
-    size_t fileCount;
-    char* pData = NULL;     /* We do everything with a single allocation (resized with realloc()). This is a pointer to that allocation. */
-    size_t dataSize = 0;    /* The total size of the data buffer. */
-    size_t dataCap = 0;     /* The total allocation size of the data buffer. */
-    size_t totalFileNameLength = 0; /* The total length of all file names in the buffer. */
-    size_t iFile;
-    char* pRunningFileName;
-
-    if (pppFileNames == NULL || pFileCount == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *pppFileNames = NULL;
-    *pFileCount = 0;
-
-    if (pFS == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    if (pDirectoryPath == NULL) {
-        pDirectoryPath = "";
-    }
-
-    /* We need to loop over each file in the directory and add it to the list. */
-    ppFileNames      = NULL;
-    pFileNameLengths = NULL;
-    pFileInfos       = NULL;
-    fileCount        = 0;
-
-    /*
-    We allocate a single buffer to store all of the info. It's structured such that the file paths are at the front, then an array of
-    char* pointers, then an array of size_t lengths, and then an array of e_file_info structures.
-
-    The buffer is structure like the following:
-
-        [char* pointers] [size_t lengths] [e_file_info] [file names]
-    */
-
-    for (pFileIterator = e_fs_first(pFS, pDirectoryPath, directoryPathLen, pAllocationCallbacks); pFileIterator != NULL; pFileIterator = e_fs_next(pFileIterator, pAllocationCallbacks)) {
-        const char* pName;
-        size_t nameLen;
-        size_t nameAndInfoDataSize;
-
-        /* We need to skip over "." and ".." directories. */
-        if (c89str_strcmp(pFileIterator->pName, ".") == 0 || c89str_strcmp(pFileIterator->pName, "..") == 0) {
-            continue;
-        }
-
-        pName   = pFileIterator->pName;
-        nameLen = pFileIterator->nameLen;
-        
-        /* Resize the buffer if necessary. We need room for the name, it's null terminator, it's length, and the file info. */
-        nameAndInfoDataSize = sizeof(char*) + nameLen + 1 + sizeof(size_t) + sizeof(e_file_info);
-        if (pData == NULL || dataSize + nameAndInfoDataSize > dataCap) {
-            size_t newDataCap;
-            char* pNewData;
-
-            newDataCap = dataCap * 2;
-            if (newDataCap < dataSize + nameAndInfoDataSize) {
-                newDataCap = dataSize + nameAndInfoDataSize;
-            }
-
-            pNewData = (char*)e_realloc(pData, newDataCap, pAllocationCallbacks);
-            if (pNewData == NULL) {
-                e_free(pData, pAllocationCallbacks);
-                return E_OUT_OF_MEMORY;
-            }
-
-            pData = pNewData;
-            dataCap = newDataCap;
-        }
-
-        /*
-        The actual file name content is stored at the end of the buffer. The first thing to do is move that down to the end so we
-        don't overwrite anything.
-        */
-        E_MOVE_MEMORY(
-            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))),
-            pData + ((fileCount  ) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))),
-            totalFileNameLength + (fileCount * sizeof(char))
-        );
-
-        /* We need to copy the name into the buffer. We can use totalFileNameLength with fileCount to calculate the insertion position. */
-        c89str_strcpy(pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info))) + totalFileNameLength + (fileCount * sizeof(char)), pName);
-
-
-        /*
-        With the name copied over we can now insert the file info. This is a similar process - we need to move the
-        existing items down, and then insert the new one. 
-        */
-        E_MOVE_MEMORY(
-            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t))),
-            pData + ((fileCount  ) * (sizeof(char*) + sizeof(size_t))),
-            fileCount * sizeof(e_file_info)
-        );
-
-        /* We need to insert the file info. */
-        E_COPY_MEMORY(
-            pData + ((fileCount+1) * (sizeof(char*) + sizeof(size_t))) + (fileCount * sizeof(e_file_info)),
-            &pFileIterator->info,
-            sizeof(e_file_info)
-        );
-
-
-        /* Now the same for the size array. */
-        E_MOVE_MEMORY(
-            pData + ((fileCount+1) * sizeof(char*)),
-            pData + ((fileCount  ) * sizeof(char*)),
-            fileCount * sizeof(size_t)
-        );
-
-        /* We need to insert the size. */
-        E_COPY_MEMORY(
-            pData + ((fileCount+1) * sizeof(char*)) + (fileCount * sizeof(size_t)),
-            &nameLen,
-            sizeof(size_t)
-        );
-
-
-        totalFileNameLength += nameLen;
-        fileCount += 1;
-        dataSize += nameAndInfoDataSize;
-    }
-
-    if (pData == NULL) {
-        /* There are no files in the directory. */
-        return E_SUCCESS;
-    }
-
-    /* We now need to do a second pass to set up our char* pointers. */
-    ppFileNames      = (char**      )(pData);
-    pFileNameLengths = (size_t*     )(pData + (fileCount * sizeof(char*)));
-    pFileInfos       = (e_file_info*)(pData + (fileCount * sizeof(char*)) + (fileCount * sizeof(size_t)));
-    pRunningFileName = pData + (fileCount * (sizeof(char*) + sizeof(size_t) + sizeof(e_file_info)));
-
-    E_ASSERT(ppFileNames != NULL);
-    for (iFile = 0; iFile < fileCount; iFile += 1) {
-        ppFileNames[iFile] = pRunningFileName;
-        pRunningFileName += pFileNameLengths[iFile] + 1;    /* +1 to get past null terminator. */
-    }
-
-
-    /*
-    Now we need to sort our arrays by name. We cannot use e_qsort() because we need to sort multiple arrays.
-
-    TODO: Make this a quick sort.
-    */
-    for (iFile = 0; iFile < fileCount; iFile += 1) {
-        size_t jFile;
-        for (jFile = iFile+1; jFile < fileCount; jFile += 1) {
-            if (c89str_strcmp(ppFileNames[iFile], ppFileNames[jFile]) > 0) {
-                char* pTempName;
-                size_t tempNameLen;
-                e_file_info tempFileInfo;
-
-                pTempName = ppFileNames[iFile];
-                ppFileNames[iFile] = ppFileNames[jFile];
-                ppFileNames[jFile] = pTempName;
-
-                tempNameLen = pFileNameLengths[iFile];
-                pFileNameLengths[iFile] = pFileNameLengths[jFile];
-                pFileNameLengths[jFile] = tempNameLen;
-
-                tempFileInfo = pFileInfos[iFile];
-                pFileInfos[iFile] = pFileInfos[jFile];
-                pFileInfos[jFile] = tempFileInfo;
-            }
-        }
-    }
-
-
-    /* Remove any duplicates. */
-    for (iFile = 0; iFile < fileCount-1; ) {
-        if (c89str_strcmp(ppFileNames[iFile], ppFileNames[iFile+1]) == 0) {
-            /* Duplicate. */
-            E_MOVE_MEMORY(ppFileNames      + iFile, ppFileNames      + iFile + 1, (fileCount - iFile - 1) * sizeof(char*));
-            E_MOVE_MEMORY(pFileNameLengths + iFile, pFileNameLengths + iFile + 1, (fileCount - iFile - 1) * sizeof(size_t));
-            E_MOVE_MEMORY(pFileInfos       + iFile, pFileInfos       + iFile + 1, (fileCount - iFile - 1) * sizeof(e_file_info));
-
-            fileCount -= 1;
-        } else {
-            iFile += 1;
-        }
-    }
-
-    if (pppFileNames != NULL) {
-        *pppFileNames = ppFileNames;
-    }
-    if (ppFileNameLengths != NULL) {
-        *ppFileNameLengths = pFileNameLengths;
-    }
-    if (ppFileInfos != NULL) {
-        *ppFileInfos = pFileInfos;
-    }
-    if (pFileCount != NULL) {
-        *pFileCount = fileCount;
-    }
-
-    return E_SUCCESS;
-}
+const e_fs_backend* E_FS_STDIO = &e_stdio_backend;
+#else
+const e_fs_backend* E_FS_STDIO = NULL;
+#endif
 /* END e_fs.c */
-
-
-
-/* BEG e_archive.c */
-E_API e_result e_archive_init(const e_archive_vtable* pVTable, void* pVTableUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
-{
-    e_result result;
-    e_archive* pArchive;
-    size_t allocSize;
-    e_fs_config fsConfig;
-
-    if (ppArchive == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *ppArchive = NULL;
-
-    if (pVTable == NULL || pStream == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    if (pVTable->archive_alloc_size == NULL || pVTable->init == NULL || pVTable->uninit == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    /* The first thing we need to do is allocate memory for the archive. */
-    result = pVTable->archive_alloc_size(pVTableUserData, &allocSize);
-    if (result != E_SUCCESS) {
-        return result;  /* Failed to retrieve the size somehow. */
-    }
-
-    pArchive = (e_archive*)e_malloc(allocSize, pAllocationCallbacks);
-    if (pArchive == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    pArchive->pVTable = pVTable;
-    pArchive->pVTableUserData = pVTableUserData;
-    pArchive->pStream = pStream;
-
-    /*
-    With memory allocated we can now initialize the archive. An archive is a file system, so we
-    need to initialize that first.
-    */
-    fsConfig = e_fs_config_init(&pVTable->fs, pVTableUserData);
-
-    result = e_fs_init_preallocated(&fsConfig, pAllocationCallbacks, &pArchive->fs);
-    if (result != E_SUCCESS) {
-        e_free(pArchive, pAllocationCallbacks);
-        return result;
-    }
-
-    /* With the file system initialized we'll need to initialize the rest. */
-    result = pVTable->init(pVTableUserData, pStream, pAllocationCallbacks, pArchive);
-    if (result != E_SUCCESS) {
-        e_fs_uninit(&pArchive->fs, pAllocationCallbacks);
-        e_free(pArchive, pAllocationCallbacks);
-        return result;
-    }
-
-    *ppArchive = pArchive;
-    return E_SUCCESS;
-}
-
-E_API e_result e_archive_init_from_file(const e_archive_vtable* pVTable, void* pVTableUserData, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_archive** ppArchive)
-{
-    e_result result;
-    e_file* pFile;
-
-    if (ppArchive == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    *ppArchive = NULL;
-
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
-    if (result != E_SUCCESS) {
-        return result;  /* Failed to open the file. */
-    }
-
-    result = e_archive_init(pVTable, pVTableUserData, e_fs_file_stream(pFile), pAllocationCallbacks, ppArchive);
-    if (result != E_SUCCESS) {
-        e_fs_close(pFile, pAllocationCallbacks);
-        return result;
-    }
-
-    (*ppArchive)->pArchiveFile = pFile;
-    return E_SUCCESS;
-}
-
-E_API void e_archive_uninit(e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_file* pArchiveFile;
-
-    if (pArchive == NULL) {
-        return;
-    }
-
-    pArchiveFile = pArchive->pArchiveFile;
-
-    E_ASSERT(pArchive->pVTable->uninit != NULL);
-    pArchive->pVTable->uninit(pArchive->pVTableUserData, pArchive, pAllocationCallbacks);
-
-    e_fs_uninit(&pArchive->fs, pAllocationCallbacks);
-    e_free(pArchive, pAllocationCallbacks);
-
-    if (pArchiveFile != NULL) {
-        e_fs_close(pArchiveFile, pAllocationCallbacks);
-    }
-}
-
-E_API e_fs* e_archive_fs(e_archive* pArchive)
-{
-    if (pArchive == NULL) {
-        return NULL;
-    }
-
-    return &pArchive->fs;
-}
-
-E_API e_stream* e_archive_stream(e_archive* pArchive)
-{
-    if (pArchive == NULL) {
-        return NULL;
-    }
-
-    return pArchive->pStream;
-}
-
-E_API e_result e_archive_open(e_archive* pArchive, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
-{
-    return e_fs_open((e_fs*)pArchive, pFilePath, openMode, pAllocationCallbacks, ppFile);
-}
-
-E_API void e_archive_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_fs_close(pFile, pAllocationCallbacks);
-}
-
-E_API e_result e_archive_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    return e_fs_read(pFile, pDst, bytesToRead, pBytesRead);
-}
-
-E_API e_result e_archive_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    return e_fs_write(pFile, pSrc, bytesToWrite, pBytesWritten);
-}
-
-E_API e_result e_archive_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
-{
-    return e_fs_seek(pFile, offset, origin);
-}
-
-E_API e_result e_archive_tell(e_file* pFile, e_int64* pCursor)
-{
-    return e_fs_tell(pFile, pCursor);
-}
-
-E_API e_result e_archive_flush(e_file* pFile)
-{
-    return e_fs_flush(pFile);
-}
-
-E_API e_result e_archive_info(e_file* pFile, e_file_info* pInfo)
-{
-    return e_fs_info(pFile, pInfo);
-}
-
-E_API e_archive* e_archive_get(e_file* pFile)
-{
-    if (pFile == NULL) {
-        return NULL;
-    }
-
-    return (e_archive*)e_fs_get(pFile);
-}
-
-E_API e_fs_iterator* e_archive_first(e_archive* pArchive, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_fs_first((e_fs*)pArchive, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
-}
-
-E_API e_fs_iterator* e_archive_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_fs_next(pIterator, pAllocationCallbacks);
-}
-
-E_API void e_archive_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_fs_free_iterator(pIterator, pAllocationCallbacks);
-}
-/* END e_archive.c */
-
-
-
-/* BEG e_zip.c */
-/* The cache size must be at least 32K, and a power of 2. */
-#ifndef E_ZIP_CACHE_SIZE_IN_BYTES
-#define E_ZIP_CACHE_SIZE_IN_BYTES               32768
-#endif
-
-#ifndef E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES
-#define E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES    4096
-#endif
-
-#define E_ZIP_EOCD_SIGNATURE                    0x06054b50
-#define E_ZIP_EOCD64_SIGNATURE                  0x06064b50
-#define E_ZIP_EOCD64_LOCATOR_SIGNATURE          0x07064b50
-#define E_ZIP_CD_FILE_HEADER_SIGNATURE          0x02014b50
-
-
-typedef struct e_zip_file     e_zip_file;
-typedef struct e_zip_iterator e_zip_iterator;
-typedef struct e_zip_cd_node  e_zip_cd_node;
-
-typedef enum
-{
-    E_ZIP_COMPRESSION_METHOD_STORE   = 0,
-    E_ZIP_COMPRESSION_METHOD_DEFLATE = 8
-} e_zip_compression_method;
-
-typedef struct
-{
-    const char* pPath;
-    size_t pathLen;
-    e_uint16 compressionMethod;
-    e_uint64 compressedSize;
-    e_uint64 uncompressedSize;
-    e_uint64 fileOffset;            /* The offset in bytes from the start of the archive file. */
-    e_bool32 directory;
-} e_zip_file_info;
-
-typedef struct
-{
-    size_t offsetInBytes;           /* The offset in bytes of the item relative to the start of the central directory. */
-} e_zip_index;
-
-struct e_zip_cd_node
-{
-    size_t iFile;                   /* Will be undefined for non leaf nodes. */
-    const char* pName;
-    size_t nameLen;
-    size_t childCount;
-    e_zip_cd_node* pChildren;
-    size_t _descendantRangeBeg;     /* Only used for building the CD node graph. */
-    size_t _descendantRangeEnd;     /* Only used for building the CD node graph. */
-    size_t _descendantPrefixLen;    /* Only used for building the CD node graph. */
-};
-
-struct e_zip_iterator
-{
-    e_fs_iterator iterator;
-    e_zip* pZip;
-    e_zip_cd_node* pDirectoryNode;
-    size_t iChild;
-};
-
-struct e_zip_file
-{
-    e_file file;
-    e_zip_file_info info;
-    e_uint64 absoluteCursorUncompressed;
-    e_uint64 absoluteCursorCompressed;      /* The position of the cursor in the compressed data. */
-    e_deflate_decompressor decompressor;    /* Only used for compressed files. */
-    size_t cacheCap;                        /* The capacity of the cache. Never changes. */
-    size_t cacheSize;                       /* The number of valid bytes in the cache. Can be less than the capacity, but never more. Will be less when holding the tail end fo the file data. */
-    size_t cacheCursor;                     /* The cursor within the cache. The cache size minus the cursor defines how much data remains in the cache. */
-    unsigned char* pCache;                  /* Cache must be at least 32K. Stores uncompressed data. Offset of _pCacheData. */
-    size_t compressedCacheCap;              /* The capacity of the compressed cache. Never changes. */
-    size_t compressedCacheSize;             /* The number of valid bytes in the compressed cache. Can be less than the capacity, but never more. Will be less when holding the tail end fo the file data. */
-    size_t compressedCacheCursor;           /* The cursor within the compressed cache. The compressed cache size minus the cursor defines how much data remains in the compressed cache. */
-    unsigned char* pCompressedCache;        /* Only used for compressed files. */
-    unsigned char _pCacheData[1];           /* Contains the data of pCache and pCompressedCache. */
-};
-
-struct e_zip
-{
-    e_archive archive;                      /* A Zip is an archive, which itself is a file system. Therefore a e_zip object can be plugged into any e_fs API. */
-    size_t fileCount;                       /* Total number of records in the central directory. */
-    e_mutex* pLock;                         /* For mutual exclusion when reading file data across multiple threads. This is an offset of pHeap. */
-    size_t centralDirectorySize;            /* Size in bytes of the central directory. */
-    void* pCentralDirectory;                /* Offset of pHeap. */
-    e_zip_index* pIndex;                    /* Offset of pHeap. There will be fileCount items in this array, and each item is sorted by the file path of each item. */
-    e_zip_cd_node* pCDRootNode;             /* The root node of our accelerated central directory data structure. */
-    void* pHeap;                            /* A single heap allocation for storing the central directory and index. */
-};
-
-
-
-static void e_zip_lock(e_zip* pZip)
-{
-    e_mutex_lock(pZip->pLock);
-}
-
-static void e_zip_unlock(e_zip* pZip)
-{
-    e_mutex_unlock(pZip->pLock);
-}
-
-
-
-typedef struct
-{
-    const char* str;
-    size_t len;
-} e_refstring;
-
-static int e_binary_search_zip_cd_node_compare(void* pUserData, const void* pKey, const void* pVal)
-{
-    const e_refstring* pRefString = (const e_refstring*)pKey;
-    const e_zip_cd_node* pNode = (const e_zip_cd_node*)pVal;
-    int compareResult;
-
-    (void)pUserData;
-
-    compareResult = c89str_strncmp(pRefString->str, pNode->pName, E_MIN(pRefString->len, pNode->nameLen));
-    if (compareResult == 0 && pRefString->len != pNode->nameLen) {
-        compareResult = (pRefString->len < pNode->nameLen) ? -1 : 1;
-    }
-
-    return compareResult;
-}
-
-static e_zip_cd_node* e_zip_cd_node_find_child(e_zip_cd_node* pParent, const char* pChildName, size_t childNameLen)
-{
-    e_refstring str;
-    str.str = pChildName;
-    str.len = childNameLen;
-
-    return (e_zip_cd_node*)e_sorted_search(&str, pParent->pChildren, pParent->childCount, sizeof(*pParent->pChildren), e_binary_search_zip_cd_node_compare, NULL);
-}
-
-
-static e_result e_archive_alloc_size_zip(void* pUserData, size_t* pSize)
-{
-    E_UNUSED(pUserData);
-    E_ASSERT(pSize != NULL);
-
-    *pSize = sizeof(e_zip);
-    return E_SUCCESS;
-}
-
-static e_result e_zip_get_file_info_by_record_offset(e_zip* pZip, size_t offset, e_zip_file_info* pInfo)
-{
-    e_uint16 filePathLen;
-    const unsigned char* pCentralDirectoryRecord;
-
-    E_ASSERT(pZip  != NULL);
-    E_ASSERT(pInfo != NULL);
-
-    E_ZERO_OBJECT(pInfo);
-
-    pCentralDirectoryRecord = (const unsigned char*)E_OFFSET_PTR(pZip->pCentralDirectory, offset);
-
-    /* Check that we're not going to overflow the central directory. */
-    if (offset + 46 > pZip->centralDirectorySize) {   /* 46 is the offset of the file path. */
-        return E_INVALID_FILE;  /* Look like an invalid central directory. */
-    }
-
-    /* Grab the length of the file path. */
-    filePathLen = ((e_uint16)pCentralDirectoryRecord[29] << 8) | pCentralDirectoryRecord[28];
-
-    /* Now we can move to the file path, again making sure we have enough room for the file path. */
-    if (offset + 46 + filePathLen > pZip->centralDirectorySize) {
-        return E_INVALID_FILE;  /* Looks like an invalid central directory. */
-    }
-
-    pInfo->pPath   = (const char*)(pCentralDirectoryRecord + 46);
-    pInfo->pathLen = filePathLen;
-
-    /* We can determine if the entry is a directory by checking if the path ends in a slash. */
-    if (pInfo->pPath[pInfo->pathLen-1] == '/' || pInfo->pPath[pInfo->pathLen-1] == '\\') {
-        pInfo->directory = E_TRUE;
-    }
-
-    /* Compression method. */
-    pInfo->compressionMethod = ((e_uint16)pCentralDirectoryRecord[11] << 8) | pCentralDirectoryRecord[10];
-
-    /* Get the size of the file. */
-    pInfo->compressedSize   = ((e_uint32)pCentralDirectoryRecord[23] << 24) | ((e_uint32)pCentralDirectoryRecord[22] << 16) | ((e_uint32)pCentralDirectoryRecord[21] << 8) | (e_uint32)pCentralDirectoryRecord[20];
-    pInfo->uncompressedSize = ((e_uint32)pCentralDirectoryRecord[27] << 24) | ((e_uint32)pCentralDirectoryRecord[26] << 16) | ((e_uint32)pCentralDirectoryRecord[25] << 8) | (e_uint32)pCentralDirectoryRecord[24];
-
-    /* File offset. */
-    pInfo->fileOffset = ((e_uint32)pCentralDirectoryRecord[45] << 24) | ((e_uint32)pCentralDirectoryRecord[44] << 16) | ((e_uint32)pCentralDirectoryRecord[43] << 8) | pCentralDirectoryRecord[42];
-
-
-    /*
-    Load Zip64 data if necessary. It's in the extra data. The extra data is made up of a
-    number of blocks. Each block has a 2 byte ID and a 2 byte size. When reading from
-    each block, we need to make sure we don't try reading beyond the reported size of
-    the extra data.
-    
-    The Zip64 data will be stored in a block with the ID of 0x0001. The presence of each
-    member inside this block is conditional to whether or not it's set to 0xFFFFFFFF in
-    the main part of the central directory record.
-    */
-    if (pInfo->compressedSize == 0xFFFFFFFF || pInfo->uncompressedSize == 0xFFFFFFFF || pInfo->fileOffset == 0xFFFFFFFF) {
-        e_uint16 extraDataSize   = ((e_uint16)pCentralDirectoryRecord[31] << 8) | pCentralDirectoryRecord[30];
-        e_uint16 extraDataOffset = 0;
-
-        const unsigned char* pExtraData = (const unsigned char*)(pCentralDirectoryRecord + 46 + filePathLen);
-
-        /* For each chunk in the extra data. */
-        for (;;) {
-            e_uint16 chunkID;
-            e_uint16 chunkSize;
-
-            if (extraDataOffset == extraDataSize) {
-                break;  /* We're done. */
-            }
-
-            if (extraDataOffset > extraDataSize) {
-                return E_INVALID_FILE;  /* We've somehow read past the extra data. Abort. */
-            }
-
-            if ((extraDataSize - extraDataOffset) < 4) {
-                return E_INVALID_FILE;  /* Not enough data in the extra data to read the chunk header. */
-            }
-
-            chunkID   = ((e_uint16)pExtraData[extraDataOffset+1] << 8) | pExtraData[extraDataOffset+0];
-            chunkSize = ((e_uint16)pExtraData[extraDataOffset+3] << 8) | pExtraData[extraDataOffset+2];
-
-            /* Increment the offset to make it easy to parse the data in the next section. */
-            extraDataOffset += 4;
-
-            if ((extraDataSize - extraDataOffset) < chunkSize) {
-                return E_INVALID_FILE;  /* Not enough data in the extra data to read the chunk. */
-            }
-
-            if (chunkID == 0x0001) {
-                /* Zip64 data. */
-                e_uint32 chunkLocalOffset = 0;
-
-                if (pInfo->uncompressedSize == 0xFFFFFFFF) {
-                    if (chunkLocalOffset + 8 > chunkSize) {
-                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
-                    }
-
-                    pInfo->uncompressedSize = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
-                    chunkLocalOffset += 8;
-                }
-
-                if (pInfo->compressedSize == 0xFFFFFFFF) {
-                    if (chunkLocalOffset + 8 > chunkSize) {
-                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
-                    }
-
-                    pInfo->compressedSize = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
-                    chunkLocalOffset += 8;
-                }
-
-                if (pInfo->fileOffset == 0xFFFFFFFF) {
-                    if (chunkLocalOffset + 8 > chunkSize) {
-                        return E_INVALID_FILE;  /* Not enough data in the chunk. */
-                    }
-
-                    pInfo->fileOffset = ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+7] << 56) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+6] << 48) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+5] << 40) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+4] << 32) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+3] << 24) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+2] << 16) | ((e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+1] << 8) | (e_uint64)pExtraData[extraDataOffset+chunkLocalOffset+0];
-                    chunkLocalOffset += 8;
-                }
-            }
-
-            extraDataOffset += chunkSize;
-        }
-    }
-
-    return E_SUCCESS;
-}
-
-static const char* e_zip_get_file_path_by_record_offset(e_zip* pZip, size_t offset, size_t* pLength)
-{
-    e_uint16 length;
-    const char* pCentralDirectoryRecord;
-
-    E_ASSERT(pLength != NULL);
-
-    *pLength = 0;
-
-    pCentralDirectoryRecord = (const char*)E_OFFSET_PTR(pZip->pCentralDirectory, offset);
-
-    /* Check that we're not going to overflow the central directory. */
-    if (offset + 46 > pZip->centralDirectorySize) {   /* 46 is the offset of the file path. */
-        return NULL;    /* Look like an invalid central directory. */
-    }
-
-    /* Grab the length of the file. */
-    length = ((e_uint16)pCentralDirectoryRecord[29] << 8) | pCentralDirectoryRecord[28];
-
-    /* Now we can move to the file path, again making sure we have enough room for the file path. */
-    if (offset + 46 + length > pZip->centralDirectorySize) {
-        return NULL;    /* Looks like an invalid central directory. */
-    }
-
-    /* We now how enough information to get the file path. */
-    *pLength = length;
-    return pCentralDirectoryRecord + 46;
-}
-
-static e_result e_zip_find_file_by_path(e_zip* pZip, const char* pFilePath, size_t filePathLen, size_t* pFileIndex)
-{
-    e_result result;
-    c89str_path_iterator pathIterator;
-    e_zip_cd_node* pCurrentNode;
-
-    E_ASSERT(pZip       != NULL);
-    E_ASSERT(pFilePath  != NULL);
-    E_ASSERT(pFileIndex != NULL);
-
-    /* Start at the root node. */
-    pCurrentNode = pZip->pCDRootNode;
-
-    result = e_result_from_errno(c89str_path_first(pFilePath, filePathLen, &pathIterator));
-    if (result != E_SUCCESS) {
-        return result;  /* Probably trying to find the root item which does not have an index. */
-    }
-
-    for (;;) {
-        e_zip_cd_node* pChildNode;
-        
-        pChildNode = e_zip_cd_node_find_child(pCurrentNode, pathIterator.pFullPath + pathIterator.segmentOffset, pathIterator.segmentLength);
-        if (pChildNode == NULL) {
-            return E_DOES_NOT_EXIST;
-        }
-
-        pCurrentNode = pChildNode;
-
-        result = e_result_from_errno(c89str_path_next(&pathIterator));
-        if (result != E_SUCCESS) {
-            /* We've reached the end. The file we're on must be the file index. */
-            *pFileIndex = pCurrentNode->iFile;
-            return E_SUCCESS;
-        }
-    }
-
-    /* Should never get here. */
-    return E_DOES_NOT_EXIST;
-}
-
-static e_result e_zip_get_file_info_by_path(e_zip* pZip, const char* pFilePath, size_t filePathLen, e_zip_file_info* pInfo)
-{
-    e_result result;
-    size_t iFile;
-
-    E_ASSERT(pZip      != NULL);
-    E_ASSERT(pFilePath != NULL);
-    E_ASSERT(pInfo     != NULL);
-
-    result = e_zip_find_file_by_path(pZip, pFilePath, filePathLen, &iFile);
-    if (result != E_SUCCESS) {
-        return result;  /* Most likely the file could not be found. */
-    }
-
-    return e_zip_get_file_info_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, pInfo);
-}
-
-static int e_zip_qsort_compare(void* pUserData, const void* a, const void* b)
-{
-    e_zip* pZip = (e_zip*)pUserData;
-    const e_zip_index* pZipIndex0 = (const e_zip_index*)a;
-    const e_zip_index* pZipIndex1 = (const e_zip_index*)b;
-    size_t fileNameLen0;
-    const char* pFileName0;
-    size_t fileNameLen1;
-    const char* pFileName1;
-    int compareResult;
-
-    E_ASSERT(pZip != NULL);
-
-    pFileName0 = e_zip_get_file_path_by_record_offset(pZip, pZipIndex0->offsetInBytes, &fileNameLen0);
-    if (pFileName0 == NULL) {
-        pFileName0 = "";    /* File couldn't be found. Just treat it as an empty string. */
-    }
-
-    pFileName1 = e_zip_get_file_path_by_record_offset(pZip, pZipIndex1->offsetInBytes, &fileNameLen1);
-    if (pFileName1 == NULL) {
-        pFileName1 = "";    /* File couldn't be found. Just treat it as an empty string. */
-    }
-
-    compareResult = strncmp(pFileName0, pFileName1, E_MIN(fileNameLen0, fileNameLen1));
-    if (compareResult == 0 && fileNameLen0 != fileNameLen1) {
-        /* The strings are the same up to the length of the shorter string. The shorter string is considered to be less than the longer string. */
-        compareResult = (fileNameLen0 < fileNameLen1) ? -1 : 1;
-    }
-
-    return compareResult;
-}
-
-static void e_zip_cd_node_build(e_zip* pZip, e_zip_cd_node** ppRunningChildrenPointer, e_zip_cd_node* pNode)
-{
-    size_t iFile;
-    size_t iChild;
-
-    E_ASSERT(pZip  != NULL);
-    E_ASSERT(pNode != NULL);
-    E_ASSERT(pNode->_descendantRangeEnd <= pZip->fileCount);
-    E_ASSERT(ppRunningChildrenPointer != NULL);
-
-    pNode->childCount = 0;
-    pNode->pChildren  = *ppRunningChildrenPointer;
-
-    /*
-    We need to loop through our file range and add any direct children first. Then once that's
-    done, we iterate over each child node and fill them out recursively.
-    */
-    for (iFile = pNode->_descendantRangeBeg; iFile < pNode->_descendantRangeEnd; iFile += 1) {
-        const char* pFullFilePath;
-        size_t fullFilePathLen;
-        const char* pShortFilePath;
-        size_t shortFilePathLen;
-        c89str_path_iterator shortFilePathIterator;
-
-        pFullFilePath = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, &fullFilePathLen);
-        if (pFullFilePath == NULL) {
-            continue;   /* Should never happen. Just ignore the file if we couldn't find it by the given offset. */
-        }
-
-        /* If the full file path length is equal to the descendant prefix length, it means it's a leaf node. */
-        E_ASSERT(fullFilePathLen >= pNode->_descendantPrefixLen);
-        if (fullFilePathLen == pNode->_descendantPrefixLen) {
-            continue;
-        }
-
-        /* The short file path is simply the full file path without the descendant prefix. */
-        pShortFilePath   = pFullFilePath   + pNode->_descendantPrefixLen;
-        shortFilePathLen = fullFilePathLen - pNode->_descendantPrefixLen;
-
-        /* Make sure we're not sitting on a path separator. */
-        if (pShortFilePath[0] == '\\' || pShortFilePath[0] == '/') {
-            pShortFilePath   += 1;
-            shortFilePathLen -= 1;
-        }
-
-        /*
-        Now we need to check if we need to add a child. Because this main file listing is sorted,
-        we need only check the last child item. If it's not equal, we have a new child item.
-        */
-        if (c89str_path_first(pShortFilePath, shortFilePathLen, &shortFilePathIterator) == C89STR_SUCCESS) {
-            if (pNode->childCount == 0 || pNode->pChildren[pNode->childCount-1].nameLen != shortFilePathIterator.segmentLength || c89str_strncmp(pNode->pChildren[pNode->childCount-1].pName, shortFilePathIterator.pFullPath + shortFilePathIterator.segmentOffset, E_MIN(pNode->pChildren[pNode->childCount-1].nameLen, shortFilePathIterator.segmentLength)) != 0) {
-                /* Child doesn't exist. Need to add it to the list. */
-                pNode->pChildren[pNode->childCount].iFile                = iFile;
-                pNode->pChildren[pNode->childCount].pName                = shortFilePathIterator.pFullPath + shortFilePathIterator.segmentOffset;
-                pNode->pChildren[pNode->childCount].nameLen              = shortFilePathIterator.segmentLength;
-                pNode->pChildren[pNode->childCount]._descendantRangeBeg  = iFile;
-                pNode->pChildren[pNode->childCount]._descendantRangeEnd  = pNode->_descendantRangeEnd;
-                pNode->pChildren[pNode->childCount]._descendantPrefixLen = (fullFilePathLen - shortFilePathLen) + shortFilePathIterator.segmentLength;
-
-                /* Update the end range for the previous child if we have one. */
-                if (pNode->childCount > 0) {
-                    pNode->pChildren[pNode->childCount-1]._descendantRangeEnd = iFile;
-                }
-
-                pNode->childCount         += 1;
-                *ppRunningChildrenPointer += 1;
-            }
-        } else {
-            /*
-            Couldn't get the first segment. This probably means we found an explicit directory
-            listing. We just ignore it.
-            */
-            if (pNode->childCount > 0) {
-                pNode->pChildren[pNode->childCount-1]._descendantRangeEnd = iFile;
-            }
-        }
-    }
-
-    /* We've initialized each of the child nodes. We now need to recursively process them. */
-    for (iChild = 0; iChild < pNode->childCount; iChild += 1) {
-        e_zip_cd_node_build(pZip, ppRunningChildrenPointer, &pNode->pChildren[iChild]);
-    }
-}
-
-static e_result e_archive_init_zip(void* pUserData, e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_archive* pArchive)
-{
-    e_zip* pZip = (e_zip*)pArchive;
-    e_result result;
-    e_uint32 sig;
-    int eocdPositionFromEnd;
-    e_uint16 cdRecordCount16;
-    e_uint64 cdRecordCount64;
-    e_uint32 cdSizeInBytes32;
-    e_uint64 cdSizeInBytes64;
-    e_uint32 cdOffset32;
-    e_uint64 cdOffset64;
-
-    E_UNUSED(pUserData);
-    E_ASSERT(pZip != NULL);
-
-    /*
-    The correct way to load a Zip file is to read from the central directory. The end of the
-    central directory is the first thing we need to find and is sitting at the end of the file. The
-    most efficient way to find this is to look for the end of central directory signature. The
-    EOCD record is at least 22 bytes, but may be larger if there is a comment. The maximum size
-    will be 22 + 65535.
-
-    The way we'll do it is we'll first assume there is no comment and try reading from byte -22
-    starting from the end. If the first 4 bytes are equal to the EOCD signature we'll treat that as
-    the start of the EOCD and read from there. If this fails it probably means there's a comment in
-    which case we'll go to byte -(22 + 65535) and scan from there.
-    */
-    result = e_stream_seek(pStream, -22, E_SEEK_END);
-    if (result != E_SUCCESS) {
-        return result;  /* Failed to seek to our EOCD. This cannot be a valid Zip file. */
-    }
-
-    result = e_stream_read(pStream, &sig, 4, NULL);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    if (sig == E_ZIP_EOCD_SIGNATURE) {
-        /* Found the EOCD. It's at position -22. */
-        eocdPositionFromEnd = -22;
-    } else {
-        /*
-        The EOCD record is not located at position -22. There might be a comment which means the
-        EOCD signature is sitting further up the file. The comment has a maximum if 65535
-        characters, so we'll start searching from -(22 + 65535).
-        */
-        result = e_stream_seek(pStream, -(22 + 65535), E_SEEK_END);
-        if (result != E_SUCCESS) {
-            /*
-            We failed the seek, but it most likely means we were just trying to seek to far back in
-            which case we can just fall back to a seek to position 0.
-            */
-            result = e_stream_seek(pStream, 0, E_SEEK_SET);
-            if (result != E_SUCCESS) {
-                return result;
-            }
-        }
-
-        /*
-        We now need to scan byte-by-byte until we find the signature. We could allocate this on the
-        stack, but that takes a little bit too much stack space that I feel comfortable with. We
-        could also allocate a buffer on the heap, but that just needlessly inefficient. Instead
-        we'll run in a loop and read into a 4K stack allocated buffer.
-        */
-        {
-            unsigned char buffer[4096];
-            size_t bufferCursor;
-            size_t bufferSize;
-            size_t totalBytesScanned;
-
-            totalBytesScanned = 0;
-            bufferCursor = 0;
-            for (;;) {
-                size_t bufferRemaining;
-                e_bool32 foundEOCD = E_FALSE;
-
-                result = e_stream_read(pStream, buffer + bufferCursor, sizeof(buffer) - bufferCursor, &bufferSize);
-                if (result != E_SUCCESS) {
-                    return E_INVALID_FILE;  /* If we get here it most likely means we've reached the end of the file. In any case, we're can't continue. */
-                }
-
-                /* Make sure we account for the offset when determining the buffer size. */
-                bufferSize += bufferCursor;
-                if (bufferSize < 4) {
-                    return E_INVALID_FILE;  /* Didn't read enough data. Not even enough to read a full signature. */
-                }
-
-                for (; bufferCursor <= (bufferSize - 4); bufferCursor += 1) {
-                    /* Is it safe to do unaligned access like this on all platforms? Safer to do a byte-by-byte comparison? */
-                    if (*(e_uint32*)(buffer + bufferCursor) == E_ZIP_EOCD_SIGNATURE) {
-                        /* The signature has been found. */
-                        foundEOCD = E_TRUE;
-                        break;
-                    }
-                }
-
-                totalBytesScanned += bufferCursor;
-
-                if (foundEOCD) {
-                    /*
-                    We found the EOCD. A complication here is that the stream's cursor won't
-                    be sitting in the correct location because we were reading in chunks.
-                    */
-                    eocdPositionFromEnd = -(22 + 65535) + (int)totalBytesScanned;   /* Safe cast to int. */
-
-                    result = e_stream_seek(pStream, eocdPositionFromEnd + 4, E_SEEK_END);  /* +4 so go just past the signatures. */
-                    if (result != E_SUCCESS) {
-                        return result;
-                    }
-
-                    /* Just setting the signature here to keep the state of our local variables consistent. */
-                    sig = E_ZIP_EOCD_SIGNATURE;
-
-                    /* Get out of the chunk loop. */
-                    break;
-                }
-
-                /*
-                Getting here means we didn't find the signature in this chunk. We need to move the
-                cursor back and read another chunk.
-                */
-                bufferRemaining = bufferSize - bufferCursor;
-                E_MOVE_MEMORY(buffer, buffer + bufferCursor, bufferRemaining);
-                bufferCursor = bufferRemaining;
-            }
-        }
-    }
-
-    /*
-    Getting here means we must have found the EOCD record. We can now parse it. The EOCD will give
-    us information that we could use to determine if it's a Zip64 record.
-
-    We're ignoring the disk properties. Split Zip files are not being supported here.
-    */
-    result = e_stream_seek(pStream, 2 + 2 + 2, E_SEEK_CUR);  /* Skip past disk stuff. */
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    result = e_stream_read(pStream, &cdRecordCount16, 2, NULL);
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    result = e_stream_read(pStream, &cdSizeInBytes32, 4, NULL);
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    result = e_stream_read(pStream, &cdOffset32, 4, NULL);
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    /*
-    The last part will be the comment. We don't care about this, and this is the last part of the
-    file so we just leave it.
-    */
-
-    /*
-    We'll now need to decide if we need to read some Zip64 information. To determine this we just
-    need to look at the content of the record count, size and offset.
-    */
-    if (cdRecordCount16 == 0xFFFF || cdSizeInBytes32 == 0xFFFFFFFF || cdOffset32 == 0xFFFFFFFF) {
-        /*
-        It's a Zip64 file. We need to find the EOCD64 locator which will be 20 bytes before the EOCD
-        that we just read. If we can't find the EOCD64 locator we'll just abort.
-        */
-        e_uint64 eocd64SizeInBytes;
-        e_int64 eocd64OffsetInBytes;
-
-        result = e_stream_seek(pStream, eocdPositionFromEnd - 20, E_SEEK_END);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        result = e_stream_read(pStream, &sig, 4, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        if (sig != E_ZIP_EOCD64_LOCATOR_SIGNATURE) {
-            /* TODO: We can try falling back to a method that scans for the EOCD64. Would work just like the regular EOCD that we just read. */
-            return E_INVALID_FILE;  /* Couldn't find the EOCD64 locator. Abort. */
-        }
-
-        /* We don't use the next 4 bytes so skip it. */
-        result = e_stream_seek(pStream, 4, E_SEEK_CUR);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        /* The next 8 bytes contains the offset to the EOCD64. */
-        result = e_stream_read(pStream, &eocd64OffsetInBytes, 8, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        /*
-        The next 4 bytes contains the number of disks. We're not supporting split Zip files, so we
-        don't need to care about this. Just seek straight to the EOCD64 record.
-        */
-        result = e_stream_seek(pStream, eocd64OffsetInBytes, E_SEEK_SET);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-
-        /* Getting here means we've found the EOCD64. We can now parse it. */
-        result = e_stream_read(pStream, &sig, 4, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        if (sig != E_ZIP_EOCD64_SIGNATURE) {
-            return E_INVALID_FILE;  /* Couldn't find the EOCD64. Abort. */
-        }
-
-        /* Getting here means we've found the EOCD64 locator. The next 8 bytes contains the size of the EOCD64 minus 12. */
-        result = e_stream_read(pStream, &eocd64SizeInBytes, 8, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        /* The EOCD64 must be at least 36 bytes. */
-        if (eocd64SizeInBytes < 36) {
-            return E_INVALID_FILE;
-        }
-
-        /* We can skip past everything up to the record count, which is 20 bytes. */
-        result = e_stream_seek(pStream, 20, E_SEEK_CUR);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        /* The next three items are the record count, size in bytes and offset, which are all 8 bytes. */
-        result = e_stream_read(pStream, &cdRecordCount64, 8, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        result = e_stream_read(pStream, &cdSizeInBytes64, 8, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-
-        result = e_stream_read(pStream, &cdOffset64, 8, NULL);
-        if (result != E_SUCCESS) {
-            return E_INVALID_FILE;
-        }
-        
-        if (cdRecordCount64 > E_SIZE_MAX) {
-            return E_TOO_BIG;   /* Too many records. Will never fit what we need in memory. */
-        }
-        if (cdSizeInBytes64 > E_SIZE_MAX) {
-            return E_TOO_BIG;   /* Central directory is too big to fit into memory. */
-        }
-
-        pZip->fileCount = cdRecordCount64;
-        
-    } else {
-        /* It's a 32-bit archive. */
-        pZip->fileCount = cdRecordCount16;
-        pZip->centralDirectorySize = cdSizeInBytes32;
-
-        cdSizeInBytes64 = cdSizeInBytes32;
-        cdOffset64 = cdOffset32;
-    }
-
-    /* We need to seek to the start of the central directory and read it's contents. */
-    result = e_stream_seek(pStream, cdOffset64, E_SEEK_SET);
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    /* At this point we'll be sitting on the central directory. */
-
-    /*
-    We don't parse the central directory here. Instead we just allocate a block of memory and read
-    straight into that. Then when we need to load a file we just iterate over the central
-    directory.
-    */
-    if (cdSizeInBytes64 > E_SIZE_MAX) {
-        return E_TOO_BIG;   /* The size of the central directory is too big. */
-    }
-
-    pZip->centralDirectorySize = (size_t)cdSizeInBytes64;
-
-
-    pZip->pHeap = e_malloc(sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount), pAllocationCallbacks);
-    if (pZip->pHeap == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    pZip->pLock             = (e_mutex*    )E_OFFSET_PTR(pZip->pHeap, 0);
-    pZip->pCentralDirectory =               E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex));
-    pZip->pIndex            = (e_zip_index*)E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize);
-    pZip->pCDRootNode       = NULL; /* <-- This will be set later. */
-
-    result = e_stream_read(pStream, pZip->pCentralDirectory, pZip->centralDirectorySize, NULL);
-    if (result != E_SUCCESS) {
-        return E_INVALID_FILE;
-    }
-
-    /* Build the index. It needs to be sorted by name. We'll treat this as case-sensitive. */
-    {
-        e_memory_stream cdStream;
-        size_t iFile;
-        size_t nodeUpperBoundCount;
-
-        result = e_memory_stream_init_readonly(pZip->pCentralDirectory, pZip->centralDirectorySize, &cdStream);
-        if (result != E_SUCCESS) {
-            e_free(pZip->pHeap, pAllocationCallbacks);
-            return result;
-        }
-
-        for (iFile = 0; iFile < pZip->fileCount; iFile += 1) {
-            size_t fileOffset;
-            e_uint16 fileNameLen;
-            e_uint16 extraLen;
-            e_uint16 commentLen;
-
-            result = e_memory_stream_tell(&cdStream, &fileOffset);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-
-            pZip->pIndex[iFile].offsetInBytes = fileOffset;
-
-
-            /*
-            We need to seek to the next item. To do this we need to retrieve the lengths of the
-            variable-length fields. These start from offset 28.
-            */
-            result = e_memory_stream_seek(&cdStream, 28, E_SEEK_CUR);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-
-            result = e_memory_stream_read(&cdStream, &fileNameLen, 2, NULL);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-
-            result = e_memory_stream_read(&cdStream, &extraLen, 2, NULL);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-
-            result = e_memory_stream_read(&cdStream, &commentLen, 2, NULL);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-
-            /* We have the necessary information we need to move past this record. */
-            result = e_memory_stream_seek(&cdStream, fileOffset + 46 + fileNameLen + extraLen + commentLen, E_SEEK_SET);
-            if (result != E_SUCCESS) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return result;
-            }
-        }
-
-        /*
-        TODO: Look at some real-world Zip archives from various archivers (7zip, Windows, etc.) and
-        check how the sorting looks before our explicit sort. If most real-world archives are already
-        mostly sorted, it might be more efficient to just do a simple insertion sort.
-        */
-        e_sort(pZip->pIndex, pZip->fileCount, sizeof(e_zip_index), e_zip_qsort_compare, pZip);
-
-        /* Testing. */
-        #if 0
-        {
-            size_t i;
-            for (i = 0; i < pZip->fileCount; i += 1) {
-                size_t nameLen;
-                const char* pName = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[i].offsetInBytes, &nameLen);
-
-                printf("File name = %.*s\n", (int)nameLen, pName);
-            }
-        }
-        #endif
-
-        /*
-        We're going to build an accelerated data structure for the central directory. Nothing over
-        the top - just a simple tree based on directory names.
-
-        It's just a graph. Each node in the graph is either a directory or a file. Leaf nodes can
-        possibly be files or an empty directory which means a flag is required to indicate whether
-        or not the node is a directory. Sub-folders and files are just child nodes. Children are
-        sorted by name to allow for fast lookups.
-
-        The items in the central directory has already been sorted thanks to the index that we
-        constructed above. If we just iterate linearly based on that index everything should be
-        sorted naturally.
-
-        The graph is constructed in two passes. The first pass simply counts the number of nodes so
-        we can allocate a single block of memory. The second pass fills the data.
-        */
-
-        /*
-        The first pass is just to count the number of nodes so we can allocate some memory in one
-        chunk. We start the count at one to accommodate for the root node. This pass is not
-        necessarily calculating an exact count, but instead it calculates an upper bound count. The
-        reason for this is how directories are handled. Sometimes they are listed explicitly, but I
-        have seen cases where they're not. If we could guarantee all folders were explicitly listed
-        we would be able to avoid this pass.
-
-        We can take advantage of the fact that the file listing has been sorted. For each entry we
-        just compare the path with the previous one, and for every segment in the new path that's
-        different we increment the counter (it should always be at least one since the file name
-        itself should always be different).
-        */
-        {
-            const char* pPrevPath;
-            size_t prevPathLen;
-            
-            /* Consider the root directory to be the previous path. */
-            pPrevPath = "";
-            prevPathLen = 0;
-
-            /* Start the count at 1 to account for the root node. */
-            nodeUpperBoundCount = 1;
-
-            for (iFile = 0; iFile < pZip->fileCount; iFile += 1) {
-                const char* pFilePath;
-                size_t filePathLen;
-
-                pFilePath = e_zip_get_file_path_by_record_offset(pZip, pZip->pIndex[iFile].offsetInBytes, &filePathLen);
-                if (pFilePath == NULL) {
-                    continue;   /* Just skip the file if we can't get the name. Should never happen. */
-                }
-
-                /*
-                Now that we have the file path all we need to do is compare is to the previous path
-                and increment the counter for every segment in the current path that is different
-                to the previous path. We'll need to use a path iterator for each of these.
-                */
-                {
-                    c89str_path_iterator nextIterator;
-                    c89str_path_iterator prevIterator;
-
-                    c89str_path_first(pFilePath, filePathLen, &nextIterator);   /* <-- This should never fail. */
-
-                    if (c89str_path_first(pPrevPath, prevPathLen, &prevIterator) == C89STR_SUCCESS) {
-                        /*
-                        First just move the next iterator forward until we reach the end of the previous
-                        iterator, or if the segments differ between the two.
-                        */
-                        for (;;) {
-                            if (c89str_path_iterators_compare(&nextIterator, &prevIterator) != 0) {
-                                break;  /* Iterators don't match. */
-                            }
-
-                            /* Getting here means the segments match. We need to move to the next one. */
-                            if (c89str_path_next(&nextIterator) != C89STR_SUCCESS) {
-                                break;  /* We reached the end of the next iterator before the previous. The only difference will be the file name. */
-                            }
-
-                            if (c89str_path_next(&prevIterator) != C89STR_SUCCESS) {
-                                break;  /* We reached the end of the prev iterator. Get out of the loop. */
-                            }
-                        }
-                    }
-
-                    /* Increment the counter to account for the segment that the next iterator is currently sitting on. */
-                    nodeUpperBoundCount += 1;
-
-                    /* Now we need to increment the counter for every new segment. */
-                    while (c89str_path_next(&nextIterator) == C89STR_SUCCESS) {
-                        nodeUpperBoundCount += 1;
-                    }
-                }
-
-                /* Getting here means we're done with the count for this item. Move to the next one. */
-                pPrevPath = pFilePath;
-                prevPathLen = filePathLen;
-            }
-        }
-
-        /*
-        Now that we've got the count we can go ahead and resize our heap allocation. It's important
-        to remember to update our pointers here.
-        */
-        {
-            void* pNewHeap = e_realloc(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount) + (sizeof(*pZip->pCDRootNode) * nodeUpperBoundCount), pAllocationCallbacks);
-            if (pNewHeap == NULL) {
-                e_free(pZip->pHeap, pAllocationCallbacks);
-                return E_OUT_OF_MEMORY;
-            }
-
-            pZip->pHeap = pNewHeap;
-            pZip->pLock             = (e_mutex*      )E_OFFSET_PTR(pZip->pHeap, 0);
-            pZip->pCentralDirectory =                 E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex));
-            pZip->pIndex            = (e_zip_index*  )E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize);
-            pZip->pCDRootNode       = (e_zip_cd_node*)E_OFFSET_PTR(pZip->pHeap, sizeof(e_mutex) + pZip->centralDirectorySize + (sizeof(*pZip->pIndex) * pZip->fileCount));
-        }
-
-        /*
-        Memory has been allocated so we can now fill it out. This is slightly tricky because we want
-        to do it in a single pass with a single memory allocation. Each node will hold a pointer to
-        an array which will contain their children. The size of this array is unknown at this point
-        so we need to come up with a system that allows us to fill each node in order.
-
-        Fortunately our file listing is sorted which gives us a good start. We want to fill out
-        higher level nodes first and then move down to leaf nodes. We're going to run through the
-        file listing in sorted order. For the current file path, we need to look at it's directory
-        structure. For each segment of the directory there will be a node. For each of these
-        segments we'll run an inner loop that adds child nodes for each file that shares the same
-        prefix.
-
-        To put simply, for each node, we need to attach all of it's children before the child nodes
-        themselves have been filled with their children. We can do this recursively. The first node
-        we're filling is the root node.
-        */
-        {
-            e_zip_cd_node* pRunningChildrenPointer = &pZip->pCDRootNode[1];
-
-            /* The root node needs to be set up first. */
-            pZip->pCDRootNode->pName                = "";
-            pZip->pCDRootNode->nameLen              = 0;
-            pZip->pCDRootNode->_descendantRangeBeg  = 0;
-            pZip->pCDRootNode->_descendantRangeEnd  = pZip->fileCount;
-            pZip->pCDRootNode->_descendantPrefixLen = 0;
-
-            e_zip_cd_node_build(pZip, &pRunningChildrenPointer, pZip->pCDRootNode);
-        }
-    }
-
-    /*
-    We need a mutex to make reading from multiple files across different threads thread-safe. This
-    needs to be done last because we can't be changing the address of the mutex, which may happen
-    due to the realloc() above.
-    */
-    result = e_mutex_init(pZip->pLock, E_MUTEX_TYPE_PLAIN);
-    if (result != E_SUCCESS) {
-        /*
-        Initialization of the mutex failed, but it's not really a critical error. It just means it
-        won't be thread safe. In practice, this will only happen on single-threaded platforms which
-        we'll never be running on anyway.
-        */
-    }
-
-    /* That's all we need to do for now. */
-    return E_SUCCESS;
-}
-
-static void e_archive_uninit_zip(void* pUserData, e_archive* pArchive, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_zip* pZip = (e_zip*)pArchive;
-
-    E_ASSERT(pZip != NULL);
-    E_UNUSED(pUserData);
-
-    e_free(pZip->pHeap, pAllocationCallbacks);
-}
-
-static e_result e_archive_file_alloc_size_zip(void* pUserData, size_t* pSize)
-{
-    E_UNUSED(pUserData);
-
-    *pSize = sizeof(e_zip_file) + E_ZIP_CACHE_SIZE_IN_BYTES + E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
-    return E_SUCCESS;
-}
-
-static e_result e_archive_open_zip(void* pUserData, e_fs* pFS, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file* pFile)
-{
-    e_zip* pZip = (e_zip*)pFS;
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-    e_result result;
-
-    E_UNUSED(pUserData);
-    (void)pAllocationCallbacks;
-
-    E_ZERO_OBJECT(pZipFile);
-
-    /* Write mode is currently unsupported. */
-    if ((openMode & (E_OPEN_MODE_WRITE | E_OPEN_MODE_APPEND | E_OPEN_MODE_TRUNCATE)) != 0) {
-        return E_INVALID_OPERATION;
-    }
-
-    /* We need to find the file info by it's path. */
-    result = e_zip_get_file_info_by_path(pZip, pFilePath, (size_t)-1, &pZipFile->info);
-    if (result != E_SUCCESS) {
-        return result;  /* Probably not found. */
-    }
-
-    /* We can't be trying to open a directory. */
-    if (pZipFile->info.directory) {
-        return E_IS_DIRECTORY;
-    }
-
-    /* Validate the compression method. We're only supporting Store and Deflate. */
-    if (pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_STORE && pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_DEFLATE) {
-        return E_INVALID_FILE;
-    }
-
-    /* Make double sure the cursor is at the start. */
-    pZipFile->absoluteCursorUncompressed = 0;
-    pZipFile->cacheCap = E_ZIP_CACHE_SIZE_IN_BYTES;
-
-    /*
-    We allocated memory for a compressed cache, even when the file is not compressed. Make use
-    of this memory if the file is not compressed.
-    */
-    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_STORE) {
-        pZipFile->cacheCap          += E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
-        pZipFile->compressedCacheCap = 0;
-    } else {
-        pZipFile->compressedCacheCap = E_ZIP_COMPRESSED_CACHE_SIZE_IN_BYTES;
-    }
-
-    pZipFile->pCache           = pZipFile->_pCacheData;
-    pZipFile->pCompressedCache = pZipFile->_pCacheData + pZipFile->cacheCap;
-
-    /*
-    We need to move the file offset forward so that it's pointing to the first byte of the actual
-    data. It's currently sitting at the top of the local header which isn't really useful for us.
-    To move forward we need to get the length of the file path and the extra data and seek past
-    the local header.
-    */
-    e_zip_lock(pZip);
-    {
-        e_stream* pArchiveStream;
-        e_uint16 fileNameLen;
-        e_uint16 extraLen;
-
-        pArchiveStream = e_archive_stream(&pZip->archive);
-
-        result = e_stream_seek(pArchiveStream, pZipFile->info.fileOffset + 26, E_SEEK_SET);
-        if (result != E_SUCCESS) {
-            e_zip_unlock(pZip);
-            return result;
-        }
-
-        result = e_stream_read(pArchiveStream, &fileNameLen, 2, NULL);
-        if (result != E_SUCCESS) {
-            e_zip_unlock(pZip);
-            return result;
-        }
-
-        result = e_stream_read(pArchiveStream, &extraLen, 2, NULL);
-        if (result != E_SUCCESS) {
-            e_zip_unlock(pZip);
-            return result;
-        }
-
-        pZipFile->info.fileOffset += (e_uint32)30 + fileNameLen + extraLen;
-    }
-    e_zip_unlock(pZip);
-
-
-    /* Initialize the decompressor if necessary. */
-    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_DEFLATE) {
-        result = e_deflate_decompressor_init(&pZipFile->decompressor);
-        if (result != E_SUCCESS) {
-            return result;
-        }
-    }
-
-
-    return E_SUCCESS;
-}
-
-static void e_archive_close_zip(void* pUserData, e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-
-    /* Nothing to do here. */
-    (void)pZipFile;
-    (void)pAllocationCallbacks;
-}
-
-static e_result e_archive_read_zip_store(e_zip_file* pZipFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    e_result result;
-    e_zip* pZip;
-    e_uint64 bytesRemainingInFile;
-    size_t bytesRead;
-
-    E_ASSERT(pZipFile   != NULL);
-    E_ASSERT(pBytesRead != NULL);
-
-    pZip = (e_zip*)pZipFile->file.pFS;
-
-    bytesRemainingInFile = pZipFile->info.uncompressedSize - pZipFile->absoluteCursorUncompressed;
-    if (bytesToRead > bytesRemainingInFile) {
-        bytesToRead = (size_t)bytesRemainingInFile;
-    }
-
-    bytesRead = 0;
-
-    /*
-    Before we spend any time locking the archive we should read from the cache. If the cache gets
-    exhausted before we've finished reading, we can then lock the archive and ready the rest of
-    the data.
-    */
-    {
-        size_t bytesRemainingInCache = pZipFile->cacheSize - pZipFile->cacheCursor;
-        size_t bytesToReadFromCache = bytesToRead;
-        if (bytesToReadFromCache > bytesRemainingInCache) {
-            bytesToReadFromCache = bytesRemainingInCache;
-        }
-
-        E_COPY_MEMORY(pDst, pZipFile->pCache + pZipFile->cacheCursor, bytesToReadFromCache);
-        pZipFile->cacheCursor += bytesToReadFromCache;
-
-        bytesRead = bytesToReadFromCache;
-    }
-
-    if (bytesRead < bytesToRead) {
-        /*
-        There's more data to read. If there's more data remaining than the cache capacity, we
-        simply load some data straight into the output buffer. Any remainder we load into the
-        cache and then read from that.
-        */
-        e_zip_lock(pZip);
-        {
-            size_t bytesRemainingToRead = bytesToRead - bytesRead;
-            size_t bytesToReadFromArchive;
-
-            result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + (pZipFile->absoluteCursorUncompressed + bytesRead), E_SEEK_SET);
-            if (result != E_SUCCESS) {
-                e_zip_unlock(pZip);
-                return result;
-            }
-
-            if (bytesRemainingToRead > pZipFile->cacheCap) {
-                size_t bytesReadFromArchive;
-
-                bytesToReadFromArchive = (bytesRemainingToRead / pZipFile->cacheCap) * pZipFile->cacheCap;
-
-                result = e_stream_read(e_archive_stream(&pZip->archive), E_OFFSET_PTR(pDst, bytesRead), bytesToReadFromArchive, &bytesReadFromArchive);
-                if (result != E_SUCCESS) {
-                    e_zip_unlock(pZip);
-                    return result;
-                }
-
-                bytesRead += bytesReadFromArchive;
-                bytesRemainingToRead -= bytesReadFromArchive; 
-            }
-
-            /*
-            At this point we should have less than the cache capacity remaining to read. We need to
-            read into the cache, and then read any leftover from it.
-            */
-            if (bytesRemainingToRead > 0) {
-                E_ASSERT(bytesRemainingToRead < pZipFile->cacheCap);
-
-                result = e_stream_read(e_archive_stream(&pZip->archive), pZipFile->pCache, E_MIN(pZipFile->cacheCap, (pZipFile->info.uncompressedSize - (pZipFile->absoluteCursorUncompressed + bytesRead))), &pZipFile->cacheSize);
-                if (result != E_SUCCESS) {
-                    e_zip_unlock(pZip);
-                    return result;
-                }
-
-                pZipFile->cacheCursor = 0;
-
-                E_COPY_MEMORY(E_OFFSET_PTR(pDst, bytesRead), pZipFile->pCache + pZipFile->cacheCursor, bytesRemainingToRead);
-                pZipFile->cacheCursor += bytesRemainingToRead;
-
-                bytesRead += bytesRemainingToRead;
-            }
-        }
-        e_zip_unlock(pZip);
-    }
-
-    pZipFile->absoluteCursorUncompressed += bytesRead;
-
-    /* We're done. */
-    *pBytesRead = bytesRead;
-    return E_SUCCESS;
-}
-
-static e_result e_archive_read_zip_deflate(e_zip_file* pZipFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    e_result result;
-    e_zip* pZip;
-    e_uint64 uncompressedBytesRemainingInFile;
-    size_t uncompressedBytesRead;
-
-    E_ASSERT(pZipFile != NULL);
-    E_ASSERT(pBytesRead != NULL);
-
-    pZip = (e_zip*)pZipFile->file.pFS;
-
-    uncompressedBytesRemainingInFile = pZipFile->info.uncompressedSize - pZipFile->absoluteCursorUncompressed;
-    if (bytesToRead > uncompressedBytesRemainingInFile) {
-        bytesToRead = (size_t)uncompressedBytesRemainingInFile;
-    }
-
-    uncompressedBytesRead = 0;
-
-
-    /*
-    The way reading works for deflate is that we need to read from the cache until it's exhausted,
-    and then refill it and read from it again. We need to do this until we've read the requested
-    number of bytes.
-    */
-    for (;;) {
-        /* Read from the cache first. */
-        size_t bytesRemainingInCache = pZipFile->cacheSize - pZipFile->cacheCursor;
-        size_t bytesToReadFromCache = bytesToRead - uncompressedBytesRead;
-        if (bytesToReadFromCache > bytesRemainingInCache) {
-            bytesToReadFromCache = bytesRemainingInCache;
-        }
-
-        E_COPY_MEMORY(E_OFFSET_PTR(pDst, uncompressedBytesRead), pZipFile->pCache + pZipFile->cacheCursor, bytesToReadFromCache);
-        pZipFile->cacheCursor += bytesToReadFromCache;
-
-        uncompressedBytesRead += bytesToReadFromCache;
-
-        /* If we've read the requested number of bytes we can stop. */
-        if (uncompressedBytesRead == bytesToRead) {
-            break;
-        }
-
-        
-        /*
-        Getting here means we've exchausted the cache but still have more data to read. We now need
-        to refill the cache and read from it again.
-
-        This needs to be run in a loop because we may need to read multiple times to get enough input
-        data to fill the entire output cache, which must be at least 32KB.
-        */
-        pZipFile->cacheCursor = 0;
-        pZipFile->cacheSize   = 0;
-
-        for (;;) {
-            size_t compressedBytesRead;
-            size_t compressedBytesToRead;
-            int decompressFlags = E_DEFLATE_FLAG_HAS_MORE_INPUT;    /* The default stance is that we have more input available. */
-            e_result decompressResult;
-
-            /* If we've already read the entire compressed file we need to set the flag to indicate there is no more input. */
-            if (pZipFile->absoluteCursorCompressed == pZipFile->info.compressedSize) {
-                decompressFlags &= ~E_DEFLATE_FLAG_HAS_MORE_INPUT;
-            }
-
-            /*
-            We need only lock while we read the compressed data into our cache. We don't need to keep
-            the archive locked while we do the decompression phase.
-
-            We need only read more input data from the stream if we've run out of data in the
-            compressed cache.
-            */
-            if (pZipFile->compressedCacheSize == 0) {
-                E_ASSERT(pZipFile->compressedCacheCursor == 0); /* The cursor should never go past the size. */
-
-                e_zip_lock(pZip);
-                {
-                    /* Make sure we're positioned correctly in the stream before we read. */
-                    result = e_stream_seek(e_archive_stream(&pZip->archive), pZipFile->info.fileOffset + pZipFile->absoluteCursorCompressed, E_SEEK_SET);
-                    if (result != E_SUCCESS) {
-                        e_zip_unlock(pZip);
-                        return result;
-                    }
-
-                    /*
-                    Read the compressed data into the cache. The number of compressed bytes we read needs
-                    to be clamped to the number of bytes remaining in the file and the number of bytes
-                    remaining in the cache.
-                    */
-                    compressedBytesToRead = E_MIN(pZipFile->compressedCacheCap - pZipFile->compressedCacheCursor, (pZipFile->info.compressedSize - pZipFile->absoluteCursorCompressed));
-
-                    result = e_stream_read(e_archive_stream(&pZip->archive), pZipFile->pCompressedCache + pZipFile->compressedCacheCursor, compressedBytesToRead, &compressedBytesRead);
-                    /*
-                    We'll inspect the result later after we've escaped from the locked section just to
-                    keep the lock as small as possible.
-                    */
-
-                    pZipFile->absoluteCursorCompressed += compressedBytesRead;
-                }
-                e_zip_unlock(pZip);
-
-                /* If we've reached the end of the compressed data, we need to set a flag which we later pass through to the decompressor. */
-                if (result == E_AT_END && compressedBytesRead < compressedBytesToRead) {
-                    decompressFlags &= ~E_DEFLATE_FLAG_HAS_MORE_INPUT;
-                }
-
-                if (result != E_SUCCESS && result != E_AT_END) {
-                    return result;  /* Failed to read the compressed data. */
-                }
-
-                pZipFile->compressedCacheSize += compressedBytesRead;
-            }
-
-
-            /*
-            At this point we should have the compressed data. Here is where we decompress it into
-            the cache. We need to set up a few parameters here. The input buffer needs to start from
-            the current cursor position of the compressed cache. The input size is the number of
-            bytes in the compressed cache between the cursor and the end of the cache. The output
-            buffer is from the current cursor position.
-            */
-            {
-                size_t inputBufferSize = pZipFile->compressedCacheSize - pZipFile->compressedCacheCursor;
-                size_t outputBufferSize = pZipFile->cacheCap - pZipFile->cacheSize;
-
-                decompressResult = e_deflate_decompress(&pZipFile->decompressor, pZipFile->pCompressedCache + pZipFile->compressedCacheCursor, &inputBufferSize, pZipFile->pCache, pZipFile->pCache + pZipFile->cacheSize, &outputBufferSize, decompressFlags);
-                if (decompressResult < 0) {
-                    return E_ERROR; /* Failed to decompress the data. */
-                }
-
-                /* Move our input cursors forward since we've just consumed some input. */
-                pZipFile->compressedCacheCursor += inputBufferSize;
-
-                /* We've just generated some uncompressed data, so push out the size of the cache to accommodate it. */
-                pZipFile->cacheSize += outputBufferSize;
-
-                /*
-                If the compressed cache has been fully exhausted we need to reset it so more data
-                can be read from the stream.
-                */
-                if (pZipFile->compressedCacheCursor == pZipFile->compressedCacheSize) {
-                    pZipFile->compressedCacheCursor = 0;
-                    pZipFile->compressedCacheSize   = 0;
-                }
-
-                /*
-                We need to inspect the result of the decompression to determine how to continue. If
-                we've reached the end we need only break from the inner loop.
-                */
-                if (decompressResult == E_NEEDS_MORE_INPUT) {
-                    continue;   /* Do another round of reading and decompression. */
-                } else {
-                    break;      /* We've reached the end of the compressed data or the output buffer is full. */
-                }
-            }
-        }
-    }
-
-    pZipFile->absoluteCursorUncompressed += uncompressedBytesRead;
-
-    /* We're done. */
-    *pBytesRead = uncompressedBytesRead;
-    return E_SUCCESS;
-}
-
-static e_result e_archive_read_zip(void* pUserData, e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-
-    if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_STORE) {
-        return e_archive_read_zip_store(pZipFile, pDst, bytesToRead, pBytesRead);
-    } else if (pZipFile->info.compressionMethod == E_ZIP_COMPRESSION_METHOD_DEFLATE) {
-        return e_archive_read_zip_deflate(pZipFile, pDst, bytesToRead, pBytesRead);
-    } else {
-        return E_INVALID_FILE;  /* Should never get here. */
-    }
-
-    return E_SUCCESS;
-}
-
-static e_result e_archive_write_zip(void* pUserData, e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    E_UNUSED(pUserData);
-    
-    /* Writing not supported. */
-    (void)pFile;
-    (void)pSrc;
-    (void)bytesToWrite;
-    (void)pBytesWritten;
-    return E_NOT_IMPLEMENTED;
-}
-
-static e_result e_archive_seek_zip(void* pUserData, e_file* pFile, e_int64 offset, e_seek_origin origin)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-    e_uint64 newAbsoluteCursor;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-
-    /*
-    We can do fast seeking if we are moving within the cache. Otherwise we just move the cursor and
-    clear the cache. The next time we read, it'll see that the cache is empty which will trigger a
-    fresh read of data from the archive stream.
-    */
-    if (origin == E_SEEK_CUR) {
-        if (offset > 0) {
-            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed + (e_uint64)offset;
-        } else {
-            if ((e_uint64)E_ABS(offset) > pZipFile->absoluteCursorUncompressed) {
-                return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-            }
-
-            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed - E_ABS(offset);
-        }
-    } else if (origin == E_SEEK_SET) {
-        if (offset < 0) {
-            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-        }
-
-        newAbsoluteCursor = (e_uint64)offset;
-    } else if (origin == E_SEEK_END) {
-        if (offset > 0) {
-            return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
-        }
-
-        if ((e_uint64)E_ABS(offset) > pZipFile->absoluteCursorUncompressed) {
-            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-        }
-
-        newAbsoluteCursor = pZipFile->info.uncompressedSize - E_ABS(offset);
-    } else {
-        return E_INVALID_ARGS;
-    }
-
-    if (newAbsoluteCursor > pZipFile->info.uncompressedSize) {
-        return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
-    }
-
-    if (newAbsoluteCursor > pZipFile->absoluteCursorUncompressed) {
-        /* Moving forward. */
-        e_uint64 delta = newAbsoluteCursor - pZipFile->absoluteCursorUncompressed;
-        if (delta <= (pZipFile->cacheSize - pZipFile->cacheCursor)) {
-            pZipFile->cacheCursor += (size_t)delta; /* Safe cast. */
-            pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
-            return E_SUCCESS;
-        } else {
-            /* Seeking beyond the cache. Fall through. */
-        }
-    } else {
-        /* Moving backward. */
-        e_uint64 delta = pZipFile->absoluteCursorUncompressed - newAbsoluteCursor;
-        if (delta <= pZipFile->cacheCursor) {
-            pZipFile->cacheCursor -= (size_t)delta;
-            pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
-            return E_SUCCESS;
-        } else {
-            /* Seeking beyond the cache. Fall through. */
-        }
-    }
-
-    /* Getting here means we're seeking beyond the cache. Just clear it. The next read will read in fresh data. */
-    pZipFile->cacheSize   = 0;
-    pZipFile->cacheCursor = 0;
-
-    /*
-    Seeking is more complicated for compressed files. We need to actually read to the seek point.
-    There is no seek table to accelerate this.
-    */
-    if (pZipFile->info.compressionMethod != E_ZIP_COMPRESSION_METHOD_STORE) {
-        pZipFile->compressedCacheCursor = 0;
-        pZipFile->compressedCacheSize   = 0;
-
-        /*
-        When seeking backwards we need to move everything back to the start and then just
-        read-and-discard until we reach the end.
-        */
-        if (pZipFile->absoluteCursorUncompressed > newAbsoluteCursor) {
-            pZipFile->absoluteCursorUncompressed = 0;
-            pZipFile->absoluteCursorCompressed   = 0;
-        }
-
-        /* Now we just keep reading until we get to the seek point. */
-        while (pZipFile->absoluteCursorUncompressed < newAbsoluteCursor) {
-            e_uint8 temp[4096];
-            size_t bytesToRead;
-            size_t bytesRead;
-            e_result result;
-
-            bytesToRead = newAbsoluteCursor - pZipFile->absoluteCursorUncompressed;
-            if (bytesToRead > sizeof(temp)) {
-                bytesToRead = sizeof(temp);
-            }
-            
-            result = e_archive_read_zip(pUserData, pFile, temp, bytesToRead, &bytesRead);
-            if (result != E_SUCCESS) {
-                return result;
-            }
-
-            pZipFile->absoluteCursorUncompressed += bytesRead;
-
-            if (bytesRead == 0) {
-                return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
-            }
-        }
-    }
-
-    /* Make sure the absolute cursor is set to the new position. */
-    pZipFile->absoluteCursorUncompressed = newAbsoluteCursor;
-
-    return E_SUCCESS;
-}
-
-static e_result e_archive_tell_zip(void* pUserData, e_file* pFile, e_int64* pCursor)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-
-    *pCursor = pZipFile->absoluteCursorUncompressed;
-    return E_SUCCESS;
-}
-
-static e_result e_archive_flush_zip(void* pUserData, e_file* pFile)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-    E_UNUSED(pZipFile);
-
-    /* Nothing to do here. */
-
-    return E_SUCCESS;
-}
-
-static e_result e_archive_info_zip(void* pUserData, e_file* pFile, e_file_info* pInfo)
-{
-    e_zip_file* pZipFile = (e_zip_file*)pFile;
-
-    E_ASSERT(pZipFile != NULL);
-    E_UNUSED(pUserData);
-
-    pInfo->size      = pZipFile->info.uncompressedSize;
-    pInfo->directory = E_FALSE; /* An opened file should never be a directory. */
-    
-    return E_SUCCESS;
-}
-
-
-static void e_zip_iterator_init(e_zip* pZip, e_zip_cd_node* pChild, e_zip_iterator* pIterator)
-{
-    e_zip_file_info info;
-
-    E_ASSERT(pIterator != NULL);
-    E_ASSERT(pChild    != NULL);
-    E_ASSERT(pZip      != NULL);
-
-    pIterator->pZip = pZip;
-
-    /* Name. */
-    c89str_strncpy_s((char*)pIterator + sizeof(*pIterator), pChild->nameLen + 1, pChild->pName, pChild->nameLen);
-    pIterator->iterator.pName   = (const char*)pIterator + sizeof(*pIterator);
-    pIterator->iterator.nameLen = pChild->nameLen;
-
-    /* Info. */
-    E_ZERO_OBJECT(&pIterator->iterator.info);
-
-    if (pChild->childCount > 0) {
-        /* The node has children. Must be a directory. */
-        pIterator->iterator.info.directory = E_TRUE;
-    } else {
-        /* The node does not have children. Could still be a directory. */
-        e_zip_get_file_info_by_record_offset(pZip, pZip->pIndex[pChild->iFile].offsetInBytes, &info);
-        pIterator->iterator.info.directory = info.directory;
-
-        if (!pIterator->iterator.info.directory) {
-            pIterator->iterator.info.size = info.uncompressedSize;
-        }
-    }
-}
-
-static e_fs_iterator* e_archive_first_zip(void* pUserData, e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_zip* pZip = (e_zip*)pFS;
-    e_zip_iterator* pIterator;
-    c89str_path_iterator directoryPathIterator;
-    e_zip_cd_node* pCurrentNode;
-
-    E_UNUSED(pUserData);
-
-    if (pZip == NULL) {
-        return NULL;
-    }
-
-    if (pDirectoryPath == NULL) {
-        pDirectoryPath = "";
-    }
-
-    /* Skip past any leading slash. */
-    if (pDirectoryPath[0] == '/' || pDirectoryPath[0] == '\\') {
-        pDirectoryPath += 1;
-    }
-
-
-    /* Always start from the root node. */
-    pCurrentNode = pZip->pCDRootNode;
-
-    /*
-    All we need to do is find the node the corresponds to the specified directory path. To do this
-    we just iterate over each segment in the path and get the children one after the other.
-    */
-    if (e_result_from_errno(c89str_path_first(pDirectoryPath, directoryPathLen, &directoryPathIterator)) == E_SUCCESS) {
-        for (;;) {
-            /* Try finding the child node. If this cannot be found, the directory does not exist. */
-            e_zip_cd_node* pChildNode;
-
-            pChildNode = e_zip_cd_node_find_child(pCurrentNode, directoryPathIterator.pFullPath + directoryPathIterator.segmentOffset, directoryPathIterator.segmentLength);
-            if (pChildNode == NULL) {
-                return NULL;    /* Does not exist. */
-            }
-
-            pCurrentNode = pChildNode;
-            
-            /* Go to the next segment if we have one. */
-            if (e_result_from_errno(c89str_path_next(&directoryPathIterator)) != E_SUCCESS) {
-                break;  /* Nothing left in the directory path. We have what we're looking for. */
-            }
-        }
-    } else {
-        /*
-        We failed to initialize the path iterator which can only mean we were given an empty path
-        in which case it should be treated as the root directory. The node will already be set to
-        the root node at this point so there's nothing more do to.
-        */
-        E_ASSERT(pCurrentNode == pZip->pCDRootNode);
-    }
-
-    /* If the current node does not have any children, there is no first item and therefore nothing to return. */
-    if (pCurrentNode->childCount == 0) {
-        return NULL;
-    }
-
-    /*
-    Now that we've found the node we have enough information to allocate the iterator. We allocate
-    room for a copy of the name so we can null terminate it.
-    */
-    pIterator = (e_zip_iterator*)e_realloc(NULL, sizeof(*pIterator) + pCurrentNode->pChildren[0].nameLen + 1, pAllocationCallbacks);
-    if (pIterator == NULL) {
-        return NULL;
-    }
-
-    e_zip_iterator_init(pZip, &pCurrentNode->pChildren[0], pIterator);
-
-    /* Internal variables for iteration. */
-    pIterator->pDirectoryNode = pCurrentNode;
-    pIterator->iChild         = 0;
-
-    return (e_fs_iterator*)pIterator;
-}
-
-static e_fs_iterator* e_archive_next_zip(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_zip_iterator* pIteratorZip = (e_zip_iterator*)pIterator;
-    e_zip_iterator* pNewIteratorZip;
-    
-
-    E_UNUSED(pUserData);
-
-    if (pIteratorZip == NULL) {
-        return NULL;
-    }
-
-    /* All we're doing is going to the next child. If there's nothing left we just free the iterator and return null. */
-    pIteratorZip->iChild += 1;
-    if (pIteratorZip->iChild >= pIteratorZip->pDirectoryNode->childCount) {
-        e_free(pIteratorZip, pAllocationCallbacks);
-        return NULL;    /* Nothing left. */
-    }
-
-    /* Getting here means there's another child to iterate. */
-    pNewIteratorZip = (e_zip_iterator*)e_realloc(pIteratorZip, sizeof(*pIteratorZip) + pIteratorZip->pDirectoryNode->pChildren[pIteratorZip->iChild].nameLen + 1, pAllocationCallbacks);
-    if (pNewIteratorZip == NULL) {
-        e_free(pIteratorZip, pAllocationCallbacks);
-        return NULL;    /* Out of memory. */
-    }
-
-    e_zip_iterator_init(pNewIteratorZip->pZip, &pNewIteratorZip->pDirectoryNode->pChildren[pNewIteratorZip->iChild], pNewIteratorZip);
-
-    return (e_fs_iterator*)pNewIteratorZip;
-}
-
-static void e_archive_free_iterator_zip(void* pUserData, e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    E_UNUSED(pUserData);
-    e_free(pIterator, pAllocationCallbacks);
-}
-
-static e_archive_vtable e_gArchiveVTableZip =
-{
-    /* e_fs */
-    {
-        e_archive_file_alloc_size_zip,
-        e_archive_open_zip,
-        e_archive_close_zip,
-        e_archive_read_zip,
-        e_archive_write_zip,
-        e_archive_seek_zip,
-        e_archive_tell_zip,
-        e_archive_flush_zip,
-        e_archive_info_zip,
-        e_archive_first_zip,
-        e_archive_next_zip,
-        e_archive_free_iterator_zip
-    },
-
-    /* e_archive */
-    e_archive_alloc_size_zip,
-    e_archive_init_zip,
-    e_archive_uninit_zip
-};
-
-E_API e_archive_vtable* e_zip_vtable(void)
-{
-    return &e_gArchiveVTableZip;
-}
-
-E_API e_result e_zip_init(e_stream* pStream, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip)
-{
-    return e_archive_init(&e_gArchiveVTableZip, NULL, pStream, pAllocationCallbacks, (e_archive**)ppZip);
-}
-
-E_API e_result e_zip_init_from_file(e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_zip** ppZip)
-{
-    return e_archive_init_from_file(&e_gArchiveVTableZip, NULL, pFS, pFilePath, pAllocationCallbacks, (e_archive**)ppZip);
-}
-
-E_API void e_zip_uninit(e_zip* pZip, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_archive_uninit((e_archive*)pZip, pAllocationCallbacks);
-}
-
-E_API e_result e_zip_open(e_zip* pZip, const char* pFilePath, int openMode, const e_allocation_callbacks* pAllocationCallbacks, e_file** ppFile)
-{
-    return e_archive_open((e_archive*)pZip, pFilePath, openMode, pAllocationCallbacks, ppFile);
-}
-
-E_API void e_zip_close(e_file* pFile, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_archive_close(pFile, pAllocationCallbacks);
-}
-
-E_API e_result e_zip_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    return e_archive_read(pFile, pDst, bytesToRead, pBytesRead);
-}
-
-E_API e_result e_zip_write(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    return e_archive_write(pFile, pSrc, bytesToWrite, pBytesWritten);
-}
-
-E_API e_result e_zip_seek(e_file* pFile, e_int64 offset, e_seek_origin origin)
-{
-    return e_archive_seek(pFile, offset, origin);
-}
-
-E_API e_result e_zip_tell(e_file* pFile, e_int64* pCursor)
-{
-    return e_archive_tell(pFile, pCursor);
-}
-
-E_API e_result e_zip_flush(e_file* pFile)
-{
-    return e_archive_flush(pFile);
-}
-
-E_API e_result e_zip_info(e_file* pFile, e_file_info* pInfo)
-{
-    return e_archive_info(pFile, pInfo);
-}
-
-E_API e_fs_iterator* e_zip_first(e_zip* pZip, const char* pDirectoryPath, size_t directoryPathLen, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_archive_first((e_archive*)pZip, pDirectoryPath, directoryPathLen, pAllocationCallbacks);
-}
-
-E_API e_fs_iterator* e_zip_next(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    return e_archive_next(pIterator, pAllocationCallbacks);
-}
-
-E_API void e_zip_free_iterator(e_fs_iterator* pIterator, const e_allocation_callbacks* pAllocationCallbacks)
-{
-    e_archive_free_iterator(pIterator, pAllocationCallbacks);
-}
-/* END e_zip.c */
 
 
 
@@ -10792,18 +11609,18 @@ E_API e_result e_script_load(e_script* pScript, e_stream* pStream, const char* p
     return E_SUCCESS;
 }
 
-E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, const e_allocation_callbacks* pAllocationCallbacks, e_log* pLog)
+E_API e_result e_script_load_file(e_script* pScript, e_fs* pFS, const char* pFilePath, e_log* pLog)
 {
     e_result result;
     e_file* pFile;
 
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    result = e_file_open(pFS, pFilePath, E_READ, &pFile);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    result = e_script_load(pScript, e_fs_file_stream(pFile), pFilePath, pLog);
-    e_fs_close(pFile, pAllocationCallbacks);
+    result = e_script_load(pScript, e_file_get_stream(pFile), pFilePath, pLog);
+    e_file_close(pFile);
 
     return result;
 }
@@ -11024,13 +11841,13 @@ E_API e_result e_config_file_load_file(e_config_file* pConfigFile, e_fs* pFS, co
     e_result result;
     e_file* pFile;
 
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    result = e_file_open(pFS, pFilePath, E_READ, &pFile);
     if (result != E_SUCCESS) {
         e_log_postf(pLog, E_LOG_LEVEL_ERROR, "Could not open \"%s\". %s.", pFilePath, e_result_description(result));
     }
 
-    result = e_config_file_load(pConfigFile, e_fs_file_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
-    e_fs_close(pFile, pAllocationCallbacks);
+    result = e_config_file_load(pConfigFile, e_file_get_stream(pFile), pFilePath, pAllocationCallbacks, pLog);
+    e_file_close(pFile);
 
     return result;
 }
@@ -11473,13 +12290,13 @@ E_API e_result e_load_image_from_file(e_image_loader_vtable* pVTable, void* pUse
         *pFormat = E_FORMAT_UNKNOWN;
     }
 
-    result = e_fs_open(pFS, pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    result = e_file_open(pFS, pFilePath, E_READ, &pFile);
     if (result != E_SUCCESS) {
         return result;
     }
 
     result = e_load_image(pVTable, pUserData, &pFile->stream, pAllocationCallbacks, ppData, pSizeX, pSizeY, pFormat);
-    e_fs_close(pFile, pAllocationCallbacks);
+    e_file_close(pFile);
 
     if (result != E_SUCCESS) {
         return result;
@@ -11544,23 +12361,23 @@ static e_result e_font_init_file(const e_font_config* pConfig, const e_allocatio
     E_ASSERT(pConfig != NULL);
 
     /* stb_truetype requires us to provide a buffer containing the raw data of the file. */
-    result = e_fs_open(pConfig->pFS, pConfig->pFilePath, E_OPEN_MODE_READ, pAllocationCallbacks, &pFile);
+    result = e_file_open(pConfig->pFS, pConfig->pFilePath, E_READ, &pFile);
     if (result != E_SUCCESS) {
         e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to open font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
         return result;
     }
 
-    result = e_fs_info(pFile, &fileInfo);
+    result = e_file_get_info(pFile, &fileInfo);
     if (result != E_SUCCESS) {
         e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to get info for font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
-        e_fs_close(pFile, pAllocationCallbacks);
+        e_file_close(pFile);
         return result;
     }
 
     pFont = (e_font*)e_malloc(sizeof(*pFont) + fileInfo.size, pAllocationCallbacks);
     if (pFont == NULL) {
         e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to allocate memory for font file '%s'.", pConfig->pFilePath);
-        e_fs_close(pFile, pAllocationCallbacks);
+        e_file_close(pFile);
         return E_OUT_OF_MEMORY;
     }
 
@@ -11568,16 +12385,16 @@ static e_result e_font_init_file(const e_font_config* pConfig, const e_allocatio
     pFont->pTTFData    = (unsigned char*)(pFont + 1);
     pFont->ttfDataSize = fileInfo.size;
 
-    result = e_fs_read(pFile, pFont->pTTFData, fileInfo.size, NULL);
+    result = e_file_read(pFile, pFont->pTTFData, fileInfo.size, NULL);
     if (result != E_SUCCESS) {
         e_log_postf(pConfig->pLog, E_LOG_LEVEL_ERROR, "Failed to read font file '%s'. %s.", pConfig->pFilePath, e_result_description(result));
-        e_fs_close(pFile, pAllocationCallbacks);
+        e_file_close(pFile);
         e_free(pFont, pAllocationCallbacks);
         return result;
     }
 
     /* Now that we've got the data in memory we can close the file. */
-    e_fs_close(pFile, pAllocationCallbacks);
+    e_file_close(pFile);
 
     /* At this point we have enough information to load the file via stb_truetype. */
     if (stbtt_InitFont(&pFont->fontInfo, pFont->pTTFData, 0) == 0) {
@@ -11875,9 +12692,9 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     pEngine->pVK             = NULL;
 
     /* We need a file system so we can load stuff like the config file. */
-    fsConfig = e_fs_config_init(pConfig->pFSVTable, pConfig->pFSVTableUserData);
+    fsConfig = e_fs_config_init(NULL, NULL, NULL);
 
-    result = e_fs_init_preallocated(&fsConfig, pAllocationCallbacks, &pEngine->fs);
+    result = e_fs_init(&fsConfig, &pEngine->pFS);
     if (result != E_SUCCESS) {
         return result;
     }
@@ -11885,7 +12702,7 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     /* Now that our file system is set up we can load our config. */
     result = e_config_file_init(pAllocationCallbacks, &pEngine->configFile);
     if (result != E_SUCCESS) {
-        e_fs_uninit(&pEngine->fs, pAllocationCallbacks);
+        e_fs_uninit(pEngine->pFS);
         return result;
     }
 
@@ -11893,7 +12710,7 @@ E_API e_result e_engine_init(const e_engine_config* pConfig, const e_allocation_
     We'll try loading a default config from the working directory. This is not a critical error if
     it fails, but we'll post a warning about it.
     */
-    result = e_config_file_load_file(&pEngine->configFile, &pEngine->fs, pConfig->pConfigFilePath, pAllocationCallbacks, pEngine->pLog);
+    result = e_config_file_load_file(&pEngine->configFile, pEngine->pFS, pConfig->pConfigFilePath, pAllocationCallbacks, pEngine->pLog);
     if (result != E_SUCCESS) {
         e_log_postf(pEngine->pLog, E_LOG_LEVEL_WARNING, "Failed to load default config file '%s'.", pConfig->pConfigFilePath);
     }
@@ -12073,7 +12890,7 @@ E_API e_fs* e_engine_get_file_system(e_engine* pEngine)
         return NULL;
     }
 
-    return &pEngine->fs;
+    return pEngine->pFS;
 }
 
 E_API e_config_file* e_engine_get_config_file(e_engine* pEngine)
