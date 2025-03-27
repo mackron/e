@@ -295,7 +295,9 @@ rename_zip_symbols :: function(src:string) string
     ;
 }
 
-e_h("/\* BEG e_fs_zip.h \*/\R":"\R/\* END e_fs_zip.h \*/") = rename_zip_symbols(@(fs_zip_h("/\* BEG fs_zip.h \*/\R":"\R/\* END fs_zip.h \*/")));
+zip_docs := @(fs_zip_h["/\*" : "\*/\R"]);
+
+e_h("/\* BEG e_fs_zip.h \*/\R":"\R/\* END e_fs_zip.h \*/") = rename_zip_symbols(@(fs_zip_h("/\* BEG fs_zip.h \*/\R":"\R/\* END fs_zip.h \*/")))["^"] = zip_docs;
 e_c("/\* BEG e_fs_zip.c \*/\R":"\R/\* END e_fs_zip.c \*/") = rename_zip_symbols(@(fs_zip_c("/\* BEG fs_zip.c \*/\R":"\R/\* END fs_zip.c \*/")));
 
 
@@ -312,5 +314,7 @@ rename_subfs_symbols :: function(src:string) string
     ;
 }
 
-e_h("/\* BEG e_fs_subfs.h \*/\R":"\R/\* END e_fs_subfs.h \*/") = rename_subfs_symbols(@(fs_subfs_h("/\* BEG fs_subfs.h \*/\R":"\R/\* END fs_subfs.h \*/")));
+subfs_docs := @(fs_subfs_h["/\*" : "\*/\R"]);
+
+e_h("/\* BEG e_fs_subfs.h \*/\R":"\R/\* END e_fs_subfs.h \*/") = rename_subfs_symbols(@(fs_subfs_h("/\* BEG fs_subfs.h \*/\R":"\R/\* END fs_subfs.h \*/")))["^"] = subfs_docs;
 e_c("/\* BEG e_fs_subfs.c \*/\R":"\R/\* END e_fs_subfs.c \*/") = rename_subfs_symbols(@(fs_subfs_c("/\* BEG fs_subfs.c \*/\R":"\R/\* END fs_subfs.c \*/")));
