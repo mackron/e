@@ -116,6 +116,21 @@
 #endif
 
 
+/* BEG e_va_copy.c */
+#ifndef e_va_copy
+    #if !defined(_MSC_VER) || _MSC_VER >= 1800
+        #if (defined(__GNUC__) && __GNUC__ < 3)
+            #define e_va_copy(dst, src) ((dst) = (src))    /* This is untested. Not sure if this is correct for old GCC. */
+        #else
+            #define e_va_copy(dst, src) va_copy((dst), (src))
+        #endif
+    #else
+        #define e_va_copy(dst, src) ((dst) = (src))
+    #endif
+#endif
+/* END e_va_copy.c */
+
+
 #define E_UNUSED(x) (void)x
 
 #ifndef E_MALLOC
@@ -712,7 +727,6 @@ E_API int e_snprintf(char* buf, size_t count, const char* fmt, ...)
 
 
 /* BEG e_allocation_callbacks.c */
-/* Default allocation callbacks. */
 static void* e_malloc_default(size_t sz, void* pUserData)
 {
     E_UNUSED(pUserData);
@@ -4927,6 +4941,14 @@ E_API e_result e_stream_read(e_stream* pStream, void* pDst, size_t bytesToRead, 
 
     if (pBytesRead != NULL) {
         *pBytesRead = bytesRead;
+    } else {
+        /*
+        The caller has not specified a destination for the bytes read. If we didn't output the exact
+        number of bytes as requested we'll need to report an error.
+        */
+        if (result == E_SUCCESS && bytesRead != bytesToRead) {
+            result = E_ERROR;
+        }
     }
 
     return result;
@@ -4993,12 +5015,18 @@ E_API e_result e_stream_writefv_ex(e_stream* pStream, const e_allocation_callbac
     e_result result;
     int strLen;
     char pStrStack[1024];
+    va_list args2;
 
     if (pStream == NULL || fmt == NULL) {
         return E_INVALID_ARGS;
     }
 
-    strLen = e_vsnprintf(pStrStack, sizeof(pStrStack), fmt, args);
+    e_va_copy(args2, args);
+    {
+        strLen = e_vsnprintf(pStrStack, sizeof(pStrStack), fmt, args2);
+    }
+    va_end(args2);
+
     if (strLen < 0) {
         return E_ERROR;    /* Encoding error. */
     }
@@ -5428,6 +5456,8 @@ E_API e_result e_memory_stream_write(e_memory_stream* pStream, const void* pSrc,
 
 E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, int origin)
 {
+    e_int64 newCursor;
+
     if (pStream == NULL) {
         return E_INVALID_ARGS;
     }
@@ -5436,51 +5466,29 @@ E_API e_result e_memory_stream_seek(e_memory_stream* pStream, e_int64 offset, in
         return E_INVALID_ARGS;  /* Trying to seek too far. This will never happen on 64-bit builds. */
     }
 
-    /*
-    The seek binary - it works or it doesn't. There's no clamping to the end or anything like that. The
-    seek point is either valid or invalid.
-    */
-    if (origin == E_SEEK_CUR) {
-        if (offset > 0) {
-            /* Moving forward. */
-            size_t bytesRemaining = *pStream->pDataSize - pStream->cursor;
-            if (bytesRemaining < (size_t)offset) {
-                return E_BAD_SEEK;  /* Trying to seek beyond the end of the buffer. */
-            }
+    newCursor = pStream->cursor;
 
-            pStream->cursor += (size_t)offset;
-        } else {
-            /* Moving backwards. */
-            size_t absoluteOffset = (size_t)E_ABS(offset); /* Safe cast because it was checked above. */
-            if (absoluteOffset > pStream->cursor) {
-                return E_BAD_SEEK;  /* Trying to seek prior to the start of the buffer. */
-            }
-
-            pStream->cursor -= absoluteOffset;
-        }
-    } else if (origin == E_SEEK_SET) {
-        if (offset < 0) {
-            return E_BAD_SEEK;  /* Trying to seek prior to the start of the buffer.. */
-        }
-
-        if ((size_t)offset > *pStream->pDataSize) {
-            return E_BAD_SEEK;
-        }
-
-        pStream->cursor = (size_t)offset;
+    if (origin == E_SEEK_SET) {
+        newCursor = 0;
+    } else if (origin == E_SEEK_CUR) {
+        newCursor = (e_int64)pStream->cursor;
     } else if (origin == E_SEEK_END) {
-        if (offset > 0) {
-            return E_BAD_SEEK;  /* Trying to seek beyond the end of the buffer. */
-        }
-
-        if ((size_t)E_ABS(offset) > *pStream->pDataSize) {
-            return E_BAD_SEEK;
-        }
-
-        pStream->cursor = *pStream->pDataSize - (size_t)E_ABS(offset);
+        newCursor = (e_int64)*pStream->pDataSize;
     } else {
+        E_ASSERT(!"Invalid seek origin");
         return E_INVALID_ARGS;
     }
+
+    newCursor += offset;
+
+    if (newCursor < 0) {
+        return E_BAD_SEEK;  /* Trying to seek prior to the start of the buffer. */
+    }
+    if ((size_t)newCursor > *pStream->pDataSize) {
+        return E_BAD_SEEK;  /* Trying to seek beyond the end of the buffer. */
+    }
+
+    pStream->cursor = (size_t)newCursor;
 
     return E_SUCCESS;
 }
@@ -5734,6 +5742,60 @@ E_API int e_path_iterators_compare(const e_path_iterator* pIteratorA, const e_pa
     return e_strncmp(pIteratorA->pFullPath + pIteratorA->segmentOffset, pIteratorB->pFullPath + pIteratorB->segmentOffset, E_MIN(pIteratorA->segmentLength, pIteratorB->segmentLength));
 }
 
+E_API int e_path_compare(const char* pPathA, size_t pathALen, const char* pPathB, size_t pathBLen)
+{
+    e_path_iterator iPathA;
+    e_path_iterator iPathB;
+    e_result result;
+
+    if (pPathA == NULL && pPathB == NULL) {
+        return 0;
+    }
+
+    if (pPathA == NULL) {
+        return -1;
+    }
+    if (pPathB == NULL) {
+        return +1;
+    }
+
+    result = e_path_first(pPathA, pathALen, &iPathA);
+    if (result != E_SUCCESS) {
+        return -1;
+    }
+
+    result = e_path_first(pPathB, pathBLen, &iPathB);
+    if (result != E_SUCCESS) {
+        return +1;
+    }
+
+    /* We just keep iterating until we find a mismatch or reach the end of one of the paths. */
+    for (;;) {
+        int cmp;
+
+        cmp = e_path_iterators_compare(&iPathA, &iPathB);
+        if (cmp != 0) {
+            return cmp;
+        }
+
+        if (e_path_is_last(&iPathA) && e_path_is_last(&iPathB)) {
+            return 0;   /* Both paths are the same. */
+        }
+
+        result = e_path_next(&iPathA);
+        if (result != E_SUCCESS) {
+            return -1;
+        }
+
+        result = e_path_next(&iPathB);
+        if (result != E_SUCCESS) {
+            return +1;
+        }
+    }
+
+    return 0;
+}
+
 E_API const char* e_path_file_name(const char* pPath, size_t pathLen)
 {
     /* The file name is just the last segment. */
@@ -5892,6 +5954,11 @@ E_API const char* e_path_trim_base(const char* pPath, size_t pathLen, const char
 
     /* Getting here means we got to the end of the base path without finding a mismatched segment which means the path begins with the base. */
     return iPath.pFullPath + iPath.segmentOffset;
+}
+
+E_API e_bool32 e_path_begins_with(const char* pPath, size_t pathLen, const char* pBasePath, size_t basePathLen)
+{
+    return e_path_trim_base(pPath, pathLen, pBasePath, basePathLen) != NULL;
 }
 
 E_API int e_path_append(char* pDst, size_t dstCap, const char* pBasePath, size_t basePathLen, const char* pPathToAppend, size_t pathToAppendLen)
@@ -6714,6 +6781,413 @@ common_exit:
 
 
 /* BEG e_fs.c */
+#if defined(_WIN32)
+#include <shlobj.h>
+#else
+#include <pwd.h>
+
+static const char* e_sysdir_home(void)
+{
+    const char* pHome;
+    struct passwd* pPasswd;
+
+    pHome = getenv("HOME");
+    if (pHome != NULL) {
+        return pHome;
+    }
+
+    /* Fallback to getpwuid(). */
+    pPasswd = getpwuid(getuid());
+    if (pPasswd != NULL) {
+        return pPasswd->pw_dir;
+    }
+
+    return NULL;
+}
+
+static size_t e_sysdir_home_subdir(const char* pSubDir, char* pDst, size_t dstCap)
+{
+    const char* pHome = e_sysdir_home();
+    if (pHome != NULL) {
+        size_t homeLen = strlen(pHome);
+        size_t subDirLen = strlen(pSubDir);
+        size_t fullLength = homeLen + 1 + subDirLen;
+
+        if (fullLength < dstCap) {
+            E_COPY_MEMORY(pDst, pHome, homeLen);
+            pDst[homeLen] = '/';
+            E_COPY_MEMORY(pDst + homeLen + 1, pSubDir, subDirLen);
+            pDst[fullLength] = '\0';
+        }
+
+        return fullLength;
+    }
+
+    return 0;
+}
+#endif
+
+E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
+{
+    size_t fullLength = 0;
+
+    #if defined(_WIN32)
+    {
+        HRESULT hr;
+        char pPath[260];
+
+        switch (type)
+        {
+            case E_SYSDIR_HOME:
+            {
+                hr = SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, pPath);
+                if (SUCCEEDED(hr)) {
+                    fullLength = strlen(pPath);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pPath, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_TEMP:
+            {
+                fullLength = GetTempPathA(sizeof(pPath), pPath);
+                if (fullLength > 0) {
+                    fullLength -= 1;  /* Remove the trailing slash. */
+
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pPath, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_CONFIG:
+            {
+                hr = SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                if (SUCCEEDED(hr)) {
+                    fullLength = strlen(pPath);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pPath, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_DATA:
+            {
+                hr = SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                if (SUCCEEDED(hr)) {
+                    fullLength = strlen(pPath);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pPath, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_CACHE:
+            {
+                /* There's no proper known folder for caches. We'll just use %LOCALAPPDATA%\Cache. */
+                hr = SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                if (SUCCEEDED(hr)) {
+                    const char* pCacheSuffix = "\\Cache";
+                    size_t localAppDataLen = strlen(pPath);
+                    size_t cacheSuffixLen = strlen(pCacheSuffix);
+                    fullLength = localAppDataLen + cacheSuffixLen;
+
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pPath, localAppDataLen);
+                        E_COPY_MEMORY(pDst + localAppDataLen, pCacheSuffix, cacheSuffixLen);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            default:
+            {
+                E_ASSERT(!"Unknown system directory type.");
+            } break;
+        }
+
+        /* Normalize the path to use forward slashes. */
+        if (pDst != NULL && fullLength < dstCap) {
+            size_t i;
+
+            for (i = 0; i < fullLength; i += 1) {
+                if (pDst[i] == '\\') {
+                    pDst[i] = '/';
+                }
+            }
+        }
+    }
+    #else
+    {
+        switch (type)
+        {
+            case E_SYSDIR_HOME:
+            {
+                const char* pHome = e_sysdir_home();
+                if (pHome != NULL) {
+                    fullLength = strlen(pHome);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pHome, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_TEMP:
+            {
+                const char* pTemp = getenv("TMPDIR");
+                if (pTemp != NULL) {
+                    fullLength = strlen(pTemp);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pTemp, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                } else {
+                    /* Fallback to /tmp. */
+                    const char* pTmp = "/tmp";
+                    fullLength = strlen(pTmp);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pTmp, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                }
+            } break;
+
+            case E_SYSDIR_CONFIG:
+            {
+                const char* pConfig = getenv("XDG_CONFIG_HOME");
+                if (pConfig != NULL) {
+                    fullLength = strlen(pConfig);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pConfig, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                } else {
+                    /* Fallback to ~/.config. */
+                    fullLength = e_sysdir_home_subdir(".config", pDst, dstCap);
+                }
+            } break;
+
+            case E_SYSDIR_DATA:
+            {
+                const char* pData = getenv("XDG_DATA_HOME");
+                if (pData != NULL) {
+                    fullLength = strlen(pData);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pData, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                } else {
+                    /* Fallback to ~/.local/share. */
+                    fullLength = e_sysdir_home_subdir(".local/share", pDst, dstCap);
+                }
+            } break;
+
+            case E_SYSDIR_CACHE:
+            {
+                const char* pCache = getenv("XDG_CACHE_HOME");
+                if (pCache != NULL) {
+                    fullLength = strlen(pCache);
+                    if (pDst != NULL && fullLength < dstCap) {
+                        E_COPY_MEMORY(pDst, pCache, fullLength);
+                        pDst[fullLength] = '\0';
+                    }
+                } else {
+                    /* Fallback to ~/.cache. */
+                    fullLength = e_sysdir_home_subdir(".cache", pDst, dstCap);
+                }
+            } break;
+
+            default:
+            {
+                E_ASSERT(!"Unknown system directory type.");
+            } break;
+        }
+    }
+    #endif
+
+    return fullLength;
+}
+
+
+#if defined(_WIN32)
+#else
+#include <unistd.h>     /* For close() */
+#endif
+
+E_API e_result e_mktmp(const char* pPrefix, char* pTmpPath, size_t tmpPathCap, int options)
+{
+    size_t baseDirLen;
+    const char* pPrefixName;
+    const char* pPrefixDir;
+    size_t prefixDirLen;
+
+    if (pTmpPath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    pTmpPath[0] = '\0';  /* Safety. */
+
+    if (tmpPathCap == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pPrefix == NULL) {
+        pPrefix = "";
+    }
+
+    if (pPrefix[0] == '\0') {
+        pPrefix = "e_fs";
+    }
+
+    /* The caller must explicitly specify whether or not a file or directory is being created. */
+    if ((options & (E_MKTMP_DIR | E_MKTMP_FILE)) == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    /* It's not allowed for both DIR and FILE to be set. */
+    if ((options & E_MKTMP_DIR) != 0 && (options & E_MKTMP_FILE) != 0) {
+        return E_INVALID_ARGS;
+    }
+
+    /* The prefix is not allowed to have any ".." segments and cannot start with "/". */
+    if (strstr(pPrefix, "..") != NULL || pPrefix[0] == '/') {
+        return E_INVALID_ARGS;
+    }
+
+    /* We first need to grab the directory of the system's base temp directory. */
+    baseDirLen = e_sysdir(E_SYSDIR_TEMP, pTmpPath, tmpPathCap);
+    if (baseDirLen == 0) {
+        return E_ERROR;    /* Failed to retrieve the base temp directory. Cannot create a temp file. */
+    }
+
+    /* Now we need to append the directory part of the prefix. */
+    pPrefixName = e_path_file_name(pPrefix, E_NULL_TERMINATED);
+    E_ASSERT(pPrefixName != NULL);
+
+    if (pPrefixName == pPrefix) {
+        /* No directory. */
+        pPrefixDir = "";
+        prefixDirLen = 0;
+    } else {
+        /* We have a directory. */
+        pPrefixDir = pPrefix;
+        prefixDirLen = (size_t)(pPrefixName - pPrefix);
+        prefixDirLen -= 1; /* Remove the trailing slash from the prefix directory. */
+    }
+
+    if (prefixDirLen > 0) {
+        if (e_strcat_s(pTmpPath, tmpPathCap, "/") != 0) {
+            return E_PATH_TOO_LONG;
+        }
+    }
+
+    if (e_strncat_s(pTmpPath, tmpPathCap, pPrefixDir, prefixDirLen) != 0) {
+        return E_PATH_TOO_LONG;
+    }
+
+    /* Create the directory structure if necessary. */
+    if ((options & E_NO_CREATE_DIRS) == 0) {
+        e_fs_mkdir(NULL, pTmpPath, E_IGNORE_MOUNTS);
+    }
+
+    /* Now we can append the between the directory part and the name part. */
+    if (e_strcat_s(pTmpPath, tmpPathCap, "/") != 0) {
+        return E_PATH_TOO_LONG;
+    }
+
+    /* We're now ready for the platform specific part. */
+    #if defined(_WIN32)
+    {
+        /*
+        We're using GetTempFileName(). This is annoying because of two things. First, it requires that
+        path separators be backslashes. Second, it does not take a capacity parameter so we need to
+        ensure the output buffer is at least MAX_PATH (260) bytes long.
+        */
+        char pTmpPathWin[MAX_PATH];
+        size_t i;
+
+        for (i = 0; pTmpPath[i] != '\0'; i += 1) {
+            if (pTmpPath[i] == '/') {
+                pTmpPath[i] = '\\';
+            }
+        }
+
+        if (GetTempFileNameA(pTmpPath, pPrefixName, 0, pTmpPathWin) == 0) {
+            return e_result_from_errno(GetLastError());
+        }
+
+        /*
+        NOTE: At this point the operating system will have created the file. If any error occurs from here
+        we need to remember to delete it.
+        */
+
+        if (e_strcpy_s(pTmpPath, tmpPathCap, pTmpPathWin) != 0) {
+            DeleteFileA(pTmpPathWin);
+            return E_PATH_TOO_LONG;
+        }
+
+        /*
+        If we're creating a folder the process is to delete the file that the OS just created and create a new
+        folder in it's place.
+        */
+        if ((options & E_MKTMP_DIR) != 0) {
+            /* We're creating a temp directory. Delete the file and create a folder in it's place. */
+            DeleteFileA(pTmpPathWin);
+
+            if (CreateDirectoryA(pTmpPathWin, NULL) == 0) {
+                return e_result_from_errno(GetLastError());
+            }
+        } else {
+            /* We're creating a temp file. The OS will have already created the file in GetTempFileNameA() so no need to create it explicitly. */
+        }
+
+        /* Finally we need to convert our back slashes to forward slashes. */
+        for (i = 0; pTmpPath[i] != '\0'; i += 1) {
+            if (pTmpPath[i] == '\\') {
+                pTmpPath[i] = '/';
+            }
+        }
+    }
+    #else
+    {
+        /* Append the file name part. */
+        if (e_strcat_s(pTmpPath, tmpPathCap, pPrefixName) != 0) {
+            return E_PATH_TOO_LONG;
+        }
+
+        /* Append the random part. */
+        if (e_strcat_s(pTmpPath, tmpPathCap, "XXXXXX") != 0) {
+            return E_PATH_TOO_LONG;
+        }
+
+        /* At this point the full path has been constructed. We can now create the file or directory. */
+        if ((options & E_MKTMP_DIR) != 0) {
+            /* We're creating a temp directory. */
+            if (mkdtemp(pTmpPath) == NULL) {
+                return e_result_from_errno(errno);
+            }
+        } else {
+            /* We're creating a temp file. */
+            int fd = mkstemp(pTmpPath);
+            if (fd == -1) {
+                return e_result_from_errno(errno);
+            }
+
+            close(fd);
+        }
+    }
+    #endif
+
+    return E_SUCCESS;
+}
+
+
 static size_t e_fs_backend_alloc_size(const e_fs_backend* pBackend, const void* pBackendConfig)
 {
     E_ASSERT(pBackend != NULL);
@@ -6784,7 +7258,7 @@ static e_result e_fs_backend_mkdir(const e_fs_backend* pBackend, e_fs* pFS, cons
 {
     E_ASSERT(pBackend != NULL);
 
-    if (pBackend->remove == NULL) {
+    if (pBackend->mkdir == NULL) {
         return E_NOT_IMPLEMENTED;
     } else {
         return pBackend->mkdir(pFS, pPath);
@@ -7025,12 +7499,18 @@ static e_file_proxy* e_file_proxy_get_backend_data(e_file* pFile)
 
 static e_bool32 e_file_proxy_get_unref_archive_on_close(e_file* pFile)
 {
-    return e_file_proxy_get_backend_data(pFile)->unrefArchiveOnClose;
+    e_file_proxy* pFileProxy = e_file_proxy_get_backend_data(pFile);
+    E_ASSERT(pFileProxy != NULL);
+
+    return pFileProxy->unrefArchiveOnClose;
 }
 
 static void e_file_proxy_set_unref_archive_on_close(e_file* pFile, e_bool32 unrefArchiveOnClose)
 {
-    e_file_proxy_get_backend_data(pFile)->unrefArchiveOnClose = unrefArchiveOnClose;
+    e_file_proxy* pFileProxy = e_file_proxy_get_backend_data(pFile);
+    E_ASSERT(pFileProxy != NULL);
+
+    pFileProxy->unrefArchiveOnClose = unrefArchiveOnClose;
 }
 
 
@@ -7091,7 +7571,7 @@ static e_result e_info_proxy(e_fs* pFS, const char* pPath, int openMode, e_file_
 
 static size_t e_file_alloc_size_proxy(e_fs* pFS)
 {
-    return e_fs_backend_file_alloc_size(e_fs_proxy_get_backend(pFS), pFS);
+    return e_fs_backend_file_alloc_size(e_fs_proxy_get_backend(pFS), pFS) + sizeof(e_file_proxy);
 }
 
 static e_result e_file_open_proxy(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
@@ -7230,9 +7710,9 @@ before garbage collection of those archives is triggered.
 #define E_DEFAULT_ARCHIVE_GC_THRESHOLD 10
 #endif
 
-#define E_IS_OPAQUE(mode)      ((mode & E_OPAQUE) != 0)
-#define E_IS_VERBOSE(mode)     ((mode & E_VERBOSE) != 0)
-#define E_IS_TRANSPARENT(mode) ((mode & (E_OPAQUE | E_VERBOSE)) == 0)
+#define E_IS_OPAQUE(mode)      ((mode & E_OPAQUE ) == E_OPAQUE )
+#define E_IS_VERBOSE(mode)     ((mode & E_VERBOSE) == E_VERBOSE)
+#define E_IS_TRANSPARENT(mode) (!E_IS_OPAQUE(mode) && !E_IS_VERBOSE(mode))
 
 E_API e_fs_config e_config_init_default(void)
 {
@@ -7298,6 +7778,12 @@ typedef struct e_file
     e_stream* pStreamForBackend;   /* The stream for use by the backend. Different to `stream`. This is a duplicate of the stream used by `pFS` so the backend can do reading. */
     size_t backendDataSize;
 } e_file;
+
+typedef enum e_mount_priority
+{
+    E_MOUNT_PRIORITY_HIGHEST = 0,
+    E_MOUNT_PRIORITY_LOWEST  = 1
+} e_mount_priority;
 
 
 static void e_gc_archives_nolock(e_fs* pFS, int policy); /* Defined further down in the file. */
@@ -7379,6 +7865,13 @@ static e_result e_mount_list_iterator_resolve_members(e_mount_list_iterator* pIt
     return E_SUCCESS;
 }
 
+static e_bool32 e_mount_list_at_end(const e_mount_list_iterator* pIterator)
+{
+    E_ASSERT(pIterator != NULL);
+
+    return (pIterator->internal.cursor >= e_mount_list_get_alloc_size(pIterator->internal.pList));
+}
+
 static e_result e_mount_list_first(e_mount_list* pList, e_mount_list_iterator* pIterator)
 {
     E_ASSERT(pIterator != NULL);
@@ -7399,8 +7892,8 @@ static e_result e_mount_list_next(e_mount_list_iterator* pIterator)
 
     E_ASSERT(pIterator != NULL);
 
-    /* For a bit of safety, lets go ahead and check if the cursor is already at the end and if so just abort early. */
-    if (pIterator->internal.cursor >= e_mount_list_get_alloc_size(pIterator->internal.pList)) {
+    /* We can't continue if the list is at the end or else we'll overrun the cursor. */
+    if (e_mount_list_at_end(pIterator)) {
         return E_AT_END;
     }
 
@@ -7708,6 +8201,52 @@ static size_t e_archive_type_sizeof(const e_archive_type* pArchiveType)
 }
 
 
+static e_mount_point* e_find_best_write_mount_point(e_fs* pFS, const char* pPath, const char** ppMountPointPath, const char** ppSubPath)
+{
+    /*
+    This is a bit different from read mounts because we want to use the mount point that most closely
+    matches the start of the file path. Consider, for example, the following mount points:
+
+        - config
+        - config/global
+
+    If we're trying to open "config/global/settings.cfg" we want to use the "config/global" mount
+    point, not the "config" mount point. This is because the "config/global" mount point is more
+    specific and therefore more likely to be the correct one.
+
+    We'll need to iterate over every mount point and keep track of the mount point with the longest
+    prefix that matches the start of the file path.
+    */
+    e_result result;
+    e_mount_list_iterator iMountPoint;
+    e_mount_point* pBestMountPoint = NULL;
+    const char* pBestMountPointPath = NULL;
+    const char* pBestMountPointFileSubPath = NULL;
+    
+    for (result = e_mount_list_first(pFS->pWriteMountPoints, &iMountPoint); result == E_SUCCESS; result = e_mount_list_next(&iMountPoint)) {
+        const char* pFileSubPath = e_path_trim_base(pPath, E_NULL_TERMINATED, iMountPoint.pMountPointPath, E_NULL_TERMINATED);
+        if (pFileSubPath == NULL) {
+            continue;   /* The file path doesn't start with this mount point so skip. */
+        }
+
+        if (pBestMountPointFileSubPath == NULL || strlen(pFileSubPath) < strlen(pBestMountPointFileSubPath)) {
+            pBestMountPoint = iMountPoint.internal.pMountPoint;
+            pBestMountPointPath = iMountPoint.pPath;
+            pBestMountPointFileSubPath = pFileSubPath;
+        }
+    }
+
+    if (ppMountPointPath != NULL) {
+        *ppMountPointPath = pBestMountPointPath;
+    }
+    if (ppSubPath != NULL) {
+        *ppSubPath = pBestMountPointFileSubPath;
+    }
+
+    return pBestMountPoint;
+}
+
+
 E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
 {
     e_fs* pFS;
@@ -7839,10 +8378,10 @@ E_API void e_fs_uninit(e_fs* pFS)
     e_fs_gc_archives(pFS, E_GC_POLICY_FULL);
 
     /* The caller has a bug if there are still outstanding archives. */
-    #if !defined(E_NO_OPENED_FILES_ASSERT)
+    #if !defined(E_ENABLE_OPENED_FILES_ASSERT)
     {
         if (pFS->openedArchivesSize > 0) {
-            E_ASSERT(!"You have outstanding opened files. You must close all files before uninitializing the e_fs object.");    /* <-- If you hit this assert but you're absolutely sure you've closed all your files, please submit a bug report with a reproducible test case. Define `E_NO_OPENED_FILES_ASSERT` to workaround the assert. */
+            E_ASSERT(!"You have outstanding opened files. You must close all files before uninitializing the e_fs object.");    /* <-- If you hit this assert but you're absolutely sure you've closed all your files, please submit a bug report with a reproducible test case. */
         }
     }
     #endif
@@ -7893,7 +8432,7 @@ E_API e_result e_fs_rename(e_fs* pFS, const char* pOldName, const char* pNewName
     return e_fs_backend_rename(pFS->pBackend, pFS, pOldName, pNewName);
 }
 
-E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
+E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath, int options)
 {
     char pRunningPathStack[1024];
     char* pRunningPathHeap = NULL;
@@ -7901,6 +8440,9 @@ E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
     size_t runningPathLen = 0;
     e_path_iterator iSegment;
     const e_fs_backend* pBackend;
+    e_mount_point* pMountPoint = NULL;
+    const char* pMountPointPath = NULL;
+    const char* pMountPointSubPath = NULL;
 
     pBackend = e_get_backend_or_default(pFS);
 
@@ -7912,17 +8454,58 @@ E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
         return E_INVALID_ARGS;
     }
 
+    /* If we're using the default file system, ignore mount points since there's no real notion of them. */
+    if (pFS == NULL) {
+        options |= E_IGNORE_MOUNTS;
+    }
+
+    /* If we're using mount points we'll want to find the best one from our input path. */
+    if ((options & E_IGNORE_MOUNTS) != 0) {
+        pMountPoint = NULL;
+        pMountPointPath = "";
+        pMountPointSubPath = pPath;
+    } else {
+        pMountPoint = e_find_best_write_mount_point(pFS, pPath, &pMountPointPath, &pMountPointSubPath);
+        if (pMountPoint == NULL) {
+            return E_INVALID_FILE; /* Couldn't find a mount point. */
+        }
+    }
+
+
     /* We need to iterate over each segment and create the directory. If any of these fail we'll need to abort. */
-    if (e_path_first(pPath, E_NULL_TERMINATED, &iSegment) != E_SUCCESS) {
+    if (e_path_first(pMountPointSubPath, E_NULL_TERMINATED, &iSegment) != E_SUCCESS) {
         return E_SUCCESS;  /* It's an empty path. */
     }
+
+
+    /* We need to pre-fill our running path with the mount point. */
+    runningPathLen = strlen(pMountPointPath);
+    if (runningPathLen + 1 >= sizeof(pRunningPathStack)) {
+        pRunningPathHeap = (char*)e_malloc(runningPathLen + 1 + 1, e_fs_get_allocation_callbacks(pFS));
+        if (pRunningPathHeap == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        pRunningPath = pRunningPathHeap;
+    }
+
+    E_COPY_MEMORY(pRunningPath, pMountPointPath, runningPathLen);
+    pRunningPath[runningPathLen] = '\0';
+
+    /* We need to make sure we have a trailing slash. */
+    if (runningPathLen > 0 && pRunningPath[runningPathLen - 1] != '/') {
+        pRunningPath[runningPathLen] = '/';
+        runningPathLen += 1;
+        pRunningPath[runningPathLen] = '\0';
+    }
+
 
     for (;;) {
         e_result result;
 
-        if (runningPathLen + iSegment.segmentLength + 1 >= sizeof(pRunningPathStack)) {
+        if (runningPathLen + iSegment.segmentLength + 1 + 1 >= sizeof(pRunningPathStack)) {
             if (pRunningPath == pRunningPathStack) {
-                pRunningPathHeap = (char*)e_malloc(runningPathLen + iSegment.segmentLength + 1, e_fs_get_allocation_callbacks(pFS));
+                pRunningPathHeap = (char*)e_malloc(runningPathLen + iSegment.segmentLength + 1 + 1, e_fs_get_allocation_callbacks(pFS));
                 if (pRunningPathHeap == NULL) {
                     return E_OUT_OF_MEMORY;
                 }
@@ -7932,7 +8515,7 @@ E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
             } else {
                 char* pNewRunningPathHeap;
 
-                pNewRunningPathHeap = (char*)e_realloc(pRunningPathHeap, runningPathLen + iSegment.segmentLength + 1, e_fs_get_allocation_callbacks(pFS));
+                pNewRunningPathHeap = (char*)e_realloc(pRunningPathHeap, runningPathLen + iSegment.segmentLength + 1 + 1, e_fs_get_allocation_callbacks(pFS));
                 if (pNewRunningPathHeap == NULL) {
                     e_free(pRunningPathHeap, e_fs_get_allocation_callbacks(pFS));
                     return E_OUT_OF_MEMORY;
@@ -7968,6 +8551,10 @@ E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath)
         if (result != E_SUCCESS) {
             break;
         }
+    }
+
+    if (pRunningPathHeap != NULL) {
+        e_free(pRunningPathHeap, e_fs_get_allocation_callbacks(pFS));
     }
 
     return E_SUCCESS;
@@ -8690,7 +9277,7 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
 
     /*
     Take a copy of the file system's stream if necessary. We only need to do this if we're opening the file, and if
-    the owner `e_fs` object `pFS` has itself has a stream.
+    the owner `e_fs` object `pFS` itself has a stream.
     */
     if (pFS != NULL && ppFile != NULL) {
         e_stream* pFSStream = pFS->pStream;
@@ -8739,7 +9326,7 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
                 pDirPath = pDirPathStack;
             }
 
-            result = e_fs_mkdir(pFS, pDirPath);
+            result = e_fs_mkdir(pFS, pDirPath, E_IGNORE_MOUNTS);
             if (result != E_SUCCESS) {
                 e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
                 return result;
@@ -8827,40 +9414,13 @@ E_API e_result e_file_open_or_info(e_fs* pFS, const char* pFilePath, int openMod
     }
 
     if ((openMode & E_WRITE) != 0) {
-        /*
-        Opening in write mode. We need to open from a mount point. This is a bit different from opening
-        in read mode because we want to use the mount point that most closely matches the start of the
-        file path. Consider, for example, the following mount points:
-
-            - config
-            - config/global
-
-        If we're trying to open "config/global/settings.cfg" we want to use the "config/global" mount
-        point, not the "config" mount point. This is because the "config/global" mount point is more
-        specific and therefore more likely to be the correct one.
-
-        We'll need to iterate over every mount point and keep track of the mount point with the longest
-        prefix that matches the start of the file path.
-        */
+        /* Opening in write mode. */
         if (pFS != NULL) {
-            e_mount_list_iterator iMountPoint;
             e_mount_point* pBestMountPoint = NULL;
             const char* pBestMountPointPath = NULL;
             const char* pBestMountPointFileSubPath = NULL;
             
-            for (mountPointIerationResult = e_mount_list_first(pFS->pWriteMountPoints, &iMountPoint); mountPointIerationResult == E_SUCCESS; mountPointIerationResult = e_mount_list_next(&iMountPoint)) {
-                const char* pFileSubPath = e_path_trim_base(pFilePath, E_NULL_TERMINATED, iMountPoint.pMountPointPath, E_NULL_TERMINATED);
-                if (pFileSubPath == NULL) {
-                    continue;   /* The file path doesn't start with this mount point so skip. */
-                }
-
-                if (pBestMountPointFileSubPath == NULL || strlen(pFileSubPath) < strlen(pBestMountPointFileSubPath)) {
-                    pBestMountPoint = iMountPoint.internal.pMountPoint;
-                    pBestMountPointPath = iMountPoint.pPath;
-                    pBestMountPointFileSubPath = pFileSubPath;
-                }
-            }
-
+            pBestMountPoint = e_find_best_write_mount_point(pFS, pFilePath, &pBestMountPointPath, &pBestMountPointFileSubPath);
             if (pBestMountPoint != NULL) {
                 char pActualPathStack[1024];
                 char* pActualPathHeap = NULL;
@@ -9086,7 +9646,26 @@ E_API e_result e_file_open(e_fs* pFS, const char* pFilePath, int openMode, e_fil
 
     *ppFile = NULL;
 
-    return e_file_open_or_info(pFS, pFilePath, openMode, ppFile, NULL);
+    if ((openMode & E_TEMP) == E_TEMP) {
+        /*
+        We're creating a temporary file. We can use e_mktmp() to generate a file path for us. The
+        input path will act as the prefix.
+
+        We'll use a stack allocation for the temporary file path. We can make this more robust later
+        by checking for E_PATH_TOO_LONG and allocating on the heap if necessary.
+        */
+        char pTmpPath[4096];
+        e_result result;
+
+        result = e_mktmp(pFilePath, pTmpPath, sizeof(pTmpPath), E_MKTMP_FILE);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+
+        return e_file_open_or_info(pFS, pTmpPath, openMode | E_IGNORE_MOUNTS, ppFile, NULL);
+    } else {
+        return e_file_open_or_info(pFS, pFilePath, openMode, ppFile, NULL);
+    }
 }
 
 E_API e_result e_file_open_from_handle(e_fs* pFS, void* hBackendFile, e_file** ppFile)
@@ -9145,6 +9724,10 @@ E_API e_result e_file_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t
     size_t bytesRead;
     const e_fs_backend* pBackend;
 
+    if (pBytesRead != NULL) {
+        *pBytesRead = 0;
+    }
+
     if (pFile == NULL || pDst == NULL) {
         return E_INVALID_ARGS;
     }
@@ -9170,6 +9753,16 @@ E_API e_result e_file_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t
         return result;
     }
 
+    /*
+    If pBytesRead is null it means the caller will never be able to tell exactly how many bytes were read. In this
+    case, if we didn't read the exact number of bytes that were requested we'll need to return an error.
+    */
+    if (pBytesRead == NULL) {
+        if (bytesRead != bytesToRead) {
+            return E_ERROR;
+        }
+    }
+
     return E_SUCCESS;
 }
 
@@ -9178,6 +9771,10 @@ E_API e_result e_file_write(e_file* pFile, const void* pSrc, size_t bytesToWrite
     e_result result;
     size_t bytesWritten;
     const e_fs_backend* pBackend;
+
+    if (pBytesWritten != NULL) {
+        *pBytesWritten = 0;
+    }
 
     if (pFile == NULL || pSrc == NULL) {
         return E_INVALID_ARGS;
@@ -9191,6 +9788,16 @@ E_API e_result e_file_write(e_file* pFile, const void* pSrc, size_t bytesToWrite
 
     if (pBytesWritten != NULL) {
         *pBytesWritten = bytesWritten;
+    }
+
+    /*
+    As with reading, if the caller passes in null for pBytesWritten we need to return an error if
+    the exact number of bytes couldn't be written.
+    */
+    if (pBytesWritten == NULL) {
+        if (bytesWritten != bytesToWrite) {
+            return E_ERROR;
+        }
     }
 
     return result;
@@ -9871,7 +10478,7 @@ E_API void e_fs_free_iterator(e_fs_iterator* pIterator)
 }
 
 
-E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority)
+static e_result e_mount_read(e_fs* pFS, const char* pActualPath, const char* pVirtualPath, int options)
 {
     e_result result;
     e_mount_list_iterator iterator;
@@ -9881,13 +10488,10 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
     e_file_info fileInfo;
     int openMode;
 
-    if (pFS == NULL || pPathToMount == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    if (pMountPoint == NULL) {
-        pMountPoint = "";
-    }
+    E_ASSERT(pFS != NULL);
+    E_ASSERT(pActualPath != NULL);
+    E_ASSERT(pVirtualPath != NULL);
+    E_ASSERT((options & E_READ) == E_READ);
 
     /*
     The first thing we're going to do is check for duplicates. We allow for the same path to be mounted
@@ -9895,7 +10499,7 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
     want to have any duplicates where the same path is mounted to the same mount point.
     */
     for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
-        if (strcmp(pPathToMount, iterator.pPath) == 0 && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
+        if (strcmp(pActualPath, iterator.pPath) == 0 && strcmp(pVirtualPath, iterator.pMountPointPath) == 0) {
             return E_SUCCESS;  /* Just pretend we're successful. */
         }
     }
@@ -9904,7 +10508,7 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
     Getting here means we're not mounting a duplicate so we can now add it. We'll be either adding it to
     the end of the list, or to the beginning of the list depending on the priority.
     */
-    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, pPathToMount, pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, pActualPath, pVirtualPath, ((options & E_LOWEST_PRIORITY) == E_LOWEST_PRIORITY) ? E_MOUNT_PRIORITY_LOWEST : E_MOUNT_PRIORITY_HIGHEST, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
     if (pMountPoints == NULL) {
         return E_OUT_OF_MEMORY;
     }
@@ -9918,7 +10522,7 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
     openMode = E_READ | E_VERBOSE;
 
     /* Must use e_fs_backend_info() instead of e_fs_info() because otherwise e_fs_info() will attempt to read from mounts when we're in the process of trying to add one (this function). */
-    result = e_fs_backend_info(e_get_backend_or_default(pFS), pFS, (pPathToMount[0] != '\0') ? pPathToMount : ".", E_IGNORE_MOUNTS, &fileInfo);
+    result = e_fs_backend_info(e_get_backend_or_default(pFS), pFS, (pActualPath[0] != '\0') ? pActualPath : ".", E_IGNORE_MOUNTS, &fileInfo);
     if (result != E_SUCCESS) {
         return result;
     }
@@ -9927,7 +10531,7 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
         pNewMountPoint->pArchive = NULL;
         pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
     } else {
-        result = e_open_archive(pFS, pPathToMount, openMode, &pNewMountPoint->pArchive);
+        result = e_open_archive(pFS, pActualPath, openMode, &pNewMountPoint->pArchive);
         if (result != E_SUCCESS) {
             return result;
         }
@@ -9938,17 +10542,19 @@ E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMoun
     return E_SUCCESS;
 }
 
-E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint)
+E_API e_result e_unmount_read(e_fs* pFS, const char* pActualPath, int options)
 {
     e_result iteratorResult;
     e_mount_list_iterator iterator;
 
-    if (pFS == NULL || pPathToMount_NotMountPoint == NULL) {
+    if (pFS == NULL || pActualPath == NULL) {
         return E_INVALID_ARGS;
     }
 
-    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; /*iteratorResult = e_mount_list_next(&iterator)*/) {
-        if (strcmp(pPathToMount_NotMountPoint, iterator.pPath) == 0) {
+    E_UNUSED(options);
+
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS && !e_mount_list_at_end(&iterator); /*iteratorResult = e_mount_list_next(&iterator)*/) {
+        if (strcmp(pActualPath, iterator.pPath) == 0) {
             if (iterator.internal.pMountPoint->closeArchiveOnUnmount) {
                 e_close_archive(iterator.pArchive);
             }
@@ -9968,92 +10574,30 @@ E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint)
     return E_SUCCESS;
 }
 
-E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pMountPoint, e_mount_priority priority)
-{
-    e_result iteratorResult;
-    e_mount_list_iterator iterator;
-    e_mount_list* pMountPoints;
-    e_mount_point* pNewMountPoint;
-
-    if (pFS == NULL || pOtherFS == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    if (pMountPoint == NULL) {
-        pMountPoint = "";
-    }
-
-    /*
-    We don't allow duplicates. An archive can be bound to multiple mount points, but we don't want to have the same
-    archive mounted to the same mount point multiple times.
-    */
-    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
-        if (pOtherFS == iterator.pArchive && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
-            return E_SUCCESS;  /* Just pretend we're successful. */
-        }
-    }
-
-    /*
-    Getting here means we're not mounting a duplicate so we can now add it. We'll be either adding it to
-    the end of the list, or to the beginning of the list depending on the priority.
-    */
-    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, "", pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
-    if (pMountPoints == NULL) {
-        return E_OUT_OF_MEMORY;
-    }
-
-    pFS->pReadMountPoints = pMountPoints;
-
-    pNewMountPoint->pArchive = pOtherFS;
-    pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
-
-    return E_SUCCESS;
-}
-
-E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS)
-{
-    e_result iteratorResult;
-    e_mount_list_iterator iterator;
-
-    if (pFS == NULL || pOtherFS == NULL) {
-        return E_INVALID_ARGS;
-    }
-
-    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
-        if (iterator.pArchive == pOtherFS) {
-            e_mount_list_remove(pFS->pReadMountPoints, iterator.internal.pMountPoint);
-            return E_SUCCESS;
-        }
-    }
-
-    return E_SUCCESS;
-}
-
-
-E_API e_result e_fs_mount_write(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority)
+static e_result e_fs_mount_write(e_fs* pFS, const char* pActualPath, const char* pVirtualPath, int options)
 {
     e_mount_list_iterator iterator;
     e_result iteratorResult;
     e_mount_point* pNewMountPoint;
     e_mount_list* pMountList;
 
-    if (pFS == NULL || pPathToMount == NULL) {
+    if (pFS == NULL || pActualPath == NULL) {
         return E_INVALID_ARGS;
     }
 
-    if (pMountPoint == NULL) {
-        pMountPoint = "";
+    if (pVirtualPath == NULL) {
+        pVirtualPath = "";
     }
 
     /* Like with regular read mount points we'll want to check for duplicates. */
     for (iteratorResult = e_mount_list_first(pFS->pWriteMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
-        if (strcmp(pPathToMount, iterator.pPath) == 0 && strcmp(pMountPoint, iterator.pMountPointPath) == 0) {
+        if (strcmp(pActualPath, iterator.pPath) == 0 && strcmp(pVirtualPath, iterator.pMountPointPath) == 0) {
             return E_SUCCESS;  /* Just pretend we're successful. */
         }
     }
 
     /* Getting here means we're not mounting a duplicate so we can now add it. */
-    pMountList = e_mount_list_alloc(pFS->pWriteMountPoints, pPathToMount, pMountPoint, priority, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    pMountList = e_mount_list_alloc(pFS->pWriteMountPoints, pActualPath, pVirtualPath, ((options & E_LOWEST_PRIORITY) == E_LOWEST_PRIORITY) ? E_MOUNT_PRIORITY_LOWEST : E_MOUNT_PRIORITY_HIGHEST, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
     if (pMountList == NULL) {
         return E_OUT_OF_MEMORY;
     }
@@ -10064,20 +10608,26 @@ E_API e_result e_fs_mount_write(e_fs* pFS, const char* pPathToMount, const char*
     pNewMountPoint->pArchive = NULL;
     pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
 
+    /* Since we'll be wanting to write out files to the mount point we should ensure the folder actually exists. */
+    if ((options & E_NO_CREATE_DIRS) == 0) {
+        e_fs_mkdir(pFS, pActualPath, E_IGNORE_MOUNTS);
+    }
+
     return E_SUCCESS;
 }
 
-E_API e_result e_fs_unmount_write(e_fs* pFS, const char* pPathToMount_NotMountPoint)
+static e_result e_fs_unmount_write(e_fs* pFS, const char* pActualPath, int options)
 {
     e_result iteratorResult;
     e_mount_list_iterator iterator;
 
-    if (pFS == NULL || pPathToMount_NotMountPoint == NULL) {
-        return E_INVALID_ARGS;
-    }
+    E_ASSERT(pFS != NULL);
+    E_ASSERT(pActualPath != NULL);
+
+    E_UNUSED(options);
 
     for (iteratorResult = e_mount_list_first(pFS->pWriteMountPoints, &iterator); iteratorResult == E_SUCCESS; /*iteratorResult = e_mount_list_next(&iterator)*/) {
-        if (strcmp(pPathToMount_NotMountPoint, iterator.pPath) == 0) {
+        if (strcmp(pActualPath, iterator.pPath) == 0) {
             e_mount_list_remove(pFS->pWriteMountPoints, iterator.internal.pMountPoint);
 
             /*
@@ -10092,6 +10642,256 @@ E_API e_result e_fs_unmount_write(e_fs* pFS, const char* pPathToMount_NotMountPo
 
     return E_SUCCESS;
 }
+
+
+E_API e_result e_fs_mount(e_fs* pFS, const char* pActualPath, const char* pVirtualPath, int options)
+{
+    if (pFS == NULL || pActualPath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pVirtualPath == NULL) {
+        pVirtualPath = "";
+    }
+
+    /* At least READ or WRITE must be specified. */
+    if ((options & (E_READ | E_WRITE)) == 0) {
+        return E_INVALID_ARGS;
+    }
+
+    if ((options & E_READ) == E_READ) {
+        e_result result = e_mount_read(pFS, pActualPath, pVirtualPath, options);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+    }
+
+    if ((options & E_WRITE) == E_WRITE) {
+        e_result result = e_fs_mount_write(pFS, pActualPath, pVirtualPath, options);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint, int options)
+{
+    e_result result;
+
+    if (pFS == NULL || pPathToMount_NotMountPoint == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if ((options & E_READ) == E_READ) {
+        result = e_unmount_read(pFS, pPathToMount_NotMountPoint, options);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+    }
+
+    if ((options & E_WRITE) == E_WRITE) {
+        result = e_fs_unmount_write(pFS, pPathToMount_NotMountPoint, options);
+        if (result != E_SUCCESS) {
+            return result;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
+static size_t e_sysdir_append(e_sysdir_type type, char* pDst, size_t dstCap, const char* pSubDir)
+{
+    size_t sysDirLen;
+    size_t subDirLen;
+    size_t totalLen;
+
+    if (pDst == NULL || pSubDir == NULL) {
+        return 0;
+    }
+
+    sysDirLen = e_sysdir(type, pDst, dstCap);
+    if (sysDirLen == 0) {
+        return 0;   /* Failed to retrieve the system directory. */
+    }
+
+    subDirLen = strlen(pSubDir);
+
+    totalLen = sysDirLen + 1 + subDirLen;   /* +1 for the separator. */
+    if (totalLen < dstCap) {
+        pDst[sysDirLen] = '/';
+        E_COPY_MEMORY(pDst + sysDirLen + 1, pSubDir, subDirLen);
+        pDst[totalLen] = '\0';
+    }
+
+    return totalLen;
+}
+
+E_API e_result e_mount_sysdir(e_fs* pFS, e_sysdir_type type, const char* pSubDir, const char* pVirtualPath, int options)
+{
+    char  pPathToMountStack[1024];
+    char* pPathToMountHeap = NULL;
+    char* pPathToMount;
+    size_t pathToMountLen;
+    e_result result;
+
+    if (pFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pVirtualPath == NULL) {
+        pVirtualPath = "";
+    }
+
+    /*
+    We're enforcing a sub-directory with this function to encourage applications to use good
+    practice with with directory structures.
+    */
+    if (pSubDir == NULL || pSubDir[0] == '\0') {
+        return E_INVALID_ARGS;
+    }
+
+    pathToMountLen = e_sysdir_append(type, pPathToMountStack, sizeof(pPathToMountStack), pSubDir);
+    if (pathToMountLen == 0) {
+        return E_ERROR;    /* Failed to retrieve the system directory. */
+    }
+
+    if (pathToMountLen < sizeof(pPathToMountStack)) {
+        pPathToMount = pPathToMountStack;
+    } else {
+        pathToMountLen += 1;    /* +1 for the null terminator. */
+
+        pPathToMountHeap = (char*)e_malloc(pathToMountLen, e_fs_get_allocation_callbacks(pFS));
+        if (pPathToMountHeap == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        e_sysdir_append(type, pPathToMountHeap, pathToMountLen, pSubDir);
+        pPathToMount = pPathToMountHeap;
+    }
+
+    /* At this point we should have the path we want to mount. Now we can do the actual mounting. */
+    result = e_fs_mount(pFS, pPathToMount, pVirtualPath, options);
+    e_free(pPathToMountHeap, e_fs_get_allocation_callbacks(pFS));
+
+    return result;
+}
+
+E_API e_result e_unmount_sysdir(e_fs* pFS, e_sysdir_type type, const char* pSubDir, int options)
+{
+    char  pPathToMountStack[1024];
+    char* pPathToMountHeap = NULL;
+    char* pPathToMount;
+    size_t pathToMountLen;
+    e_result result;
+
+    if (pFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    We're enforcing a sub-directory with this function to encourage applications to use good
+    practice with with directory structures.
+    */
+    if (pSubDir == NULL || pSubDir[0] == '\0') {
+        return E_INVALID_ARGS;
+    }
+
+    pathToMountLen = e_sysdir_append(type, pPathToMountStack, sizeof(pPathToMountStack), pSubDir);
+    if (pathToMountLen == 0) {
+        return E_ERROR;    /* Failed to retrieve the system directory. */
+    }
+
+    if (pathToMountLen < sizeof(pPathToMountStack)) {
+        pPathToMount = pPathToMountStack;
+    } else {
+        pathToMountLen += 1;    /* +1 for the null terminator. */
+
+        pPathToMountHeap = (char*)e_malloc(pathToMountLen, e_fs_get_allocation_callbacks(pFS));
+        if (pPathToMountHeap == NULL) {
+            return E_OUT_OF_MEMORY;
+        }
+
+        e_sysdir_append(type, pPathToMountHeap, pathToMountLen, pSubDir);
+        pPathToMount = pPathToMountHeap;
+    }
+
+    /* At this point we should have the path we want to mount. Now we can do the actual mounting. */
+    result = e_fs_unmount(pFS, pPathToMount, options);
+
+    e_free(pPathToMountHeap, e_fs_get_allocation_callbacks(pFS));
+    return result;
+}
+
+E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pVirtualPath, int options)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+    e_mount_list* pMountPoints;
+    e_mount_point* pNewMountPoint;
+
+    if (pFS == NULL || pOtherFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    if (pVirtualPath == NULL) {
+        pVirtualPath = "";
+    }
+
+    /* We don't support write mode when mounting an FS. */
+    if ((options & E_WRITE) == E_WRITE) {
+        return E_INVALID_ARGS;
+    }
+
+    /*
+    We don't allow duplicates. An archive can be bound to multiple mount points, but we don't want to have the same
+    archive mounted to the same mount point multiple times.
+    */
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (pOtherFS == iterator.pArchive && strcmp(pVirtualPath, iterator.pMountPointPath) == 0) {
+            return E_SUCCESS;  /* Just pretend we're successful. */
+        }
+    }
+
+    /*
+    Getting here means we're not mounting a duplicate so we can now add it. We'll be either adding it to
+    the end of the list, or to the beginning of the list depending on the priority.
+    */
+    pMountPoints = e_mount_list_alloc(pFS->pReadMountPoints, "", pVirtualPath, ((options & E_LOWEST_PRIORITY) == E_LOWEST_PRIORITY) ? E_MOUNT_PRIORITY_LOWEST : E_MOUNT_PRIORITY_HIGHEST, e_fs_get_allocation_callbacks(pFS), &pNewMountPoint);
+    if (pMountPoints == NULL) {
+        return E_OUT_OF_MEMORY;
+    }
+
+    pFS->pReadMountPoints = pMountPoints;
+
+    pNewMountPoint->pArchive = pOtherFS;
+    pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
+
+    return E_SUCCESS;
+}
+
+E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS, int options)
+{
+    e_result iteratorResult;
+    e_mount_list_iterator iterator;
+
+    if (pFS == NULL || pOtherFS == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    E_UNUSED(options);
+
+    for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
+        if (iterator.pArchive == pOtherFS) {
+            e_mount_list_remove(pFS->pReadMountPoints, iterator.internal.pMountPoint);
+            return E_SUCCESS;
+        }
+    }
+
+    return E_SUCCESS;
+}
+
 
 E_API e_result e_file_read_to_end(e_file* pFile, e_stream_data_format format, void** ppData, size_t* pDataSize)
 {
@@ -10151,7 +10951,7 @@ E_API e_result e_file_open_and_write(e_fs* pFS, const char* pFilePath, void* pDa
 ******************************************************************************/
 #ifndef E_NO_STDIO
 #include <stdio.h>
-#include <wchar.h>     /* For wcstombs(). */
+#include <wchar.h>      /* For wcstombs(). */
 #include <sys/stat.h>
 
 #if defined(_WIN32)
@@ -10428,7 +11228,16 @@ static e_result e_rename_stdio(e_fs* pFS, const char* pOldName, const char* pNew
 #if defined(_WIN32)
 static e_result e_mkdir_stdio_win32(const char* pPath)
 {
-    int result = _mkdir(pPath);
+    int result;
+
+    /* If it's a drive letter segment just pretend it's successful. */
+    if (pPath[0] >= 'a' && pPath[0] <= 'z' || pPath[0] >= 'A' && pPath[0] <= 'Z') {
+        if (pPath[1] == ':' && pPath[2] == '\0') {
+            return E_SUCCESS;
+        }
+    }
+    
+    result = _mkdir(pPath);
     if (result != 0) {
         return e_result_from_errno(errno);
     }
@@ -12475,11 +13284,7 @@ static e_result e_file_read_zip_store(e_fs* pFS, e_file_zip* pZipFile, void* pDs
 
     bytesRead = 0;
 
-    /*
-    Before we spend any time locking the archive we should read from the cache. If the cache gets
-    exhausted before we've finished reading, we can then lock the archive and ready the rest of
-    the data.
-    */
+    /* Read from the cache first. */
     {
         size_t bytesRemainingInCache = pZipFile->cacheSize - pZipFile->cacheCursor;
         size_t bytesToReadFromCache = bytesToRead;
@@ -12738,54 +13543,41 @@ static e_result e_file_write_zip(e_file* pFile, const void* pSrc, size_t bytesTo
     return E_NOT_IMPLEMENTED;
 }
 
-#include <stdio.h>
 static e_result e_file_seek_zip(e_file* pFile, e_int64 offset, e_seek_origin origin)
 {
     e_file_zip* pZipFile;
+    e_int64 newSeekTarget;
     e_uint64 newAbsoluteCursor;
 
     pZipFile = (e_file_zip*)e_file_get_backend_data(pFile);
     E_ASSERT(pZipFile != NULL);
+
+    if (origin == E_SEEK_SET) {
+        newSeekTarget = 0;
+    } else if (origin == E_SEEK_CUR) {
+        newSeekTarget = pZipFile->absoluteCursorUncompressed;
+    } else if (origin == E_SEEK_END) {
+        newSeekTarget = pZipFile->info.uncompressedSize;
+    } else {
+        E_ASSERT(!"Invalid seek origin.");
+        return E_INVALID_ARGS;
+    }
+
+    newSeekTarget += offset;
+    if (newSeekTarget < 0) {
+        return E_BAD_SEEK;  /* Trying to seek before the start of the file. */
+    }
+    if ((e_uint64)newSeekTarget > pZipFile->info.uncompressedSize) {
+        return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
+    }
+
+    newAbsoluteCursor = (e_uint64)newSeekTarget;
 
     /*
     We can do fast seeking if we are moving within the cache. Otherwise we just move the cursor and
     clear the cache. The next time we read, it'll see that the cache is empty which will trigger a
     fresh read of data from the archive stream.
     */
-    if (origin == E_SEEK_CUR) {
-        if (offset > 0) {
-            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed + (e_uint64)offset;
-        } else {
-            if ((e_uint64)E_ABS(offset) > pZipFile->absoluteCursorUncompressed) {
-                return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-            }
-
-            newAbsoluteCursor = pZipFile->absoluteCursorUncompressed - E_ABS(offset);
-        }
-    } else if (origin == E_SEEK_SET) {
-        if (offset < 0) {
-            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-        }
-
-        newAbsoluteCursor = (e_uint64)offset;
-    } else if (origin == E_SEEK_END) {
-        if (offset > 0) {
-            return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
-        }
-
-        if ((e_uint64)E_ABS(offset) > pZipFile->info.uncompressedSize) {
-            return E_BAD_SEEK;  /* Trying to seek to before the start of the file. */
-        }
-
-        newAbsoluteCursor = pZipFile->info.uncompressedSize - E_ABS(offset);
-    } else {
-        return E_INVALID_ARGS;
-    }
-
-    if (newAbsoluteCursor > pZipFile->info.uncompressedSize) {
-        return E_BAD_SEEK;  /* Trying to seek beyond the end of the file. */
-    }
-
     if (newAbsoluteCursor > pZipFile->absoluteCursorUncompressed) {
         /* Moving forward. */
         e_uint64 delta = newAbsoluteCursor - pZipFile->absoluteCursorUncompressed;
@@ -13116,31 +13908,31 @@ const e_fs_backend* E_FS_ZIP = &e_zip_backend;
 /* END e_fs_zip.c */
 
 
-/* BEG e_fs_subfs.c */
-typedef struct e_subfs
+/* BEG e_fs_sub.c */
+typedef struct e_sub
 {
     e_fs* pOwnerFS;
     char* pRootDir;   /* Points to the end of the structure. */
     size_t rootDirLen;
-} e_subfs;
+} e_sub;
 
-typedef struct e_file_subfs
+typedef struct e_file_sub
 {
     e_file* pActualFile;
-} e_file_subfs;
+} e_file_sub;
 
 
-typedef struct e_subfs_path
+typedef struct e_sub_path
 {
     char  pFullPathStack[1024];
     char* pFullPathHeap;
     char* pFullPath;
     int fullPathLen;
-} e_subfs_path;
+} e_sub_path;
 
-static e_result e_subfs_path_init(e_fs* pFS, const char* pPath, size_t pathLen, e_subfs_path* pSubFSPath)
+static e_result e_sub_path_init(e_fs* pFS, const char* pPath, size_t pathLen, e_sub_path* pSubFSPath)
 {
-    e_subfs* pSubFS;
+    e_sub* pSubFS;
     char  pPathCleanStack[1024];
     char* pPathCleanHeap = NULL;
     char* pPathClean;
@@ -13171,7 +13963,7 @@ static e_result e_subfs_path_init(e_fs* pFS, const char* pPath, size_t pathLen, 
     }
 
     /* Now that the input path has been cleaned we need only append it to the base path. */
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
     pSubFSPath->fullPathLen = e_path_append(pSubFSPath->pFullPathStack, sizeof(pSubFSPath->pFullPathStack), pSubFS->pRootDir, pSubFS->rootDirLen, pPathClean, pathCleanLen);
@@ -13196,7 +13988,7 @@ static e_result e_subfs_path_init(e_fs* pFS, const char* pPath, size_t pathLen, 
     return E_SUCCESS;
 }
 
-static void e_subfs_path_uninit(e_subfs_path* pSubFSPath)
+static void e_sub_path_uninit(e_sub_path* pSubFSPath)
 {
     if (pSubFSPath->pFullPathHeap != NULL) {
         e_free(pSubFSPath->pFullPathHeap, e_fs_get_allocation_callbacks(NULL));
@@ -13206,22 +13998,22 @@ static void e_subfs_path_uninit(e_subfs_path* pSubFSPath)
 }
 
 
-static size_t e_alloc_size_subfs(const void* pBackendConfig)
+static size_t e_alloc_size_sub(const void* pBackendConfig)
 {
-    e_subfs_config* pSubFSConfig = (e_subfs_config*)pBackendConfig;
+    e_sub_config* pSubFSConfig = (e_sub_config*)pBackendConfig;
 
     if (pSubFSConfig == NULL) {
-        return 0;   /* The subfs config must be specified. */
+        return 0;   /* The sub config must be specified. */
     }
 
     /* We include a copy of the path with the main allocation. */
-    return sizeof(e_subfs) + strlen(pSubFSConfig->pRootDir) + 1 + 1;   /* +1 for trailing slash and +1 for null terminator. */
+    return sizeof(e_sub) + strlen(pSubFSConfig->pRootDir) + 1 + 1;   /* +1 for trailing slash and +1 for null terminator. */
 }
 
-static e_result e_init_subfs(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
+static e_result e_init_sub(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
 {
-    e_subfs_config* pSubFSConfig = (e_subfs_config*)pBackendConfig;
-    e_subfs* pSubFS;
+    e_sub_config* pSubFSConfig = (e_sub_config*)pBackendConfig;
+    e_sub* pSubFS;
 
     E_ASSERT(pFS != NULL);
     E_UNUSED(pStream);
@@ -13238,7 +14030,7 @@ static e_result e_init_subfs(e_fs* pFS, const void* pBackendConfig, e_stream* pS
         return E_INVALID_ARGS; /* Must have a root directory. */
     }
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pFS != NULL);
 
     pSubFS->pOwnerFS   = pSubFSConfig->pOwnerFS;
@@ -13257,285 +14049,285 @@ static e_result e_init_subfs(e_fs* pFS, const void* pBackendConfig, e_stream* pS
     return E_SUCCESS;
 }
 
-static void e_uninit_subfs(e_fs* pFS)
+static void e_uninit_sub(e_fs* pFS)
 {
     /* Nothing to do here. */
     E_UNUSED(pFS);
 }
 
-static e_result e_ioctl_subfs(e_fs* pFS, int op, void* pArgs)
+static e_result e_ioctl_sub(e_fs* pFS, int op, void* pArgs)
 {
-    e_subfs* pSubFS;
+    e_sub* pSubFS;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
     return e_fs_ioctl(pSubFS->pOwnerFS, op, pArgs);
 }
 
-static e_result e_remove_subfs(e_fs* pFS, const char* pFilePath)
+static e_result e_remove_sub(e_fs* pFS, const char* pFilePath)
 {
     e_result result;
-    e_subfs* pSubFS;
-    e_subfs_path subfsPath;
+    e_sub* pSubFS;
+    e_sub_path subPath;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    result = e_subfs_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subfsPath);
+    result = e_sub_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subPath);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    result = e_fs_remove(pSubFS->pOwnerFS, subfsPath.pFullPath);
-    e_subfs_path_uninit(&subfsPath);
+    result = e_fs_remove(pSubFS->pOwnerFS, subPath.pFullPath);
+    e_sub_path_uninit(&subPath);
 
     return result;
 }
 
-static e_result e_rename_subfs(e_fs* pFS, const char* pOldName, const char* pNewName)
+static e_result e_rename_sub(e_fs* pFS, const char* pOldName, const char* pNewName)
 {
     e_result result;
-    e_subfs* pSubFS;
-    e_subfs_path subfsPathOld;
-    e_subfs_path subfsPathNew;
+    e_sub* pSubFS;
+    e_sub_path subPathOld;
+    e_sub_path subPathNew;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    result = e_subfs_path_init(pFS, pOldName, E_NULL_TERMINATED, &subfsPathOld);
+    result = e_sub_path_init(pFS, pOldName, E_NULL_TERMINATED, &subPathOld);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    result = e_subfs_path_init(pFS, pNewName, E_NULL_TERMINATED, &subfsPathNew);
+    result = e_sub_path_init(pFS, pNewName, E_NULL_TERMINATED, &subPathNew);
     if (result != E_SUCCESS) {
-        e_subfs_path_uninit(&subfsPathOld);
+        e_sub_path_uninit(&subPathOld);
         return result;
     }
 
-    result = e_fs_rename(pSubFS->pOwnerFS, subfsPathOld.pFullPath, subfsPathNew.pFullPath);
+    result = e_fs_rename(pSubFS->pOwnerFS, subPathOld.pFullPath, subPathNew.pFullPath);
 
-    e_subfs_path_uninit(&subfsPathOld);
-    e_subfs_path_uninit(&subfsPathNew);
+    e_sub_path_uninit(&subPathOld);
+    e_sub_path_uninit(&subPathNew);
 
     return result;
 }
 
-static e_result e_mkdir_subfs(e_fs* pFS, const char* pPath)
+static e_result e_mkdir_sub(e_fs* pFS, const char* pPath)
 {
     e_result result;
-    e_subfs* pSubFS;
-    e_subfs_path subfsPath;
+    e_sub* pSubFS;
+    e_sub_path subPath;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    result = e_subfs_path_init(pFS, pPath, E_NULL_TERMINATED, &subfsPath);
+    result = e_sub_path_init(pFS, pPath, E_NULL_TERMINATED, &subPath);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    result = e_fs_mkdir(pSubFS->pOwnerFS, subfsPath.pFullPath);
-    e_subfs_path_uninit(&subfsPath);
+    result = e_fs_mkdir(pSubFS->pOwnerFS, subPath.pFullPath, E_IGNORE_MOUNTS);
+    e_sub_path_uninit(&subPath);
 
     return result;
 }
 
-static e_result e_info_subfs(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
+static e_result e_info_sub(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
 {
     e_result result;
-    e_subfs* pSubFS;
-    e_subfs_path subfsPath;
+    e_sub* pSubFS;
+    e_sub_path subPath;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    result = e_subfs_path_init(pFS, pPath, E_NULL_TERMINATED, &subfsPath);
+    result = e_sub_path_init(pFS, pPath, E_NULL_TERMINATED, &subPath);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    result = e_fs_info(pSubFS->pOwnerFS, subfsPath.pFullPath, openMode, pInfo);
-    e_subfs_path_uninit(&subfsPath);
+    result = e_fs_info(pSubFS->pOwnerFS, subPath.pFullPath, openMode, pInfo);
+    e_sub_path_uninit(&subPath);
 
     return result;
 }
 
-static size_t e_file_alloc_size_subfs(e_fs* pFS)
+static size_t e_file_alloc_size_sub(e_fs* pFS)
 {
     E_UNUSED(pFS);
-    return sizeof(e_file_subfs);
+    return sizeof(e_file_sub);
 }
 
-static e_result e_file_open_subfs(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
+static e_result e_file_open_sub(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
 {
     e_result result;
-    e_subfs_path subfsPath;
-    e_subfs* pSubFS;
-    e_file_subfs* pSubFSFile;
+    e_sub_path subPath;
+    e_sub* pSubFS;
+    e_file_sub* pSubFSFile;
 
     E_UNUSED(pStream);
 
-    result = e_subfs_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subfsPath);
+    result = e_sub_path_init(pFS, pFilePath, E_NULL_TERMINATED, &subPath);
     if (result != E_SUCCESS) {
         return result;
     }
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
-    result = e_file_open(pSubFS->pOwnerFS, subfsPath.pFullPath, openMode, &pSubFSFile->pActualFile);
-    e_subfs_path_uninit(&subfsPath);
+    result = e_file_open(pSubFS->pOwnerFS, subPath.pFullPath, openMode, &pSubFSFile->pActualFile);
+    e_sub_path_uninit(&subPath);
 
     return result;
 }
 
-static e_result e_file_open_handle_subfs(e_fs* pFS, void* hBackendFile, e_file* pFile)
+static e_result e_file_open_handle_sub(e_fs* pFS, void* hBackendFile, e_file* pFile)
 {
-    e_subfs* pSubFS;
-    e_file_subfs* pSubFSFile;
+    e_sub* pSubFS;
+    e_file_sub* pSubFSFile;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
     return e_file_open_from_handle(pSubFS->pOwnerFS, hBackendFile, &pSubFSFile->pActualFile);
 }
 
-static void e_file_close_subfs(e_file* pFile)
+static void e_file_close_sub(e_file* pFile)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
     e_file_close(pSubFSFile->pActualFile);
 }
 
-static e_result e_file_read_subfs(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
+static e_result e_file_read_sub(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
     return e_file_read(pSubFSFile->pActualFile, pDst, bytesToRead, pBytesRead);
 }
 
-static e_result e_file_write_subfs(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
+static e_result e_file_write_sub(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
     return e_file_write(pSubFSFile->pActualFile, pSrc, bytesToWrite, pBytesWritten);
 }
 
-static e_result e_file_seek_subfs(e_file* pFile, e_int64 offset, e_seek_origin origin)
+static e_result e_file_seek_sub(e_file* pFile, e_int64 offset, e_seek_origin origin)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
     
     return e_file_seek(pSubFSFile->pActualFile, offset, origin);
 }
 
-static e_result e_file_tell_subfs(e_file* pFile, e_int64* pCursor)
+static e_result e_file_tell_sub(e_file* pFile, e_int64* pCursor)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
     
     return e_file_tell(pSubFSFile->pActualFile, pCursor);
 }
 
-static e_result e_file_flush_subfs(e_file* pFile)
+static e_result e_file_flush_sub(e_file* pFile)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
     
     return e_file_flush(pSubFSFile->pActualFile);
 }
 
-static e_result e_file_info_subfs(e_file* pFile, e_file_info* pInfo)
+static e_result e_file_info_sub(e_file* pFile, e_file_info* pInfo)
 {
-    e_file_subfs* pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    e_file_sub* pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
     
     return e_file_get_info(pSubFSFile->pActualFile, pInfo);
 }
 
-static e_result e_file_duplicate_subfs(e_file* pFile, e_file* pDuplicatedFile)
+static e_result e_file_duplicate_sub(e_file* pFile, e_file* pDuplicatedFile)
 {
-    e_file_subfs* pSubFSFile;
-    e_file_subfs* pSubFSFileDuplicated;
+    e_file_sub* pSubFSFile;
+    e_file_sub* pSubFSFileDuplicated;
 
-    pSubFSFile = (e_file_subfs*)e_file_get_backend_data(pFile);
+    pSubFSFile = (e_file_sub*)e_file_get_backend_data(pFile);
     E_ASSERT(pSubFSFile != NULL);
 
-    pSubFSFileDuplicated = (e_file_subfs*)e_file_get_backend_data(pDuplicatedFile);
+    pSubFSFileDuplicated = (e_file_sub*)e_file_get_backend_data(pDuplicatedFile);
     E_ASSERT(pSubFSFileDuplicated != NULL);
     
     return e_file_duplicate(pSubFSFile->pActualFile, &pSubFSFileDuplicated->pActualFile);
 }
 
-static e_fs_iterator* e_first_subfs(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
+static e_fs_iterator* e_first_sub(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
 {
     e_result result;
-    e_subfs* pSubFS;
-    e_subfs_path subfsPath;
+    e_sub* pSubFS;
+    e_sub_path subPath;
     e_fs_iterator* pIterator;
 
-    pSubFS = (e_subfs*)e_fs_get_backend_data(pFS);
+    pSubFS = (e_sub*)e_fs_get_backend_data(pFS);
     E_ASSERT(pSubFS != NULL);
 
-    result = e_subfs_path_init(pFS, pDirectoryPath, directoryPathLen, &subfsPath);
+    result = e_sub_path_init(pFS, pDirectoryPath, directoryPathLen, &subPath);
     if (result != E_SUCCESS) {
         return NULL;
     }
 
-    pIterator = e_fs_first(pSubFS->pOwnerFS, subfsPath.pFullPath, subfsPath.fullPathLen);
-    e_subfs_path_uninit(&subfsPath);
+    pIterator = e_fs_first(pSubFS->pOwnerFS, subPath.pFullPath, subPath.fullPathLen);
+    e_sub_path_uninit(&subPath);
 
     return pIterator;
 }
 
-static e_fs_iterator* e_next_subfs(e_fs_iterator* pIterator)
+static e_fs_iterator* e_next_sub(e_fs_iterator* pIterator)
 {
     return e_fs_next(pIterator);
 }
 
-static void e_free_iterator_subfs(e_fs_iterator* pIterator)
+static void e_free_iterator_sub(e_fs_iterator* pIterator)
 {
     e_fs_free_iterator(pIterator);
 }
 
-e_fs_backend e_subfs_backend =
+e_fs_backend e_sub_backend =
 {
-    e_alloc_size_subfs,
-    e_init_subfs,
-    e_uninit_subfs,
-    e_ioctl_subfs,
-    e_remove_subfs,
-    e_rename_subfs,
-    e_mkdir_subfs,
-    e_info_subfs,
-    e_file_alloc_size_subfs,
-    e_file_open_subfs,
-    e_file_open_handle_subfs,
-    e_file_close_subfs,
-    e_file_read_subfs,
-    e_file_write_subfs,
-    e_file_seek_subfs,
-    e_file_tell_subfs,
-    e_file_flush_subfs,
-    e_file_info_subfs,
-    e_file_duplicate_subfs,
-    e_first_subfs,
-    e_next_subfs,
-    e_free_iterator_subfs
+    e_alloc_size_sub,
+    e_init_sub,
+    e_uninit_sub,
+    e_ioctl_sub,
+    e_remove_sub,
+    e_rename_sub,
+    e_mkdir_sub,
+    e_info_sub,
+    e_file_alloc_size_sub,
+    e_file_open_sub,
+    e_file_open_handle_sub,
+    e_file_close_sub,
+    e_file_read_sub,
+    e_file_write_sub,
+    e_file_seek_sub,
+    e_file_tell_sub,
+    e_file_flush_sub,
+    e_file_info_sub,
+    e_file_duplicate_sub,
+    e_first_sub,
+    e_next_sub,
+    e_free_iterator_sub
 };
-const e_fs_backend* E_FS_SUBFS = &e_subfs_backend;
-/* END e_fs_subfs.c */
+const e_fs_backend* E_FS_SUB = &e_sub_backend;
+/* END e_fs_sub.c */
 
 
 

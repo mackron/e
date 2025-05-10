@@ -957,11 +957,13 @@ E_API e_result e_path_prev(e_path_iterator* pIterator);
 E_API e_bool32 e_path_is_first(const e_path_iterator* pIterator);
 E_API e_bool32 e_path_is_last(const e_path_iterator* pIterator);
 E_API int e_path_iterators_compare(const e_path_iterator* pIteratorA, const e_path_iterator* pIteratorB);
+E_API int e_path_compare(const char* pPathA, size_t pathALen, const char* pPathB, size_t pathBLen);
 E_API const char* e_path_file_name(const char* pPath, size_t pathLen);    /* Does *not* include the null terminator. Returns an offset of pPath. Will only be null terminated if pPath is. Returns null if the path ends with a slash. */
 E_API int e_path_directory(char* pDst, size_t dstCap, const char* pPath, size_t pathLen); /* Returns the length, or < 0 on error. pDst can be null in which case the required length will be returned. Will not include a trailing slash. */
 E_API const char* e_path_extension(const char* pPath, size_t pathLen);    /* Does *not* include the null terminator. Returns an offset of pPath. Will only be null terminated if pPath is. Returns null if the extension cannot be found. */
 E_API e_bool32 e_path_extension_equal(const char* pPath, size_t pathLen, const char* pExtension, size_t extensionLen); /* Returns true if the extension is equal to the given extension. Case insensitive. */
 E_API const char* e_path_trim_base(const char* pPath, size_t pathLen, const char* pBasePath, size_t basePathLen);
+E_API e_bool32 e_path_begins_with(const char* pPath, size_t pathLen, const char* pBasePath, size_t basePathLen);
 E_API int e_path_append(char* pDst, size_t dstCap, const char* pBasePath, size_t basePathLen, const char* pPathToAppend, size_t pathToAppendLen); /* pDst can be equal to pBasePath in which case it will be appended in-place. pDst can be null in which case the function will return the required length. */
 E_API int e_path_normalize(char* pDst, size_t dstCap, const char* pPath, size_t pathLen, unsigned int options); /* The only root component recognized is "/". The path cannot start with "C:", "//<address>", etc. This is not intended to be a general cross-platform path normalization routine. If the path starts with "/", this will fail with a negative result code if normalization would result in the path going above the root directory. Will convert all separators to "/". Will remove trailing slash. pDst can be null in which case the required length will be returned. */
 /* END e_path.h */
@@ -1032,12 +1034,32 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
 
 
 /* BEG e_fs.h */
+typedef enum e_sysdir_type
+{
+    E_SYSDIR_HOME,
+    E_SYSDIR_TEMP,
+    E_SYSDIR_CONFIG,
+    E_SYSDIR_DATA,
+    E_SYSDIR_CACHE
+} e_sysdir_type;
+
+E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap);    /* Returns the length of the string, or 0 on failure. If the return value is >= to dstCap it means the output buffer was too small. Use the returned value to know how big to make the buffer. Set pDst to NULL to calculate the required length. */
+
+
+/* Make sure these options do not conflict with E_NO_CREATE_DIRS. */
+#define E_MKTMP_DIR  0x0800  /* Create a temporary directory. */
+#define E_MKTMP_FILE 0x1000  /* Create a temporary file. */
+
+E_API e_result e_mktmp(const char* pPrefix, char* pTmpPath, size_t tmpPathCap, int options);  /* Returns E_PATH_TOO_LONG if the output buffer is too small. Use E_MKTMP_FILE to create a file and E_MKTMP_DIR to create a directory. Use E_MKTMP_BASE_DIR to query the system base temp folder. pPrefix should not include the name of the system's base temp directory. Do not include paths like "/tmp" in the prefix. The output path will include the system's base temp directory and the prefix. */
+
+
 /* Open mode flags. */
 #define E_READ                     0x0001
 #define E_WRITE                    0x0002
 #define E_APPEND                   (E_WRITE | 0x0004)
 #define E_OVERWRITE                (E_WRITE | 0x0008)
 #define E_TRUNCATE                 (E_WRITE)
+#define E_TEMP                     (E_TRUNCATE | 0x0010)
 
 #define E_TRANSPARENT              0x0000  /* Default. Opens a file such that archives of a known type are handled transparently. For example, "somefolder/archive.zip/file.txt" can be opened with "somefolder/file.txt" (the "archive.zip" part need not be specified). This assumes the `e_fs` object has been initialized with support for the relevant archive types. */
 #define E_OPAQUE                   0x0010  /* When used, files inside archives cannot be opened automatically. For example, "somefolder/archive.zip/file.txt" will fail. Mounted archives work fine. */
@@ -1049,6 +1071,7 @@ E_API e_result e_deflate_decompress(e_deflate_decompressor* pDecompressor, const
 #define E_NO_SPECIAL_DIRS          0x0200  /* When used, the presence of special directories like "." and ".." will be result in an error when opening files. */
 #define E_NO_ABOVE_ROOT_NAVIGATION 0x0400  /* When used, navigating above the mount point with leading ".." segments will result in an error. Can be also be used with e_path_normalize(). */
 
+#define E_LOWEST_PRIORITY          0x2000  /* Only used with mounting. When set will create the mount with a lower priority to existing mounts. */
 
 /* Garbage collection policies.*/
 #define E_GC_POLICY_THRESHOLD      0x0001  /* Only garbage collect unreferenced opened archives until the count is below the configured threshold. */
@@ -1061,12 +1084,6 @@ typedef struct e_file         e_file;
 typedef struct e_file_info    e_file_info;
 typedef struct e_fs_iterator  e_fs_iterator;
 typedef struct e_fs_backend   e_fs_backend;
-
-typedef enum e_mount_priority
-{
-    E_MOUNT_PRIORITY_HIGHEST = 0,
-    E_MOUNT_PRIORITY_LOWEST  = 1
-} e_mount_priority;
 
 typedef struct e_archive_type
 {
@@ -1116,7 +1133,7 @@ typedef struct e_fs_backend
     e_result       (* mkdir           )(e_fs* pFS, const char* pPath);                                           /* This is not recursive. Return E_SUCCESS if directory already exists. */
     e_result       (* info            )(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);        /* openMode flags can be ignored by most backends. It's primarily used by proxy of passthrough style backends. */
     size_t         (* file_alloc_size )(e_fs* pFS);
-    e_result       (* file_open       )(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile); /* Return 0 on success or an errno result code on error. Return ENOENT if the file does not exist. pStream will be null if the backend does not need a stream (the `pFS` object was not initialized with one). */
+    e_result       (* file_open       )(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile); /* Return 0 on success or an errno result code on error. Return E_DOES_NOT_EXIST if the file does not exist. pStream will be null if the backend does not need a stream (the `pFS` object was not initialized with one). */
     e_result       (* file_open_handle)(e_fs* pFS, void* hBackendFile, e_file* pFile);                   /* Optional. Open a file from a file handle. Backend-specific. The format of hBackendFile will be specified by the backend. */
     void           (* file_close      )(e_file* pFile);
     e_result       (* file_read       )(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead);   /* Return 0 on success, or E_AT_END on end of file. Only return E_AT_END if *pBytesRead is 0. Return an errno code on error. Implementations must support reading when already at EOF, in which case E_AT_END should be returned and *pBytesRead should be 0. */
@@ -1134,9 +1151,9 @@ typedef struct e_fs_backend
 E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS);
 E_API void e_fs_uninit(e_fs* pFS);
 E_API e_result e_fs_ioctl(e_fs* pFS, int op, void* pArg);
-E_API e_result e_fs_remove(e_fs* pFS, const char* pFilePath);
-E_API e_result e_fs_rename(e_fs* pFS, const char* pOldName, const char* pNewName);
-E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath);  /* Does not consider mounts. Returns E_SUCCESS if directory already exists. */
+E_API e_result e_fs_remove(e_fs* pFS, const char* pFilePath); /* Does not consider mounts. */
+E_API e_result e_fs_rename(e_fs* pFS, const char* pOldName, const char* pNewName);    /* Does not consider mounts. */
+E_API e_result e_fs_mkdir(e_fs* pFS, const char* pPath, int options);  /* Recursive. Will consider mounts unless E_IGNORE_MOUNTS is specified. Returns E_SUCCESS if directory already exists. */
 E_API e_result e_fs_info(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);  /* openMode flags specify same options as openMode in file_open(), but E_READ, E_WRITE, E_TRUNCATE, E_APPEND, and E_OVERWRITE are ignored. */
 E_API e_stream* e_fs_get_stream(e_fs* pFS);
 E_API const e_allocation_callbacks* e_fs_get_allocation_callbacks(e_fs* pFS);
@@ -1172,13 +1189,12 @@ E_API e_fs_iterator* e_fs_first(e_fs* pFS, const char* pDirectoryPath, int mode)
 E_API e_fs_iterator* e_fs_next(e_fs_iterator* pIterator);
 E_API void e_fs_free_iterator(e_fs_iterator* pIterator);
 
-E_API e_result e_fs_mount(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority);
-E_API e_result e_fs_unmount(e_fs* pFS, const char* pPathToMount_NotMountPoint);
-E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pMountPoint, e_mount_priority priority);
-E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS);   /* Must be matched up with e_fs_mount_fs(). */
-
-E_API e_result e_fs_mount_write(e_fs* pFS, const char* pPathToMount, const char* pMountPoint, e_mount_priority priority);
-E_API e_result e_fs_unmount_write(e_fs* pFS, const char* pPathToMount_NotMountPoint);
+E_API e_result e_fs_mount(e_fs* pFS, const char* pActualPath, const char* pVirtualPath, int options);
+E_API e_result e_fs_unmount(e_fs* pFS, const char* pActualPath, int options);
+E_API e_result e_mount_sysdir(e_fs* pFS, e_sysdir_type type, const char* pSubDir, const char* pVirtualPath, int options);
+E_API e_result e_unmount_sysdir(e_fs* pFS, e_sysdir_type type, const char* pSubDir, int options);
+E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pVirtualPath, int options);
+E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS, int options);   /* Must be matched up with e_fs_mount_fs(). */
 
 /*
 Helper functions for reading the entire contents of a file, starting from the current cursor position. Free
@@ -1243,42 +1259,42 @@ extern const e_fs_backend* E_FS_ZIP;
 /* END e_fs_zip.h */
 
 
-/* BEG e_fs_subfs.h */
+/* BEG e_fs_sub.h */
 /*
 This backend can be used to create a filesystem where the root directory of the new e_fs object is
 a subdirectory of another e_fs object. Trying to access anything outside of this root directory
 will result in an error.
 
 Everything is done in terms of the owner FS object, meaning the owner must be kept alive for the
-life of the subfs object. It also means it will inherit the owner's registered archive types.
+life of the sub object. It also means it will inherit the owner's registered archive types.
 
 The way this works is very simple. Whenever you try to open a file, the path is checked to see if
 it's attempting to access anything outside of the root directory. If it is, an error is returned.
 Otherwise, the root directory is prepended to the path and the operation is passed on to the owner
 FS object.
 
-To use this backend, you need to create a e_subfs_config object and fill in the pOwnerFS and
+To use this backend, you need to create a e_sub_config object and fill in the pOwnerFS and
 pRootDir fields. Then pass this object into `e_fs_init()`:
 
-    e_subfs_config subfsConfig;
-    subfsConfig.pOwnerFS = pOwnerFS;
-    subfsConfig.pRootDir = "subdir";
+    e_sub_config subConfig;
+    subConfig.pOwnerFS = pOwnerFS;
+    subConfig.pRootDir = "subdir";
 
-    e_fs_config fsConfig = e_fs_config_init(E_FS_SUBFS, &subfsConfig, NULL);
+    e_fs_config fsConfig = e_fs_config_init(E_FS_SUB, &subConfig, NULL);
 
     e_fs* pSubFS;
     e_fs_init(&fsConfig, &pSubFS);
 
-You must ensure you destroy your subfs object before destroying the owner FS object.
+You must ensure you destroy your sub object before destroying the owner FS object.
 */
-typedef struct e_subfs_config
+typedef struct e_sub_config
 {
     e_fs* pOwnerFS;
     const char* pRootDir;
-} e_subfs_config;
+} e_sub_config;
 
-extern const e_fs_backend* E_FS_SUBFS;
-/* END e_fs_subfs.h */
+extern const e_fs_backend* E_FS_SUB;
+/* END e_fs_sub.h */
 
 
 /* BEG e_log.h */
