@@ -926,10 +926,9 @@ E_API void* e_memory_stream_take_ownership(e_memory_stream* pStream, size_t* pSi
 /*
 These functions are low-level functions for working with paths. The most important part of this API
 is probably the iteration functions. These functions are used for iterating over each of the
-segments of a path. This library will recognize both '\' and '/'. If you want to use just one or
-the other, or a different separator, you'll need to use a different library. Likewise, this library
-will treat paths as case sensitive. Again, you'll need to use a different library if this is not
-suitable for you.
+segments of a path. This library will recognize both '\' and '/'. If you want to use a different
+separator, you'll need to use a different library. Likewise, this library will treat paths as case
+sensitive. Again, you'll need to use a different library if this is not suitable for you.
 
 Iteration will always return both sides of a separator. For example, if you iterate "abc/def",
 you will get two items: "abc" and "def". Where this is of particular importance and where you must
@@ -1073,6 +1072,8 @@ E_API e_result e_mktmp(const char* pPrefix, char* pTmpPath, size_t tmpPathCap, i
 
 #define E_LOWEST_PRIORITY          0x2000  /* Only used with mounting. When set will create the mount with a lower priority to existing mounts. */
 
+#define E_NO_INCREMENT_REFCOUNT    0x4000  /* Internal use only. Used with e_open_archive_ex() internally. */
+
 /* Garbage collection policies.*/
 #define E_GC_POLICY_THRESHOLD      0x0001  /* Only garbage collect unreferenced opened archives until the count is below the configured threshold. */
 #define E_GC_POLICY_FULL           0x0002  /* Garbage collect every unreferenced opened archive, regardless of how many are open.*/
@@ -1084,6 +1085,13 @@ typedef struct e_file         e_file;
 typedef struct e_file_info    e_file_info;
 typedef struct e_fs_iterator  e_fs_iterator;
 typedef struct e_fs_backend   e_fs_backend;
+
+/*
+This callback is fired when the reference count of a e_fs object changes. This is useful if you want
+to do some kind of advanced memory management, such as garbage collection. If the new reference count
+is 1, it means no other objects are referencing the e_fs object.
+*/
+typedef void (* e_on_refcount_changed_proc)(void* pUserData, e_fs* pFS, e_uint32 newRefCount, e_uint32 oldRefCount);
 
 typedef struct e_archive_type
 {
@@ -1115,6 +1123,8 @@ struct e_fs_config
     e_stream* pStream;
     const e_archive_type* pArchiveTypes;
     size_t archiveTypeCount;
+    e_on_refcount_changed_proc onRefCountChanged;
+    void* pRefCountChangedUserData;
     const e_allocation_callbacks* pAllocationCallbacks;
 };
 
@@ -1131,7 +1141,7 @@ typedef struct e_fs_backend
     e_result       (* remove          )(e_fs* pFS, const char* pFilePath);
     e_result       (* rename          )(e_fs* pFS, const char* pOldName, const char* pNewName);
     e_result       (* mkdir           )(e_fs* pFS, const char* pPath);                                           /* This is not recursive. Return E_SUCCESS if directory already exists. */
-    e_result       (* info            )(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);        /* openMode flags can be ignored by most backends. It's primarily used by proxy of passthrough style backends. */
+    e_result       (* info            )(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo);        /* openMode flags can be ignored by most backends. It's primarily used by passthrough style backends. */
     size_t         (* file_alloc_size )(e_fs* pFS);
     e_result       (* file_open       )(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile); /* Return 0 on success or an errno result code on error. Return E_DOES_NOT_EXIST if the file does not exist. pStream will be null if the backend does not need a stream (the `pFS` object was not initialized with one). */
     e_result       (* file_open_handle)(e_fs* pFS, void* hBackendFile, e_file* pFile);                   /* Optional. Open a file from a file handle. Backend-specific. The format of hBackendFile will be specified by the backend. */
@@ -1159,6 +1169,9 @@ E_API e_stream* e_fs_get_stream(e_fs* pFS);
 E_API const e_allocation_callbacks* e_fs_get_allocation_callbacks(e_fs* pFS);
 E_API void* e_fs_get_backend_data(e_fs* pFS);    /* For use by the backend. Will be the size returned by the alloc_size() function in the vtable. */
 E_API size_t e_fs_get_backend_data_size(e_fs* pFS);
+E_API e_fs* e_ref(e_fs* pFS);     /* Increments the reference count. Returns pFS. */
+E_API e_uint32 e_unref(e_fs* pFS);  /* Decrements the reference count. Does not uninitialize. */
+E_API e_uint32 e_refcount(e_fs* pFS);
 
 E_API e_result e_open_archive_ex(e_fs* pFS, const e_fs_backend* pBackend, void* pBackendConfig, const char* pArchivePath, size_t archivePathLen, int openMode, e_fs** ppArchive);
 E_API e_result e_open_archive(e_fs* pFS, const char* pArchivePath, int openMode, e_fs** ppArchive);

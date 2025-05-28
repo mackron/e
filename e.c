@@ -5835,8 +5835,8 @@ E_API int e_path_directory(char* pDst, size_t dstCap, const char* pPath, size_t 
 
         if (pDst != NULL && dstCap > 0) {
             size_t bytesToCopy = E_MIN(dstCap - 1, dirLen);
-            if (bytesToCopy > 0) {
-                E_COPY_MEMORY(pDst, pPath, bytesToCopy);
+            if (bytesToCopy > 0 && pDst != pPath) {
+                E_MOVE_MEMORY(pDst, pPath, bytesToCopy);
             }
 
             pDst[bytesToCopy] = '\0';
@@ -6783,8 +6783,83 @@ common_exit:
 /* BEG e_fs.c */
 #if defined(_WIN32)
 #include <shlobj.h>
+
+#ifndef CSIDL_LOCAL_APPDATA
+#define CSIDL_LOCAL_APPDATA 0x001C
+#endif
+#ifndef CSIDL_PROFILE
+#define CSIDL_PROFILE       0x0028
+#endif
+
+
+/*
+A helper for retrieving the directory containing the executable. We use this as a fall back for when
+a system folder cannot be used (usually ancient versions of Windows).
+*/
+HRESULT e_get_executable_directory_win32(char* pPath)
+{
+    DWORD result;
+
+    result = GetModuleFileNameA(NULL, pPath, 260);
+    if (result == 260) {
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    e_path_directory(pPath, 260, pPath, result);
+
+    return ERROR_SUCCESS;
+}
+
+/*
+A simple wrapper to get a folder path. Mainly used to hide away some messy compatibility workarounds
+for different versions of Windows.
+
+The `pPath` pointer must be large enough to store at least 260 characters.
+*/
+HRESULT e_get_folder_path_win32(char* pPath, int nFolder)
+{
+    HRESULT hr;
+
+    E_ASSERT(pPath != NULL);
+
+    /*
+    Using SHGetSpecialFolderPath() here for compatibility with Windows 95/98. This has been deprecated
+    and the successor is SHGetFolderPath(), which itself has been deprecated in favour of the Known
+    Folder API.
+
+    If something comes up and SHGetSpecialFolderPath() stops working (unlikely), we could instead try
+    using SHGetFolderPath(), like this:
+
+        SHGetFolderPathA(NULL, nFolder, NULL, SHGFP_TYPE_CURRENT, pPath);
+
+    If that also stops working, we would need to use the Known Folder API which I'm unfamiliar with.
+    */
+
+    hr = SHGetSpecialFolderPathA(NULL, pPath, nFolder, 0);
+    if (FAILED(hr)) {
+        /*
+        If this fails it could be because we're calling this from an old version of Windows. We'll
+        check for known folder types and do a fall back.
+        */
+        if (nFolder == CSIDL_LOCAL_APPDATA) {
+            hr = SHGetSpecialFolderPathA(NULL, pPath, CSIDL_APPDATA, 0);
+            if (FAILED(hr)) {
+                hr = e_get_executable_directory_win32(pPath);
+            }
+        } else if (nFolder == CSIDL_PROFILE) {
+            /*
+            Old versions of Windows don't really have the notion of a user folder. In this case
+            we'll just use the executable directory.
+            */
+            hr = e_get_executable_directory_win32(pPath);
+        }
+    }
+
+    return hr;
+}
 #else
 #include <pwd.h>
+#include <unistd.h> /* For getuid() */
 
 static const char* e_sysdir_home(void)
 {
@@ -6840,7 +6915,7 @@ E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
         {
             case E_SYSDIR_HOME:
             {
-                hr = SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, pPath);
+                hr = e_get_folder_path_win32(pPath, CSIDL_PROFILE);
                 if (SUCCEEDED(hr)) {
                     fullLength = strlen(pPath);
                     if (pDst != NULL && fullLength < dstCap) {
@@ -6865,7 +6940,7 @@ E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
 
             case E_SYSDIR_CONFIG:
             {
-                hr = SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                hr = e_get_folder_path_win32(pPath, CSIDL_APPDATA);
                 if (SUCCEEDED(hr)) {
                     fullLength = strlen(pPath);
                     if (pDst != NULL && fullLength < dstCap) {
@@ -6877,7 +6952,7 @@ E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
 
             case E_SYSDIR_DATA:
             {
-                hr = SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                hr = e_get_folder_path_win32(pPath, CSIDL_LOCAL_APPDATA);
                 if (SUCCEEDED(hr)) {
                     fullLength = strlen(pPath);
                     if (pDst != NULL && fullLength < dstCap) {
@@ -6890,7 +6965,7 @@ E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
             case E_SYSDIR_CACHE:
             {
                 /* There's no proper known folder for caches. We'll just use %LOCALAPPDATA%\Cache. */
-                hr = SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, pPath);
+                hr = e_get_folder_path_win32(pPath, CSIDL_LOCAL_APPDATA);
                 if (SUCCEEDED(hr)) {
                     const char* pCacheSuffix = "\\Cache";
                     size_t localAppDataLen = strlen(pPath);
@@ -7014,11 +7089,6 @@ E_API size_t e_sysdir(e_sysdir_type type, char* pDst, size_t dstCap)
     return fullLength;
 }
 
-
-#if defined(_WIN32)
-#else
-#include <unistd.h>     /* For close() */
-#endif
 
 E_API e_result e_mktmp(const char* pPrefix, char* pTmpPath, size_t tmpPathCap, int options)
 {
@@ -7441,268 +7511,6 @@ static void e_fs_backend_free_iterator(const e_fs_backend* pBackend, e_fs_iterat
 
 
 /*
-This is a special backend that we use for archives so we can intercept opening and closing of files within those archives
-and do any necessary reference counting.
-*/
-
-/* Forward declarations. */
-static size_t e_increment_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive);
-static size_t e_decrement_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive);
-
-typedef struct e_fs_proxy
-{
-    const e_fs_backend* pBackend;
-    e_file* pArchiveFile;
-} e_fs_proxy;
-
-typedef struct e_fs_proxy_config
-{
-    const e_fs_backend* pBackend;
-    const void* pBackendConfig;
-} e_fs_proxy_config;
-
-typedef struct e_file_proxy
-{
-    e_bool32 unrefArchiveOnClose;
-} e_file_proxy;
-
-static e_fs_proxy* e_fs_proxy_get_backend_data(e_fs* pFS)
-{
-    return (e_fs_proxy*)E_OFFSET_PTR(e_fs_get_backend_data(pFS), e_fs_get_backend_data_size(pFS) - sizeof(e_fs_proxy));
-}
-
-static const e_fs_backend* e_fs_proxy_get_backend(e_fs* pFS)
-{
-    return e_fs_proxy_get_backend_data(pFS)->pBackend;
-}
-
-static e_file* e_fs_proxy_get_archive_file(e_fs* pFS)
-{
-    e_fs_proxy* pProxy;
-
-    pProxy = e_fs_proxy_get_backend_data(pFS);
-    E_ASSERT(pProxy != NULL);
-
-    return pProxy->pArchiveFile;
-}
-
-static e_fs* e_fs_proxy_get_owner_fs(e_fs* pFS)
-{
-    return e_file_get_fs(e_fs_proxy_get_archive_file(pFS));
-}
-
-
-static e_file_proxy* e_file_proxy_get_backend_data(e_file* pFile)
-{
-    return (e_file_proxy*)E_OFFSET_PTR(e_file_get_backend_data(pFile), e_file_get_backend_data_size(pFile) - sizeof(e_file_proxy));
-}
-
-static e_bool32 e_file_proxy_get_unref_archive_on_close(e_file* pFile)
-{
-    e_file_proxy* pFileProxy = e_file_proxy_get_backend_data(pFile);
-    E_ASSERT(pFileProxy != NULL);
-
-    return pFileProxy->unrefArchiveOnClose;
-}
-
-static void e_file_proxy_set_unref_archive_on_close(e_file* pFile, e_bool32 unrefArchiveOnClose)
-{
-    e_file_proxy* pFileProxy = e_file_proxy_get_backend_data(pFile);
-    E_ASSERT(pFileProxy != NULL);
-
-    pFileProxy->unrefArchiveOnClose = unrefArchiveOnClose;
-}
-
-
-static size_t e_alloc_size_proxy(const void* pBackendConfig)
-{
-    const e_fs_proxy_config* pProxyConfig = (const e_fs_proxy_config*)pBackendConfig;
-    E_ASSERT(pProxyConfig != NULL);    /* <-- We must have a config since that's where the backend is specified. */
-
-    return e_fs_backend_alloc_size(pProxyConfig->pBackend, pProxyConfig->pBackendConfig) + sizeof(e_fs_proxy);
-}
-
-static e_result e_init_proxy(e_fs* pFS, const void* pBackendConfig, e_stream* pStream)
-{
-    const e_fs_proxy_config* pProxyConfig = (const e_fs_proxy_config*)pBackendConfig;
-    e_fs_proxy* pProxy;
-
-    E_ASSERT(pProxyConfig != NULL);    /* <-- We must have a config since that's where the backend is specified. */
-    E_ASSERT(pStream      != NULL);    /* <-- This backend is only used with archives which means we must have a stream. */
-
-    pProxy = e_fs_proxy_get_backend_data(pFS);
-    E_ASSERT(pProxy != NULL);
-
-    pProxy->pBackend     = pProxyConfig->pBackend;
-    pProxy->pArchiveFile = (e_file*)pStream; /* The stream will always be a e_file when using this backend. */
-
-    return e_fs_backend_init(pProxyConfig->pBackend, pFS, pProxyConfig->pBackendConfig, pStream);
-}
-
-static void e_uninit_proxy(e_fs* pFS)
-{
-    e_fs_backend_uninit(e_fs_proxy_get_backend(pFS), pFS);
-}
-
-static e_result e_ioctl_proxy(e_fs* pFS, int command, void* pArgs)
-{
-    return e_fs_backend_ioctl(e_fs_proxy_get_backend(pFS), pFS, command, pArgs);
-}
-
-static e_result e_remove_proxy(e_fs* pFS, const char* pFilePath)
-{
-    return e_fs_backend_remove(e_fs_proxy_get_backend(pFS), pFS, pFilePath);
-}
-
-static e_result e_rename_proxy(e_fs* pFS, const char* pOldName, const char* pNewName)
-{
-    return e_fs_backend_rename(e_fs_proxy_get_backend(pFS), pFS, pOldName, pNewName);
-}
-
-static e_result e_mkdir_proxy(e_fs* pFS, const char* pPath)
-{
-    return e_fs_backend_mkdir(e_fs_proxy_get_backend(pFS), pFS, pPath);
-}
-
-static e_result e_info_proxy(e_fs* pFS, const char* pPath, int openMode, e_file_info* pInfo)
-{
-    return e_fs_backend_info(e_fs_proxy_get_backend(pFS), pFS, pPath, openMode, pInfo);
-}
-
-static size_t e_file_alloc_size_proxy(e_fs* pFS)
-{
-    return e_fs_backend_file_alloc_size(e_fs_proxy_get_backend(pFS), pFS) + sizeof(e_file_proxy);
-}
-
-static e_result e_file_open_proxy(e_fs* pFS, e_stream* pStream, const char* pFilePath, int openMode, e_file* pFile)
-{
-    return e_fs_backend_file_open(e_fs_proxy_get_backend(pFS), pFS, pStream, pFilePath, openMode, pFile);
-}
-
-static e_result e_file_open_handle_proxy(e_fs* pFS, void* hBackendFile, e_file* pFile)
-{
-    return e_fs_backend_file_open_handle(e_fs_proxy_get_backend(pFS), pFS, hBackendFile, pFile);
-}
-
-static void e_file_close_proxy(e_file* pFile)
-{
-    e_fs_backend_file_close(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile);
-
-    /*
-    This right here is the entire reason the backend needs to be proxied. We need to intercept
-    calls to e_file_close() so we can then tell the FS that owns the archive to decrement the
-    reference count and potentially put the archive FS up for garbage collection.
-
-    You'll note that we don't have a corresponding call to e_open_archive() in the function
-    e_file_open_proxy() above. The reason is that e_open_archive() is called at a higher
-    level when the archive FS is being acquired in the first place.
-    */
-    if (e_file_proxy_get_unref_archive_on_close(pFile)) {
-        e_close_archive(e_file_get_fs(pFile));
-    }
-}
-
-static e_result e_file_read_proxy(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
-{
-    return e_fs_backend_file_read(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pDst, bytesToRead, pBytesRead);
-}
-
-static e_result e_file_write_proxy(e_file* pFile, const void* pSrc, size_t bytesToWrite, size_t* pBytesWritten)
-{
-    return e_fs_backend_file_write(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pSrc, bytesToWrite, pBytesWritten);
-}
-
-static e_result e_file_seek_proxy(e_file* pFile, e_int64 offset, e_seek_origin origin)
-{
-    return e_fs_backend_file_seek(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, offset, origin);
-}
-
-static e_result e_file_tell_proxy(e_file* pFile, e_int64* pCursor)
-{
-    return e_fs_backend_file_tell(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pCursor);
-}
-
-static e_result e_file_flush_proxy(e_file* pFile)
-{
-    return e_fs_backend_file_flush(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile);
-}
-
-static e_result e_file_info_proxy(e_file* pFile, e_file_info* pInfo)
-{
-    return e_fs_backend_file_info(e_fs_proxy_get_backend(e_file_get_fs(pFile)), pFile, pInfo);
-}
-
-static e_result e_file_duplicate_proxy(e_file* pFile, e_file* pDuplicatedFile)
-{
-    e_result result;
-    e_fs* pFS;
-
-    pFS = e_file_get_fs(pFile);
-    
-    result = e_fs_backend_file_duplicate(e_fs_proxy_get_backend(pFS), pFile, pDuplicatedFile);
-    if (result != E_SUCCESS) {
-        return result;
-    }
-
-    /* Increment the reference count of the opened archive if necessary. */
-    if (e_file_proxy_get_unref_archive_on_close(pFile)) {
-        e_fs* pOwnerFS;
-
-        e_file_proxy_set_unref_archive_on_close(pDuplicatedFile, E_TRUE);
-
-        pOwnerFS = e_fs_proxy_get_owner_fs(pFS);
-        if (pOwnerFS != NULL) {
-            e_increment_opened_archive_ref_count(pOwnerFS, pFS);
-        }
-    }
-
-    return E_SUCCESS;
-}
-
-static e_fs_iterator* e_first_proxy(e_fs* pFS, const char* pDirectoryPath, size_t directoryPathLen)
-{
-    return e_fs_backend_first(e_fs_proxy_get_backend(pFS), pFS, pDirectoryPath, directoryPathLen);
-}
-
-static e_fs_iterator* e_next_proxy(e_fs_iterator* pIterator)
-{
-    return e_fs_backend_next(e_fs_proxy_get_backend(pIterator->pFS), pIterator);
-}
-
-static void e_free_iterator_proxy(e_fs_iterator* pIterator)
-{
-    e_fs_backend_free_iterator(e_fs_proxy_get_backend(pIterator->pFS), pIterator);
-}
-
-static e_fs_backend e_fs_proxy_backend =
-{
-    e_alloc_size_proxy,
-    e_init_proxy,
-    e_uninit_proxy,
-    e_ioctl_proxy,
-    e_remove_proxy,
-    e_rename_proxy,
-    e_mkdir_proxy,
-    e_info_proxy,
-    e_file_alloc_size_proxy,
-    e_file_open_proxy,
-    e_file_open_handle_proxy,
-    e_file_close_proxy,
-    e_file_read_proxy,
-    e_file_write_proxy,
-    e_file_seek_proxy,
-    e_file_tell_proxy,
-    e_file_flush_proxy,
-    e_file_info_proxy,
-    e_file_duplicate_proxy,
-    e_first_proxy,
-    e_next_proxy,
-    e_free_iterator_proxy
-};
-const e_fs_backend* E_PROXY = &e_fs_proxy_backend;
-
-
-/*
 This is the maximum number of ureferenced opened archive files that will be kept in memory
 before garbage collection of those archives is triggered.
 */
@@ -7736,7 +7544,6 @@ E_API e_fs_config e_fs_config_init(const e_fs_backend* pBackend, void* pBackendC
 typedef struct e_opened_archive
 {
     e_fs* pArchive;
-    size_t refCount;
     char pPath[1];
 } e_opened_archive;
 
@@ -7762,6 +7569,8 @@ struct e_fs
     size_t archiveTypesAllocSize;
     e_bool32 isOwnerOfArchiveTypes;
     size_t backendDataSize;
+    e_on_refcount_changed_proc onRefCountChanged;
+    void* pRefCountChangedUserData;
     e_mutex archiveLock;     /* For use with e_open_archive() and e_close_archive(). */
     void* pOpenedArchives;  /* One heap allocation. Structure is [e_fs*][refcount (size_t)][path][null-terminator][padding (aligned to E_SIZEOF_PTR)] */
     size_t openedArchivesSize;
@@ -7769,6 +7578,8 @@ struct e_fs
     size_t archiveGCThreshold;
     e_mount_list* pReadMountPoints;
     e_mount_list* pWriteMountPoints;
+    e_mutex refLock;
+    e_uint32 refCount;        /* Incremented when a file is opened, decremented when a file is closed. */
 };
 
 typedef struct e_file
@@ -8071,6 +7882,7 @@ static e_opened_archive* e_find_opened_archive(e_fs* pFS, const char* pArchivePa
     return NULL;
 }
 
+#if 0
 static e_opened_archive* e_find_opened_archive_by_fs(e_fs* pFS, e_fs* pArchive)
 {
     size_t cursor;
@@ -8096,6 +7908,7 @@ static e_opened_archive* e_find_opened_archive_by_fs(e_fs* pFS, e_fs* pArchive)
     /* If we get here it means we couldn't find the archive. */
     return NULL;
 }
+#endif
 
 static e_result e_add_opened_archive(e_fs* pFS, e_fs* pArchive, const char* pArchivePath, size_t archivePathLen)
 {
@@ -8135,7 +7948,6 @@ static e_result e_add_opened_archive(e_fs* pFS, e_fs* pArchive, const char* pArc
 
     pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, pFS->openedArchivesSize);
     pOpenedArchive->pArchive = pArchive;
-    pOpenedArchive->refCount = 0;
     e_strncpy(pOpenedArchive->pPath, pArchivePath, archivePathLen);
 
     pFS->openedArchivesSize += openedArchiveSize;
@@ -8157,41 +7969,6 @@ static e_result e_remove_opened_archive(e_fs* pFS, e_opened_archive* pOpenedArch
     pFS->openedArchivesSize -= openedArchiveSize;
 
     return E_SUCCESS;
-}
-
-static size_t e_increment_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive)
-{
-    e_opened_archive* pOpenedArchive = e_find_opened_archive_by_fs(pFS, pArchive);
-    if (pOpenedArchive != NULL) {
-        pOpenedArchive->refCount += 1;
-
-        /* If the owner FS is also an archive, increment it's reference counter as well. */
-        if (pFS->pBackend == E_PROXY) {
-            e_increment_opened_archive_ref_count(e_fs_proxy_get_owner_fs(pFS), pFS);
-        }
-
-        return pOpenedArchive->refCount;
-    }
-
-    return 0;
-}
-
-static size_t e_decrement_opened_archive_ref_count(e_fs* pFS, e_fs* pArchive)
-{
-    e_opened_archive* pOpenedArchive = e_find_opened_archive_by_fs(pFS, pArchive);
-    if (pOpenedArchive != NULL) {
-        E_ASSERT(pOpenedArchive->refCount > 0);    /* <-- If this fails it means there's a bug in the library. Please report. */
-        pOpenedArchive->refCount -= 1;
-
-        /* If the owner FS is also an archive, decrement it's reference counter as well. */
-        if (pFS->pBackend == E_PROXY) {
-            e_decrement_opened_archive_ref_count(e_fs_proxy_get_owner_fs(pFS), pFS);
-        }
-
-        return pOpenedArchive->refCount;
-    }
-
-    return 0;
 }
 
 
@@ -8256,6 +8033,7 @@ E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
     e_int64 initialStreamCursor = -1;
     size_t archiveTypesAllocSize = 0;
     size_t iArchiveType;
+    e_result result;
 
     if (ppFS == NULL) {
         return E_INVALID_ARGS;
@@ -8278,11 +8056,7 @@ E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
         return E_INVALID_ARGS;
     }
 
-    if (pBackend->alloc_size != NULL) {
-        backendDataSizeInBytes = pBackend->alloc_size(pConfig->pBackendConfig);
-    } else {
-        backendDataSizeInBytes = 0;
-    }
+    backendDataSizeInBytes = e_fs_backend_alloc_size(pBackend, pConfig->pBackendConfig);
 
     /* We need to allocate space for the archive types which we place just after the "e_fs" struct. After that will be the backend data. */
     for (iArchiveType = 0; iArchiveType < pConfig->archiveTypeCount; iArchiveType += 1) {
@@ -8296,8 +8070,11 @@ E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
 
     pFS->pBackend              = pBackend;
     pFS->pStream               = pConfig->pStream; /* <-- This is allowed to be null, which will be the case for standard OS file system APIs like stdio. Streams are used for things like archives like Zip files, or in-memory file systems. */
+    pFS->refCount              = 1;
     pFS->allocationCallbacks   = e_allocation_callbacks_init_copy(pConfig->pAllocationCallbacks);
     pFS->backendDataSize       = backendDataSizeInBytes;
+    pFS->onRefCountChanged     = pConfig->onRefCountChanged;
+    pFS->pRefCountChangedUserData = pConfig->pRefCountChangedUserData;
     pFS->isOwnerOfArchiveTypes = E_TRUE;
     pFS->archiveGCThreshold    = E_DEFAULT_ARCHIVE_GC_THRESHOLD;
     pFS->archiveTypesAllocSize = archiveTypesAllocSize;
@@ -8338,9 +8115,15 @@ E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
     */
     e_mutex_init(&pFS->archiveLock, E_MUTEX_TYPE_RECURSIVE);
 
+    /*
+    We need a mutex for the reference counting. This is needed because we may have multiple threads
+    opening and closing files at the same time.
+    */
+    e_mutex_init(&pFS->refLock, E_MUTEX_TYPE_RECURSIVE);
+
     /* We're now ready to initialize the backend. */
-    if (pBackend->init != NULL) {
-        e_result result = pBackend->init(pFS, pConfig->pBackendConfig, pConfig->pStream);
+    result = e_fs_backend_init(pBackend, pFS, pConfig->pBackendConfig, pConfig->pStream);
+    if (result != E_NOT_IMPLEMENTED) {
         if (result != E_SUCCESS) {
             /*
             If we have a stream and the backend failed to initialize, it's possible that the cursor of the stream
@@ -8356,6 +8139,7 @@ E_API e_result e_fs_init(const e_fs_config* pConfig, e_fs** ppFS)
         }
     } else {
         /* Getting here means the backend does not implement an init() function. This is not mandatory so we just assume successful.*/
+        result = E_SUCCESS;
     }
 
     *ppFS = pFS;
@@ -8377,19 +8161,20 @@ E_API void e_fs_uninit(e_fs* pFS)
     */
     e_fs_gc_archives(pFS, E_GC_POLICY_FULL);
 
-    /* The caller has a bug if there are still outstanding archives. */
+    /*
+    A correct program should explicitly close their files. The reference count should be 1 when
+    calling this function if the program is correct.
+    */
     #if !defined(E_ENABLE_OPENED_FILES_ASSERT)
     {
-        if (pFS->openedArchivesSize > 0) {
+        if (e_refcount(pFS) > 1) {
             E_ASSERT(!"You have outstanding opened files. You must close all files before uninitializing the e_fs object.");    /* <-- If you hit this assert but you're absolutely sure you've closed all your files, please submit a bug report with a reproducible test case. */
         }
     }
     #endif
 
 
-    if (pFS->pBackend->uninit != NULL) {
-        pFS->pBackend->uninit(pFS);
-    }
+    e_fs_backend_uninit(pFS->pBackend, pFS);
 
     e_free(pFS->pReadMountPoints, &pFS->allocationCallbacks);
     pFS->pReadMountPoints = NULL;
@@ -8400,6 +8185,7 @@ E_API void e_fs_uninit(e_fs* pFS)
     e_free(pFS->pOpenedArchives, &pFS->allocationCallbacks);
     pFS->pOpenedArchives = NULL;
 
+    e_mutex_destroy(&pFS->refLock);
     e_mutex_destroy(&pFS->archiveLock);
 
     e_free(pFS, &pFS->allocationCallbacks);
@@ -8614,6 +8400,103 @@ E_API size_t e_fs_get_backend_data_size(e_fs* pFS)
 }
 
 
+static void e_on_refcount_changed(e_fs* pFS, e_uint32 newRefCount, e_uint32 oldRefCount)
+{
+    if (pFS->onRefCountChanged != NULL) {
+        pFS->onRefCountChanged(pFS->pRefCountChangedUserData, pFS, newRefCount, oldRefCount);
+    }
+}
+
+E_API e_fs* e_ref(e_fs* pFS)
+{
+    e_uint32 newRefCount;
+    e_uint32 oldRefCount;
+
+    if (pFS == NULL) {
+        return NULL;
+    }
+
+    e_mutex_lock(&pFS->refLock);
+    {
+        oldRefCount = pFS->refCount;
+        newRefCount = pFS->refCount + 1;
+
+        pFS->refCount = newRefCount;
+
+        e_on_refcount_changed(pFS, newRefCount, oldRefCount);
+    }
+    e_mutex_unlock(&pFS->refLock);
+
+    return pFS;
+}
+
+E_API e_uint32 e_unref(e_fs* pFS)
+{
+    e_uint32 newRefCount;
+    e_uint32 oldRefCount;
+
+    if (pFS == NULL) {
+        return 0;
+    }
+
+    if (pFS->refCount == 1) {
+        #if !defined(E_ENABLE_OPENED_FILES_ASSERT)
+        {
+            E_ASSERT(!"ref/funref mismatch. Ensure all e_ref() calls are matched with e_unref() calls.");
+        }
+        #endif
+        return pFS->refCount;
+    }
+
+    e_mutex_lock(&pFS->refLock);
+    {
+        oldRefCount = pFS->refCount;
+        newRefCount = pFS->refCount - 1;
+
+        pFS->refCount = newRefCount;
+
+        e_on_refcount_changed(pFS, newRefCount, oldRefCount);
+    }
+    e_mutex_unlock(&pFS->refLock);
+
+    return newRefCount;
+}
+
+E_API e_uint32 e_refcount(e_fs* pFS)
+{
+    e_uint32 refCount;
+
+    if (pFS == NULL) {
+        return 0;
+    }
+
+    e_mutex_lock(&pFS->refLock);
+    {
+        refCount = pFS->refCount;
+    }
+    e_mutex_unlock(&pFS->refLock);
+
+    return refCount;
+}
+
+
+static void e_on_refcount_changed_internal(void* pUserData, e_fs* pFS, e_uint32 newRefCount, e_uint32 oldRefCount)
+{
+    e_fs* pOwnerFS;
+
+    (void)pUserData;
+    (void)pFS;
+    (void)newRefCount;
+    (void)oldRefCount;
+
+    pOwnerFS = (e_fs*)pUserData;
+    E_ASSERT(pOwnerFS != NULL);
+
+    if (newRefCount == 1) {
+        /* In this case there are no more files referencing this archive. We'll want to do some garbage collection. */
+        e_fs_gc_archives(pOwnerFS, E_GC_POLICY_THRESHOLD);
+    }
+}
 
 static e_result e_open_archive_nolock(e_fs* pFS, const e_fs_backend* pBackend, void* pBackendConfig, const char* pArchivePath, size_t archivePathLen, int openMode, e_fs** ppArchive)
 {
@@ -8624,7 +8507,6 @@ static e_result e_open_archive_nolock(e_fs* pFS, const e_fs_backend* pBackend, v
     char pArchivePathNTStack[1024];
     char* pArchivePathNTHeap = NULL;    /* <-- Must be initialized to null. */
     char* pArchivePathNT;
-    e_fs_proxy_config proxyConfig;
     e_opened_archive* pOpenedArchive;
 
     /*
@@ -8633,80 +8515,72 @@ static e_result e_open_archive_nolock(e_fs* pFS, const e_fs_backend* pBackend, v
     */
     pOpenedArchive = e_find_opened_archive(pFS, pArchivePath, archivePathLen);
     if (pOpenedArchive != NULL) {
-        if (pOpenedArchive->refCount == 0) {
-            pOpenedArchive->refCount += 1;
-        } else {
-            e_increment_opened_archive_ref_count(pFS, pOpenedArchive->pArchive);
-        }
-
-        *ppArchive = pOpenedArchive->pArchive;
-        return E_SUCCESS;
-    }
-
-    /*
-    Getting here means the archive is not cached. We'll need to open it. Unfortunately our path is
-    not null terminated so we'll need to do that now. We'll try to avoid a heap allocation if we
-    can.
-    */
-    if (archivePathLen == E_NULL_TERMINATED) {
-        pArchivePathNT = (char*)pArchivePath;   /* <-- Safe cast. We won't be modifying this. */
+        pArchive = pOpenedArchive->pArchive;
     } else {
-        if (archivePathLen >= sizeof(pArchivePathNTStack)) {
-            pArchivePathNTHeap = (char*)e_malloc(archivePathLen + 1, e_fs_get_allocation_callbacks(pFS));
-            if (pArchivePathNTHeap == NULL) {
-                return E_OUT_OF_MEMORY;
+        /*
+        Getting here means the archive is not cached. We'll need to open it. Unfortunately our path is
+        not null terminated so we'll need to do that now. We'll try to avoid a heap allocation if we
+        can.
+        */
+        if (archivePathLen == E_NULL_TERMINATED) {
+            pArchivePathNT = (char*)pArchivePath;   /* <-- Safe cast. We won't be modifying this. */
+        } else {
+            if (archivePathLen >= sizeof(pArchivePathNTStack)) {
+                pArchivePathNTHeap = (char*)e_malloc(archivePathLen + 1, e_fs_get_allocation_callbacks(pFS));
+                if (pArchivePathNTHeap == NULL) {
+                    return E_OUT_OF_MEMORY;
+                }
+
+                pArchivePathNT = pArchivePathNTHeap;
+            } else {
+                pArchivePathNT = pArchivePathNTStack;
             }
 
-            pArchivePathNT = pArchivePathNTHeap;
-        } else {
-            pArchivePathNT = pArchivePathNTStack;
+            E_COPY_MEMORY(pArchivePathNT, pArchivePath, archivePathLen);
+            pArchivePathNT[archivePathLen] = '\0';
         }
 
-        E_COPY_MEMORY(pArchivePathNT, pArchivePath, archivePathLen);
-        pArchivePathNT[archivePathLen] = '\0';
-    }
+        result = e_file_open(pFS, pArchivePathNT, openMode, &pArchiveFile);
+        if (result != E_SUCCESS) {
+            e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
+            return result;
+        }
 
-    result = e_file_open(pFS, pArchivePathNT, openMode, &pArchiveFile);
-    if (result != E_SUCCESS) {
+        archiveConfig = e_fs_config_init(pBackend, pBackendConfig, e_file_get_stream(pArchiveFile));
+        archiveConfig.pAllocationCallbacks = e_fs_get_allocation_callbacks(pFS);
+        archiveConfig.onRefCountChanged = e_on_refcount_changed_internal;
+        archiveConfig.pRefCountChangedUserData = pFS;   /* The user data is always the e_fs object that owns this archive. */
+
+        result = e_fs_init(&archiveConfig, &pArchive);
         e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
-        return result;
+
+        if (result != E_SUCCESS) { /* <-- This is the result of e_fs_init().*/
+            e_file_close(pArchiveFile);
+            return result;
+        }
+
+        /*
+        We need to support the ability to open archives within archives. To do this, the archive e_fs
+        object needs to inherit the registered archive types. Fortunately this is easy because we do
+        this as one single allocation which means we can just reference it directly. The API has a
+        restriction that archive type registration cannot be modified after a file has been opened.
+        */
+        pArchive->pArchiveTypes         = pFS->pArchiveTypes;
+        pArchive->archiveTypesAllocSize = pFS->archiveTypesAllocSize;
+        pArchive->isOwnerOfArchiveTypes = E_FALSE;
+
+        /* Add the new archive to the cache. */
+        result = e_add_opened_archive(pFS, pArchive, pArchivePath, archivePathLen);
+        if (result != E_SUCCESS) {
+            e_fs_uninit(pArchive);
+            e_file_close(pArchiveFile);
+            return result;
+        }
     }
 
-    proxyConfig.pBackend = pBackend;
-    proxyConfig.pBackendConfig = pBackendConfig;
+    E_ASSERT(pArchive != NULL);
 
-    archiveConfig = e_fs_config_init(E_PROXY, &proxyConfig, e_file_get_stream(pArchiveFile));
-    archiveConfig.pAllocationCallbacks = e_fs_get_allocation_callbacks(pFS);
-
-    result = e_fs_init(&archiveConfig, &pArchive);
-    e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
-
-    if (result != E_SUCCESS) { /* <-- This is the result of e_fs_init().*/
-        e_file_close(pArchiveFile);
-        return result;
-    }
-
-    /*
-    We need to support the ability to open archives within archives. To do this, the archive e_fs
-    object needs to inherit the registered archive types. Fortunately this is easy because we do
-    this as one single allocation which means we can just reference it directly. The API has a
-    restriction that archive type registration cannot be modified after a file has been opened.
-    */
-    pArchive->pArchiveTypes         = pFS->pArchiveTypes;
-    pArchive->archiveTypesAllocSize = pFS->archiveTypesAllocSize;
-    pArchive->isOwnerOfArchiveTypes = E_FALSE;
-
-    /* Add the new archive to the cache. */
-    result = e_add_opened_archive(pFS, pArchive, pArchivePath, archivePathLen);
-    if (result != E_SUCCESS) {
-        e_fs_uninit(pArchive);
-        e_file_close(pArchiveFile);
-        return result;
-    }
-
-    e_increment_opened_archive_ref_count(pFS, pArchive);
-
-    *ppArchive = pArchive;
+    *ppArchive = ((openMode & E_NO_INCREMENT_REFCOUNT) == 0) ? e_ref(pArchive) : pArchive;
     return E_SUCCESS;
 }
 
@@ -8778,33 +8652,30 @@ E_API e_result e_open_archive(e_fs* pFS, const char* pArchivePath, int openMode,
 
 E_API void e_close_archive(e_fs* pArchive)
 {
-    e_fs* pOwnerFS;
+    e_uint32 newRefCount;
 
-    /* This function should only ever be called for archives that were opened with e_open_archive(). */
-    E_ASSERT(pArchive->pBackend == E_PROXY);
-
-    pOwnerFS = e_fs_proxy_get_owner_fs(pArchive);
-    E_ASSERT(pOwnerFS != NULL);
-
-    e_mutex_lock(&pOwnerFS->archiveLock);
-    {
-        e_decrement_opened_archive_ref_count(pOwnerFS, pArchive);
+    if (pArchive == NULL) {
+        return;
     }
-    e_mutex_unlock(&pOwnerFS->archiveLock);
+
+    /* In e_open_archive() we incremented the reference count. Now we need to decrement it. */
+    newRefCount = e_unref(pArchive);
 
     /*
-    Now we need to do a bit of garbage collection of opened archives. When files are opened sequentially
-    from a single archive, it's more efficient to keep the archive open for a bit rather than constantly
-    loading and unloading the archive for every single file. Zip, for example, can be inefficient because
-    it requires re-reading and processing the central directory every time you open the archive. The
-    issue is that we probably don't want to have too many archives open at a time since it's a bit
-    wasteful on memory.
-
-    What we're going to do is use a threshold of how many archives we want to keep open at any given
-    time. If we're over this threshold, we'll unload any archives that are no longer in use until we
-    get below the threshold.
+    If the reference count of the archive is 1 it means we don't currently have any files opened. We should
+    look at garbage collecting.
     */
-    e_fs_gc_archives(pOwnerFS, E_GC_POLICY_THRESHOLD);
+    if (newRefCount == 1) {
+        /*
+        This is a bit hacky and should probably change. When we initialized the archive in e_open_archive() we set the user
+        data of the onRefCountChanged callback to be the e_fs object that owns this archive. We'll just use that to fire the
+        garbage collection process.
+        */
+        e_fs* pArchiveOwnerFS = (e_fs*)pArchive->pRefCountChangedUserData;
+        E_ASSERT(pArchiveOwnerFS != NULL);
+
+        e_fs_gc_archives(pArchiveOwnerFS, E_GC_POLICY_THRESHOLD);
+    }
 }
 
 static void e_gc_archives_nolock(e_fs* pFS, int policy)
@@ -8836,7 +8707,7 @@ static void e_gc_archives_nolock(e_fs* pFS, int policy)
     while (cursor < pFS->openedArchivesSize) {
         e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
 
-        if (pOpenedArchive->refCount == 0) {
+        if (e_refcount(pOpenedArchive->pArchive) == 1) {
             unreferencedCount += 1;
         }
 
@@ -8861,10 +8732,12 @@ static void e_gc_archives_nolock(e_fs* pFS, int policy)
     cursor = 0;
     while (collectionCount > 0 && cursor < pFS->openedArchivesSize) {
         e_opened_archive* pOpenedArchive = (e_opened_archive*)E_OFFSET_PTR(pFS->pOpenedArchives, cursor);
-        if (pOpenedArchive->refCount == 0) {
+
+        if (e_refcount(pOpenedArchive->pArchive) == 1) {
             e_file* pArchiveFile;
 
-            pArchiveFile = e_fs_proxy_get_archive_file(pOpenedArchive->pArchive);
+            /* For our cached archives, the stream should always be a file. */
+            pArchiveFile = (e_file*)pOpenedArchive->pArchive->pStream;
             E_ASSERT(pArchiveFile != NULL);
 
             e_fs_uninit(pOpenedArchive->pArchive);
@@ -9072,7 +8945,7 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
                 } else {
                     e_fs* pArchive;
 
-                    result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, iFilePathSeg.pFullPath, iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength, E_OPAQUE | openMode, &pArchive);
+                    result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, iFilePathSeg.pFullPath, iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength, E_NO_INCREMENT_REFCOUNT | E_OPAQUE | openMode, &pArchive);
                     if (result != E_SUCCESS) {
                         /*
                         We failed to open the archive. If it's due to the archive not existing we just continue searching. Otherwise
@@ -9087,16 +8960,13 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
 
                     result = e_file_open_or_info(pArchive, iFilePathSeg.pFullPath + iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1, openMode, ppFile, pInfo);
                     if (result != E_SUCCESS) {
-                        e_close_archive(pArchive);
+                        if (e_refcount(pArchive) == 1) { e_fs_gc_archives(pFS, E_GC_POLICY_THRESHOLD); }
                         return result;
                     }
 
-                    if (ppFile != NULL) {
-                        /* The archive must be unreferenced when closing the file. */
-                        e_file_proxy_set_unref_archive_on_close(*ppFile, E_TRUE);
-                    } else {
-                        /* We were only grabbing file info. We can close the archive straight away. */
-                        e_close_archive(pArchive);
+                    if (ppFile == NULL) {
+                        /* We were only grabbing file info. We can garbage collect the archive straight away if necessary. */
+                        if (e_refcount(pArchive) == 1) { e_fs_gc_archives(pFS, E_GC_POLICY_THRESHOLD); }
                     }
 
                     return E_SUCCESS;
@@ -9160,7 +9030,7 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
                         pArchivePathNT[archivePathLen] = '\0';
 
                         /* At this point we've constructed the archive name and we can now open it. */
-                        result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, pArchivePathNT, E_NULL_TERMINATED, E_OPAQUE | openMode, &pArchive);
+                        result = e_open_archive_ex(pFS, iBackend.pBackend, iBackend.pBackendConfig, pArchivePathNT, E_NULL_TERMINATED, E_NO_INCREMENT_REFCOUNT | E_OPAQUE | openMode, &pArchive);
                         e_free(pArchivePathNTHeap, e_fs_get_allocation_callbacks(pFS));
 
                         if (result != E_SUCCESS) { /* <-- This is checking the result of e_open_archive_ex(). */
@@ -9173,7 +9043,7 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
                         */
                         result = e_file_open_or_info(pArchive, iFilePathSeg.pFullPath + iFilePathSeg.segmentOffset + iFilePathSeg.segmentLength + 1, openMode, ppFile, pInfo);  /* +1 to skip the separator. */
                         if (result != E_SUCCESS) {
-                            e_close_archive(pArchive);
+                            if (e_refcount(pArchive) == 1) { e_fs_gc_archives(pFS, E_GC_POLICY_THRESHOLD); }
                             continue;  /* Failed to open the file. Keep looking. */
                         }
 
@@ -9181,12 +9051,9 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
                         e_fs_backend_free_iterator(e_get_backend_or_default(pFS), pIterator);
                         pIterator = NULL;
 
-                        if (ppFile != NULL) {
-                            /* The archive must be unreferenced when closing the file. */
-                            e_file_proxy_set_unref_archive_on_close(*ppFile, E_TRUE);
-                        } else {
-                            /* We were only grabbing file info. We can close the archive straight away. */
-                            e_close_archive(pArchive);
+                        if (ppFile == NULL) {
+                            /* We were only grabbing file info. We can garbage collect the archive straight away if necessary. */
+                            if (e_refcount(pArchive) == 1) { e_fs_gc_archives(pFS, E_GC_POLICY_THRESHOLD); }
                         }
 
                         /* Getting here means we successfully opened the file. We're done. */
@@ -9209,6 +9076,25 @@ static e_result e_open_or_info_from_archive(e_fs* pFS, const char* pFilePath, in
     
     /* Getting here means we reached the end of the path and never did find the file. */
     return E_DOES_NOT_EXIST;
+}
+
+static void e_file_free(e_file** ppFile)
+{
+    e_file* pFile;
+
+    if (ppFile == NULL) {
+        return;
+    }
+
+    pFile = *ppFile;
+    if (pFile == NULL) {
+        return;
+    }
+
+    e_unref(pFile->pFS);
+    e_free(pFile, e_fs_get_allocation_callbacks(pFile->pFS));
+
+    *ppFile = NULL;
 }
 
 static e_result e_file_alloc(e_fs* pFS, e_file** ppFile)
@@ -9241,6 +9127,9 @@ static e_result e_file_alloc(e_fs* pFS, e_file** ppFile)
     pFile->pFS = pFS;
     pFile->backendDataSize = backendDataSizeInBytes;
 
+    /* The reference count of the e_fs object needs to be incremented. It'll be decremented in e_file_free(). */
+    e_ref(pFS);
+
     *ppFile = pFile;
     return E_SUCCESS;
 }
@@ -9261,18 +9150,17 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
     e_result result;
     const e_fs_backend* pBackend;
 
+    pBackend = e_get_backend_or_default(pFS);
+    if (pBackend == NULL) {
+        return E_INVALID_ARGS;
+    }
+
     if (ppFile != NULL) {
         result = e_file_alloc_if_necessary(pFS, ppFile);
         if (result != E_SUCCESS) {
             *ppFile = NULL;
             return result;
         }
-    }
-
-    pBackend = e_get_backend_or_default(pFS);
-
-    if (pBackend == NULL) {
-        return E_INVALID_ARGS;
     }
 
     /*
@@ -9284,6 +9172,7 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
         if (pFSStream != NULL) {
             result = e_stream_duplicate(pFSStream, e_fs_get_allocation_callbacks(pFS), &(*ppFile)->pStreamForBackend);
             if (result != E_SUCCESS) {
+                e_file_free(ppFile);
                 return result;
             }
         }
@@ -9294,8 +9183,8 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
     file path should already be prefixed with the mount point.
 
     UPDATE: Actually don't want to explicitly append E_IGNORE_MOUNTS here because it can affect the behavior of
-    proxy and passthrough style backends. Some backends, particularly E_SUBFS, will call straight into the owner
-    `e_fs` object which might depend on those mounts being handled for correct behaviour.
+    passthrough style backends. Some backends, particularly E_SUB, will call straight into the owner `e_fs` object
+    which might depend on those mounts being handled for correct behaviour.
     */
     /*openMode |= E_IGNORE_MOUNTS;*/
 
@@ -9311,12 +9200,15 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
             if (dirPathLen >= (int)sizeof(pDirPathStack)) {
                 pDirPathHeap = (char*)e_malloc(dirPathLen + 1, e_fs_get_allocation_callbacks(pFS));
                 if (pDirPathHeap == NULL) {
+                    e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+                    e_file_free(ppFile);
                     return E_OUT_OF_MEMORY;
                 }
 
                 dirPathLen = e_path_directory(pDirPathHeap, dirPathLen + 1, pFilePath, E_NULL_TERMINATED);
                 if (dirPathLen < 0) {
                     e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+                    e_file_free(ppFile);
                     e_free(pDirPathHeap, e_fs_get_allocation_callbacks(pFS));
                     return E_ERROR;    /* Should never hit this. */
                 }
@@ -9329,6 +9221,7 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
             result = e_fs_mkdir(pFS, pDirPath, E_IGNORE_MOUNTS);
             if (result != E_SUCCESS) {
                 e_stream_delete_duplicate((*ppFile)->pStreamForBackend, e_fs_get_allocation_callbacks(pFS));
+                e_file_free(ppFile);
                 return result;
             }
         }
@@ -9359,8 +9252,7 @@ static e_result e_file_alloc_if_necessary_and_open_or_info(e_fs* pFS, const char
         */
         if (pFS != NULL && (result == E_DOES_NOT_EXIST || result == E_NOT_DIRECTORY)) {
             if (ppFile != NULL) {
-                e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
-                *ppFile = NULL;
+                e_file_free(ppFile);
             }
 
             result = e_open_or_info_from_archive(pFS, pFilePath, openMode, ppFile, pInfo);
@@ -9563,14 +9455,6 @@ E_API e_result e_file_open_or_info(e_fs* pFS, const char* pFilePath, int openMod
                     /* The mount point is an archive. This is the simpler case. We just load the file directly from the archive. */
                     result = e_file_open_or_info(iMountPoint.pArchive, pFileSubPathClean, openMode, ppFile, pInfo);
                     if (result == E_SUCCESS) {
-                        /*
-                        The reference count of the archive must be incremented or else it'll get prematurely garbage collected. We only
-                        need to do this if we're opening the file. It's not necessary if we're just grabbing file info.
-                        */
-                        if (ppFile != NULL) {
-                            e_increment_opened_archive_ref_count(pFS, iMountPoint.pArchive);
-                        }
-
                         return E_SUCCESS;
                     } else {
                         /* Failed to load from this archive. Keep looking. */
@@ -9629,8 +9513,7 @@ E_API e_result e_file_open_or_info(e_fs* pFS, const char* pFilePath, int openMod
 
         /* Getting here means we couldn't open the file from any mount points, nor could we open it directly. */
         if (ppFile != NULL) {
-            e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
-            *ppFile = NULL;
+            e_file_free(ppFile);
         }
     }
 
@@ -9686,8 +9569,8 @@ E_API e_result e_file_open_from_handle(e_fs* pFS, void* hBackendFile, e_file** p
 
     result = e_fs_backend_file_open_handle(e_get_backend_or_default(pFS), pFS, hBackendFile, *ppFile);
     if (result != E_SUCCESS) {
-        e_free(*ppFile, e_fs_get_allocation_callbacks(pFS));
-        *ppFile = NULL;
+        e_file_free(ppFile);
+        return result;
     }
 
     return E_SUCCESS;
@@ -9715,7 +9598,7 @@ E_API void e_file_close(e_file* pFile)
         e_stream_delete_duplicate(pFile->pStreamForBackend, e_fs_get_allocation_callbacks(pFile->pFS));
     }
 
-    e_free(pFile, e_fs_get_allocation_callbacks(pFile->pFS));
+    e_file_free(&pFile);
 }
 
 E_API e_result e_file_read(e_file* pFile, void* pDst, size_t bytesToRead, size_t* pBytesRead)
@@ -10850,7 +10733,9 @@ E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pVirtualPath
     */
     for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
         if (pOtherFS == iterator.pArchive && strcmp(pVirtualPath, iterator.pMountPointPath) == 0) {
-            return E_SUCCESS;  /* Just pretend we're successful. */
+            /* File system is already mounted to the virtual path. Just pretend we're successful. */
+            e_ref(pOtherFS);
+            return E_SUCCESS;
         }
     }
 
@@ -10865,7 +10750,7 @@ E_API e_result e_fs_mount_fs(e_fs* pFS, e_fs* pOtherFS, const char* pVirtualPath
 
     pFS->pReadMountPoints = pMountPoints;
 
-    pNewMountPoint->pArchive = pOtherFS;
+    pNewMountPoint->pArchive = e_ref(pOtherFS);
     pNewMountPoint->closeArchiveOnUnmount = E_FALSE;
 
     return E_SUCCESS;
@@ -10885,6 +10770,7 @@ E_API e_result e_fs_unmount_fs(e_fs* pFS, e_fs* pOtherFS, int options)
     for (iteratorResult = e_mount_list_first(pFS->pReadMountPoints, &iterator); iteratorResult == E_SUCCESS; iteratorResult = e_mount_list_next(&iterator)) {
         if (iterator.pArchive == pOtherFS) {
             e_mount_list_remove(pFS->pReadMountPoints, iterator.internal.pMountPoint);
+            e_unref(pOtherFS);
             return E_SUCCESS;
         }
     }
@@ -10924,7 +10810,12 @@ E_API e_result e_file_open_and_write(e_fs* pFS, const char* pFilePath, void* pDa
     e_result result;
     e_file* pFile;
 
-    if (pFilePath == NULL || pData == NULL) {
+    if (pFilePath == NULL) {
+        return E_INVALID_ARGS;
+    }
+
+    /* The data pointer can be null, but only if the data size is 0. In this case the file is just made empty which is a valid use case. */
+    if (pData == NULL && dataSize > 0) {
         return E_INVALID_ARGS;
     }
 
@@ -10933,7 +10824,9 @@ E_API e_result e_file_open_and_write(e_fs* pFS, const char* pFilePath, void* pDa
         return result;
     }
 
-    result = e_file_write(pFile, pData, dataSize, NULL);
+    if (dataSize > 0) {
+        result = e_file_write(pFile, pData, dataSize, NULL);
+    }
 
     e_file_close(pFile);
 
